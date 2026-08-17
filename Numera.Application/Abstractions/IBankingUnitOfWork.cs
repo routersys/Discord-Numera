@@ -94,6 +94,14 @@ public interface IBankingUnitOfWork
     IHoldRepository Holds { get; }
 
     IPaymentOrderRepository PaymentOrders { get; }
+
+    IEconomyCalendarRepository EconomyCalendars { get; }
+
+    IFeeScheduleRepository FeeSchedules { get; }
+
+    IFeeWaiverCounterRepository FeeWaiverCounters { get; }
+
+    IFeeAssessmentRepository FeeAssessments { get; }
 }
 
 public interface IBankingWriteGateway
@@ -156,6 +164,11 @@ public interface ILedgerAccountRepository
     Numera.Domain.Accounting.LedgerAccount? Find(LedgerAccountId id);
 
     Numera.Domain.Accounting.LedgerAccount? FindByCode(AccountingBookId bookId, string accountCode);
+
+    Numera.Domain.Accounting.LedgerAccount? FindPostingByKind(
+        AccountingBookId bookId,
+        Numera.Domain.Accounting.LedgerAccountKind kind,
+        CurrencyId currencyId);
 
     void UpsertProjection(LedgerAccountId id, Numera.Domain.Accounting.LedgerBalance balance, UtcTimestamp updatedAt);
 
@@ -220,6 +233,32 @@ public interface IPaymentOrderRepository
 public interface IAccountProductRepository
 {
     AccountProductSelection? FindDefault(BankId bankId);
+}
+
+public interface IEconomyCalendarRepository
+{
+    string? FindCanonicalTimezone(EconomyScopeId economyScopeId);
+
+    BusinessDayClass? FindDayClassOverride(EconomyScopeId economyScopeId, BusinessDate localDate);
+}
+
+public interface IFeeScheduleRepository
+{
+    IReadOnlyList<Numera.Domain.Banking.FeeRule> ListRules(
+        FeeScheduleVersionId feeScheduleVersionId,
+        Numera.Domain.Banking.FeeType feeType);
+}
+
+public interface IFeeWaiverCounterRepository
+{
+    long FindUsedCount(DepositAccountId depositAccountId, string waiverCounterKey, int businessMonth);
+
+    void Consume(DepositAccountId depositAccountId, string waiverCounterKey, int businessMonth);
+}
+
+public interface IFeeAssessmentRepository
+{
+    void Add(Numera.Domain.Accounting.FeeAssessment assessment);
 }
 
 public sealed record AccountProductSelection(
