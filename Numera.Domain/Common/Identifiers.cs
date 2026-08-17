@@ -224,3 +224,30 @@ public readonly record struct AuditRecordId(EntityIdValue Value) : IEntityId<Aud
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct ResolutionCaseId(EntityIdValue Value) : IEntityId<ResolutionCaseId>
+{
+    public static string EntityName => "resolution_case";
+
+    public static ResolutionCaseId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct BankPolicyVersionId(EntityIdValue Value) : IEntityId<BankPolicyVersionId>
+{
+    public static string EntityName => "bank_policy_version";
+
+    public static BankPolicyVersionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FeeScheduleVersionId(EntityIdValue Value) : IEntityId<FeeScheduleVersionId>
+{
+    public static string EntityName => "fee_schedule_version";
+
+    public static FeeScheduleVersionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

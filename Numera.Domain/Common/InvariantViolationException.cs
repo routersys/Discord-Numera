@@ -75,4 +75,11 @@ public static class InvariantViolationCode
     public const string DiscordUserIdInvalid = "DISCORD_USER_ID_INVALID";
     public const string PartyTransitionInvalid = "PARTY_TRANSITION_INVALID";
     public const string PartyTypeUnknown = "PARTY_TYPE_UNKNOWN";
+    public const string BankNameInvalid = "BANK_NAME_INVALID";
+    public const string InstitutionCodeInvalid = "INSTITUTION_CODE_INVALID";
+    public const string BankTransitionInvalid = "BANK_TRANSITION_INVALID";
+    public const string BankStatusUnknown = "BANK_STATUS_UNKNOWN";
+    public const string BankKindInconsistent = "BANK_KIND_INCONSISTENT";
+    public const string RelationshipTransitionInvalid = "RELATIONSHIP_TRANSITION_INVALID";
+    public const string RelationshipStatusUnknown = "RELATIONSHIP_STATUS_UNKNOWN";
 }
