@@ -123,7 +123,10 @@ public sealed class SuggestionTests
 
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            using (SqliteConnection pooled = ConnectionFactory.OpenRuntimeConnection())
+            {
+                SqliteConnection.ClearPool(pooled);
+            }
 
             try
             {

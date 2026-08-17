@@ -108,7 +108,10 @@ public sealed class InteractionSessionTests
         public async ValueTask DisposeAsync()
         {
             await Coordinator.DisposeAsync();
-            SqliteConnection.ClearAllPools();
+            using (SqliteConnection pooled = ConnectionFactory.OpenRuntimeConnection())
+            {
+                SqliteConnection.ClearPool(pooled);
+            }
 
             try
             {

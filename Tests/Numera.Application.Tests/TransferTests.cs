@@ -373,7 +373,10 @@ public sealed class TransferTests
         public async ValueTask DisposeAsync()
         {
             await Coordinator.DisposeAsync();
-            SqliteConnection.ClearAllPools();
+            using (SqliteConnection pooled = ConnectionFactory.OpenRuntimeConnection())
+            {
+                SqliteConnection.ClearPool(pooled);
+            }
 
             try
             {
