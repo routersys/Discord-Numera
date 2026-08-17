@@ -121,6 +121,21 @@ internal static class CommandDiagnostics
         "Modal の表示文言が Discord の長さ制限に違反しています",
         "'{0}' の {1} は {2} 文字以下でなければなりません。");
 
+    internal static readonly DiagnosticDescriptor EndpointContextParameterInvalid = Create(
+        "ECONCMD024",
+        "Endpoint の第 1 引数が規定型と一致しません",
+        "Endpoint '{0}' の第 1 引数は '{1}' でなければなりません。認可根拠を Socket Object から受け取ってはなりません。");
+
+    internal static readonly DiagnosticDescriptor OptionTypeNotSupported = Create(
+        "ECONCMD025",
+        "Slash Option の型が許可されていません",
+        "Option '{0}' の型 '{1}' は使用できません。string、bool、int、long、Generator 対応済み enum だけを指定できます。");
+
+    internal static readonly DiagnosticDescriptor EndpointInputParameterInvalid = Create(
+        "ECONCMD026",
+        "Endpoint の入力引数が規定型と一致しません",
+        "Endpoint '{0}' の第 2 引数は '{1}' でなければなりません。");
+
     private static DiagnosticDescriptor Create(string id, string title, string messageFormat) =>
         new(id, title, messageFormat, Category, DiagnosticSeverity.Error, isEnabledByDefault: true);
 }

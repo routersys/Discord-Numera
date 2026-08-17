@@ -72,13 +72,17 @@ internal sealed class OptionDescriptor
         string description,
         bool required,
         int choiceCount,
-        string? autocompleteProviderKey)
+        string? autocompleteProviderKey,
+        string typeDisplayName,
+        bool typeSupported)
     {
         Name = name;
         Description = description;
         Required = required;
         ChoiceCount = choiceCount;
         AutocompleteProviderKey = autocompleteProviderKey;
+        TypeDisplayName = typeDisplayName;
+        TypeSupported = typeSupported;
     }
 
     internal string Name { get; }
@@ -90,6 +94,10 @@ internal sealed class OptionDescriptor
     internal int ChoiceCount { get; }
 
     internal string? AutocompleteProviderKey { get; }
+
+    internal string TypeDisplayName { get; }
+
+    internal bool TypeSupported { get; }
 }
 
 internal sealed class CommandDescriptor
@@ -103,6 +111,7 @@ internal sealed class CommandDescriptor
         string endpointDisplayName,
         string returnTypeDisplayName,
         bool endsWithCancellationToken,
+        ImmutableArray<string> parameterTypeDisplayNames,
         LocationInfo? location)
     {
         Kind = kind;
@@ -113,6 +122,7 @@ internal sealed class CommandDescriptor
         EndpointDisplayName = endpointDisplayName;
         ReturnTypeDisplayName = returnTypeDisplayName;
         EndsWithCancellationToken = endsWithCancellationToken;
+        ParameterTypeDisplayNames = parameterTypeDisplayNames;
         Location = location;
     }
 
@@ -132,6 +142,8 @@ internal sealed class CommandDescriptor
 
     internal bool EndsWithCancellationToken { get; }
 
+    internal ImmutableArray<string> ParameterTypeDisplayNames { get; }
+
     internal LocationInfo? Location { get; }
 
     internal string CanonicalPath =>
@@ -142,12 +154,21 @@ internal sealed class CommandDescriptor
 
 internal sealed class HandlerDescriptor
 {
-    internal HandlerDescriptor(string key, string endpointDisplayName, string returnTypeDisplayName, bool endsWithCancellationToken, LocationInfo? location)
+    internal HandlerDescriptor(
+        string key,
+        string endpointDisplayName,
+        string returnTypeDisplayName,
+        bool endsWithCancellationToken,
+        ImmutableArray<string> parameterTypeDisplayNames,
+        string? declaredInputTypeDisplayName,
+        LocationInfo? location)
     {
         Key = key;
         EndpointDisplayName = endpointDisplayName;
         ReturnTypeDisplayName = returnTypeDisplayName;
         EndsWithCancellationToken = endsWithCancellationToken;
+        ParameterTypeDisplayNames = parameterTypeDisplayNames;
+        DeclaredInputTypeDisplayName = declaredInputTypeDisplayName;
         Location = location;
     }
 
@@ -158,6 +179,10 @@ internal sealed class HandlerDescriptor
     internal string ReturnTypeDisplayName { get; }
 
     internal bool EndsWithCancellationToken { get; }
+
+    internal ImmutableArray<string> ParameterTypeDisplayNames { get; }
+
+    internal string? DeclaredInputTypeDisplayName { get; }
 
     internal LocationInfo? Location { get; }
 }

@@ -10,6 +10,12 @@ internal static class CommandSurfaceValidator
     internal const string EndpointReturnType = "System.Threading.Tasks.Task<Numera.Discord.Abstractions.DiscordEndpointResponse>";
     internal const string AutocompleteReturnType = "System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Numera.Discord.Abstractions.DiscordAutocompleteOption>>";
 
+    private const string ContextType = "Numera.Discord.Abstractions.DiscordEndpointContext";
+    private const string AutocompleteRequestType = "Numera.Discord.Abstractions.DiscordAutocompleteRequest";
+    private const string UserInputType = "Numera.Discord.Abstractions.DiscordUserInput";
+    private const string MessageInputType = "Numera.Discord.Abstractions.DiscordMessageInput";
+    private const string ComponentInputType = "Numera.Discord.Abstractions.DiscordComponentInput";
+
     internal static void Validate(SourceProductionContext context, CommandSurface surface)
     {
         ValidateCommands(context, surface);
@@ -38,11 +44,6 @@ internal static class CommandSurfaceValidator
                 Report(context, CommandDiagnostics.CommandNameLengthInvalid, location, command.Name);
             }
 
-            if (!CommandNameRules.IsNameFormatValid(command.Name))
-            {
-                Report(context, CommandDiagnostics.CommandNameFormatInvalid, location, command.Name);
-            }
-
             if (command.GroupPath.Length > CommandNameRules.MaximumGroupDepth)
             {
                 Report(context, CommandDiagnostics.GroupDepthExceeded, location, command.CanonicalPath);
@@ -66,6 +67,20 @@ internal static class CommandSurfaceValidator
             ValidateEndpointSignature(
                 context, location, command.EndpointDisplayName, command.ReturnTypeDisplayName,
                 command.EndsWithCancellationToken, EndpointReturnType);
+
+            ValidateFirstParameter(
+                context, location, command.EndpointDisplayName, command.ParameterTypeDisplayNames, ContextType);
+
+            if (command.Kind == CommandKind.User)
+            {
+                ValidateInputParameter(
+                    context, location, command.EndpointDisplayName, command.ParameterTypeDisplayNames, UserInputType);
+            }
+            else if (command.Kind == CommandKind.Message)
+            {
+                ValidateInputParameter(
+                    context, location, command.EndpointDisplayName, command.ParameterTypeDisplayNames, MessageInputType);
+            }
         }
     }
 
@@ -74,6 +89,11 @@ internal static class CommandSurfaceValidator
         CommandDescriptor command,
         Location location)
     {
+        if (!CommandNameRules.IsNameFormatValid(command.Name))
+        {
+            Report(context, CommandDiagnostics.CommandNameFormatInvalid, location, command.Name);
+        }
+
         if (!CommandNameRules.IsDescriptionLengthValid(command.Description))
         {
             Report(context, CommandDiagnostics.DescriptionLengthInvalid, location, command.CanonicalPath);
@@ -132,6 +152,12 @@ internal static class CommandSurfaceValidator
             {
                 Report(context, CommandDiagnostics.ChoiceAndAutocompleteTogether, location, option.Name);
             }
+
+            if (!option.TypeSupported)
+            {
+                Report(context, CommandDiagnostics.OptionTypeNotSupported, location,
+                    option.Name, option.TypeDisplayName);
+            }
         }
     }
 
@@ -153,13 +179,26 @@ internal static class CommandSurfaceValidator
             ValidateEndpointSignature(
                 context, location, handler.EndpointDisplayName, handler.ReturnTypeDisplayName,
                 handler.EndsWithCancellationToken, EndpointReturnType);
+
+            ValidateFirstParameter(
+                context, location, handler.EndpointDisplayName, handler.ParameterTypeDisplayNames, ContextType);
+
+            ValidateInputParameter(
+                context, location, handler.EndpointDisplayName, handler.ParameterTypeDisplayNames,
+                handler.DeclaredInputTypeDisplayName ?? ComponentInputType);
         }
 
         foreach (HandlerDescriptor provider in surface.AutocompleteProviders)
         {
+            Location location = Resolve(provider.Location);
+
             ValidateEndpointSignature(
-                context, Resolve(provider.Location), provider.EndpointDisplayName, provider.ReturnTypeDisplayName,
+                context, location, provider.EndpointDisplayName, provider.ReturnTypeDisplayName,
                 provider.EndsWithCancellationToken, AutocompleteReturnType);
+
+            ValidateFirstParameter(
+                context, location, provider.EndpointDisplayName, provider.ParameterTypeDisplayNames,
+                AutocompleteRequestType);
         }
     }
 
@@ -280,6 +319,37 @@ internal static class CommandSurfaceValidator
         if (!endsWithCancellationToken)
         {
             Report(context, CommandDiagnostics.CancellationTokenParameterInvalid, location, endpointDisplayName);
+        }
+    }
+
+    private static void ValidateFirstParameter(
+        SourceProductionContext context,
+        Location location,
+        string endpointDisplayName,
+        ImmutableArray<string> parameterTypes,
+        string expectedType)
+    {
+        if (parameterTypes.IsDefaultOrEmpty
+            || !string.Equals(parameterTypes[0], expectedType, System.StringComparison.Ordinal))
+        {
+            Report(context, CommandDiagnostics.EndpointContextParameterInvalid, location,
+                endpointDisplayName, expectedType);
+        }
+    }
+
+    private static void ValidateInputParameter(
+        SourceProductionContext context,
+        Location location,
+        string endpointDisplayName,
+        ImmutableArray<string> parameterTypes,
+        string expectedType)
+    {
+        if (parameterTypes.IsDefaultOrEmpty
+            || parameterTypes.Length < 2
+            || !string.Equals(parameterTypes[1], expectedType, System.StringComparison.Ordinal))
+        {
+            Report(context, CommandDiagnostics.EndpointInputParameterInvalid, location,
+                endpointDisplayName, expectedType);
         }
     }
 

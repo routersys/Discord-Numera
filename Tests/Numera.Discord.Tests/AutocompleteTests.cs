@@ -42,6 +42,23 @@ public sealed class DiscordLimitConformanceTests
 
         CollectionAssert.AreEquivalent(expected, library);
     }
+
+    [TestMethod]
+    public void ContextCommandNamesAcceptNonAsciiAndUppercase()
+    {
+        _ = new UserCommandBuilder().WithName("このユーザーへ振込").Build();
+        _ = new MessageCommandBuilder().WithName("送信者へ振込").Build();
+        _ = new UserCommandBuilder().WithName("Balance Check").Build();
+    }
+
+    [TestMethod]
+    public void SlashCommandNamesRejectUppercase()
+    {
+        _ = new SlashCommandBuilder().WithName("銀行").WithDescription("説明です。").Build();
+
+        Assert.ThrowsExactly<FormatException>(
+            () => new SlashCommandBuilder().WithName("Bank").WithDescription("説明です。").Build());
+    }
 }
 
 [TestClass]

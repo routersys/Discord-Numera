@@ -28,3 +28,6 @@ ECONCMD020 | Numera.Discord.Commands | Error | Discord Application Command Contr
 ECONCMD021 | Numera.Discord.Commands | Error | Discord Application Command Contract
 ECONCMD022 | Numera.Discord.Commands | Error | Discord Application Command Contract
 ECONCMD023 | Numera.Discord.Commands | Error | Discord Application Command Contract
+ECONCMD024 | Numera.Discord.Commands | Error | Discord Application Command Contract
+ECONCMD025 | Numera.Discord.Commands | Error | Discord Application Command Contract
+ECONCMD026 | Numera.Discord.Commands | Error | Discord Application Command Contract

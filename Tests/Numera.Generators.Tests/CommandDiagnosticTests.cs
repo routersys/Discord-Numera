@@ -20,7 +20,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "銀行の一覧を表示します。")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -36,11 +38,15 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "銀行の一覧を表示します。")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
 
                 [EconomySlashCommand("list", "別の説明です。")]
-                public Task<DiscordEndpointResponse> ListAgainAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAgainAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -60,7 +66,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("{{name}}", "銀行の一覧を表示します。")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -75,7 +83,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("{{new string('a', 33)}}", "銀行の一覧を表示します。")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -90,7 +100,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """).HasError("ECONCMD004"));
@@ -99,7 +111,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "{{new string('あ', 101)}}")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """).HasError("ECONCMD004"));
@@ -113,6 +127,7 @@ public sealed class CommandDiagnosticTests
             {
                 [EconomySlashCommand("transfer", "振込を行います。")]
                 public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
                     [EconomyOption("memo", "振込メモです。", false)] string memo,
                     [EconomyOption("amount", "振込金額です。", true)] long amount,
                     CancellationToken cancellationToken) =>
@@ -131,6 +146,7 @@ public sealed class CommandDiagnosticTests
             {
                 [EconomySlashCommand("transfer", "振込を行います。")]
                 public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
                     [EconomyOption("amount", "振込金額です。", true)] long amount,
                     [EconomyOption("memo", "振込メモです。", false)] string memo,
                     CancellationToken cancellationToken) =>
@@ -149,6 +165,7 @@ public sealed class CommandDiagnosticTests
             {
                 [EconomySlashCommand("transfer", "振込を行います。")]
                 public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
                     [EconomyOption("amount", "振込金額です。", true)] long first,
                     [EconomyOption("amount", "重複した名前です。", true)] long second,
                     CancellationToken cancellationToken) =>
@@ -166,11 +183,14 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomyAutocompleteProvider("bank")]
-                public Task<IReadOnlyList<DiscordAutocompleteOption>> SuggestAsync(CancellationToken cancellationToken) =>
+                public Task<IReadOnlyList<DiscordAutocompleteOption>> SuggestAsync(
+                    DiscordAutocompleteRequest request,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult<IReadOnlyList<DiscordAutocompleteOption>>([]);
 
                 [EconomySlashCommand("open", "口座を開設します。")]
                 public Task<DiscordEndpointResponse> OpenAsync(
+                    DiscordEndpointContext context,
                     [EconomyOption("bank", "銀行を選択します。", true)]
                     [EconomyChoice("第一銀行", "first")]
                     [EconomyAutocomplete("bank")] string bank,
@@ -190,6 +210,7 @@ public sealed class CommandDiagnosticTests
             {
                 [EconomySlashCommand("open", "口座を開設します。")]
                 public Task<DiscordEndpointResponse> OpenAsync(
+                    DiscordEndpointContext context,
                     [EconomyOption("bank", "銀行を選択します。", true)]
                     [EconomyAutocomplete("missing")] string bank,
                     CancellationToken cancellationToken) =>
@@ -207,11 +228,17 @@ public sealed class CommandDiagnosticTests
             internal sealed class PanelEndpoints
             {
                 [EconomyComponent(EconomyComponentKind.Button, "confirm")]
-                public Task<DiscordEndpointResponse> ConfirmAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ConfirmAsync(
+                    DiscordEndpointContext context,
+                    DiscordComponentInput input,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
 
                 [EconomyComponent(EconomyComponentKind.Select, "confirm")]
-                public Task<DiscordEndpointResponse> ConfirmSelectAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ConfirmSelectAsync(
+                    DiscordEndpointContext context,
+                    DiscordComponentInput input,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -226,7 +253,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "銀行の一覧を表示します。")]
-                public Task<string> ListAsync(CancellationToken cancellationToken) =>
+                public Task<string> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(string.Empty);
             }
             """);
@@ -241,7 +270,7 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "銀行の一覧を表示します。")]
-                public Task<DiscordEndpointResponse> ListAsync() =>
+                public Task<DiscordEndpointResponse> ListAsync(DiscordEndpointContext context) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -257,6 +286,7 @@ public sealed class CommandDiagnosticTests
             {
                 [EconomySlashCommand("list", "銀行の一覧を表示します。")]
                 public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
                     CancellationToken cancellationToken,
                     [EconomyOption("amount", "金額です。", true)] long amount) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
@@ -273,7 +303,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "銀行の一覧を表示します。\U0001F600")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -288,7 +320,10 @@ public sealed class CommandDiagnosticTests
             internal sealed class ContextEndpoints
             {
                 [EconomyUserCommand("残高照会")]
-                public Task<DiscordEndpointResponse> BalanceAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> BalanceAsync(
+                    DiscordEndpointContext context,
+                    DiscordUserInput input,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -304,7 +339,9 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("list", "銀行の一覧を表示します。")]
-                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ListAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """);
@@ -320,11 +357,15 @@ public sealed class CommandDiagnosticTests
             internal sealed class BankEndpoints
             {
                 [EconomySlashCommand("zebra", "説明です。")]
-                public Task<DiscordEndpointResponse> ZebraAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> ZebraAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
 
                 [EconomySlashCommand("alpha", "説明です。")]
-                public Task<DiscordEndpointResponse> AlphaAsync(CancellationToken cancellationToken) =>
+                public Task<DiscordEndpointResponse> AlphaAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
                     Task.FromResult(DiscordEndpointResponse.NoContent());
             }
             """;
@@ -367,5 +408,294 @@ public sealed class CommandDiagnosticTests
             """);
 
         Assert.IsTrue(run.HasError("ECONCMD023"));
+    }
+
+    [TestMethod]
+    public void MissingEndpointContextIsRejected()
+    {
+        GeneratorRun run = Run("""
+            internal sealed class BankEndpoints
+            {
+                [EconomySlashCommand("list", "銀行の一覧を表示します。")]
+                public Task<DiscordEndpointResponse> ListAsync(CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD024"));
+    }
+
+    [TestMethod]
+    public void EndpointContextAfterOptionIsRejected()
+    {
+        GeneratorRun run = Run("""
+            internal sealed class BankEndpoints
+            {
+                [EconomySlashCommand("transfer", "振込を行います。")]
+                public Task<DiscordEndpointResponse> TransferAsync(
+                    [EconomyOption("amount", "振込金額です。", true)] long amount,
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD024"));
+    }
+
+    [TestMethod]
+    public void AutocompleteProviderWithoutRequestIsRejected()
+    {
+        GeneratorRun run = Run("""
+            internal sealed class BankEndpoints
+            {
+                [EconomyAutocompleteProvider("bank")]
+                public Task<IReadOnlyList<DiscordAutocompleteOption>> SuggestAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult<IReadOnlyList<DiscordAutocompleteOption>>([]);
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD024"));
+    }
+
+    [TestMethod]
+    [DataRow("double")]
+    [DataRow("float")]
+    [DataRow("decimal")]
+    public void UnsupportedOptionTypeIsRejected(string typeName)
+    {
+        GeneratorRun run = Run($$"""
+            internal sealed class BankEndpoints
+            {
+                [EconomySlashCommand("transfer", "振込を行います。")]
+                public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
+                    [EconomyOption("amount", "振込金額です。", true)] {{typeName}} amount,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD025"));
+    }
+
+    [TestMethod]
+    [DataRow("string")]
+    [DataRow("bool")]
+    [DataRow("int")]
+    [DataRow("long")]
+    public void SupportedOptionTypeIsAccepted(string typeName)
+    {
+        GeneratorRun run = Run($$"""
+            internal sealed class BankEndpoints
+            {
+                [EconomySlashCommand("transfer", "振込を行います。")]
+                public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
+                    [EconomyOption("amount", "振込金額です。", true)] {{typeName}} amount,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsFalse(run.HasError("ECONCMD025"));
+    }
+
+    [TestMethod]
+    public void EnumOptionTypeIsAccepted()
+    {
+        GeneratorRun run = Run("""
+            internal enum TransferPurpose
+            {
+                Salary = 1,
+                Reward = 2,
+            }
+
+            internal sealed class BankEndpoints
+            {
+                [EconomySlashCommand("transfer", "振込を行います。")]
+                public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
+                    [EconomyOption("purpose", "用途です。", true)] TransferPurpose purpose,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsFalse(run.HasError("ECONCMD025"));
+    }
+
+    [TestMethod]
+    public void UserCommandWithoutUserInputIsRejected()
+    {
+        GeneratorRun run = Run("""
+            internal sealed class ContextEndpoints
+            {
+                [EconomyUserCommand("このユーザーへ振込")]
+                public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD026"));
+    }
+
+    [TestMethod]
+    public void MessageCommandRequiresMessageInput()
+    {
+        GeneratorRun run = Run("""
+            internal sealed class ContextEndpoints
+            {
+                [EconomyMessageCommand("送信者へ振込")]
+                public Task<DiscordEndpointResponse> TransferAsync(
+                    DiscordEndpointContext context,
+                    DiscordUserInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD026"));
+    }
+
+    [TestMethod]
+    public void ComponentWithoutComponentInputIsRejected()
+    {
+        GeneratorRun run = Run("""
+            internal sealed class PanelEndpoints
+            {
+                [EconomyComponent(EconomyComponentKind.Button, "confirm")]
+                public Task<DiscordEndpointResponse> ConfirmAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD026"));
+    }
+
+    [TestMethod]
+    public void CanonicalContextAndComponentEndpointsProduceNoDiagnostic()
+    {
+        GeneratorRun run = Run("""
+            [EconomyModalForm("振込")]
+            internal sealed class TransferForm
+            {
+                [EconomyModalField("amount", "金額", EconomyModalFieldStyle.Short, true, 1, 20, "")]
+                public string Amount { get; set; } = string.Empty;
+            }
+
+            internal sealed class PanelEndpoints
+            {
+                [EconomyUserCommand("このユーザーへ振込")]
+                public Task<DiscordEndpointResponse> TransferToUserAsync(
+                    DiscordEndpointContext context,
+                    DiscordUserInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+
+                [EconomyMessageCommand("送信者へ振込")]
+                public Task<DiscordEndpointResponse> TransferToAuthorAsync(
+                    DiscordEndpointContext context,
+                    DiscordMessageInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+
+                [EconomyComponent(EconomyComponentKind.Button, "confirm")]
+                public Task<DiscordEndpointResponse> ConfirmAsync(
+                    DiscordEndpointContext context,
+                    DiscordComponentInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+
+                [EconomyModal("transfer", typeof(TransferForm))]
+                public Task<DiscordEndpointResponse> SubmitAsync(
+                    DiscordEndpointContext context,
+                    TransferForm form,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+
+                [EconomyAutocompleteProvider("bank")]
+                public Task<IReadOnlyList<DiscordAutocompleteOption>> SuggestAsync(
+                    DiscordAutocompleteRequest request,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult<IReadOnlyList<DiscordAutocompleteOption>>([]);
+            }
+            """);
+
+        CollectionAssert.AreEqual(Array.Empty<string>(), run.ErrorIds);
+    }
+
+    [TestMethod]
+    public void ContextCommandNameIsNotBoundBySlashNameFormat()
+    {
+        GeneratorRun run = Run("""
+            internal sealed class ContextEndpoints
+            {
+                [EconomyUserCommand("このユーザーへ振込")]
+                public Task<DiscordEndpointResponse> TransferToUserAsync(
+                    DiscordEndpointContext context,
+                    DiscordUserInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+
+                [EconomyMessageCommand("送信者へ振込")]
+                public Task<DiscordEndpointResponse> TransferToAuthorAsync(
+                    DiscordEndpointContext context,
+                    DiscordMessageInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsFalse(run.HasError("ECONCMD002"));
+    }
+
+    [TestMethod]
+    public void OverlongContextCommandNameIsRejected()
+    {
+        GeneratorRun run = Run($$"""
+            internal sealed class ContextEndpoints
+            {
+                [EconomyUserCommand("{{new string('あ', 33)}}")]
+                public Task<DiscordEndpointResponse> TransferToUserAsync(
+                    DiscordEndpointContext context,
+                    DiscordUserInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD003"));
+    }
+
+    [TestMethod]
+    public void ModalWithMismatchedFormTypeIsRejected()
+    {
+        GeneratorRun run = Run("""
+            [EconomyModalForm("振込")]
+            internal sealed class TransferForm
+            {
+                [EconomyModalField("amount", "金額", EconomyModalFieldStyle.Short, true, 1, 20, "")]
+                public string Amount { get; set; } = string.Empty;
+            }
+
+            internal sealed class PanelEndpoints
+            {
+                [EconomyModal("transfer", typeof(TransferForm))]
+                public Task<DiscordEndpointResponse> SubmitAsync(
+                    DiscordEndpointContext context,
+                    DiscordComponentInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD026"));
     }
 }

@@ -34,10 +34,10 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
         IncrementalValuesProvider<CommandDescriptor> message =
             Commands(context, MessageAttribute, CommandKind.Message);
 
-        IncrementalValuesProvider<HandlerDescriptor> components = Handlers(context, ComponentAttribute, 1);
-        IncrementalValuesProvider<HandlerDescriptor> modals = Handlers(context, ModalAttribute, 0);
+        IncrementalValuesProvider<HandlerDescriptor> components = Handlers(context, ComponentAttribute, 1, -1);
+        IncrementalValuesProvider<HandlerDescriptor> modals = Handlers(context, ModalAttribute, 0, 1);
         IncrementalValuesProvider<HandlerDescriptor> providers =
-            Handlers(context, AutocompleteProviderAttribute, 0);
+            Handlers(context, AutocompleteProviderAttribute, 0, -1);
         IncrementalValuesProvider<ModalFormDescriptor> forms = ModalForms(context);
 
         IncrementalValueProvider<CommandSurface> surface = slash.Collect()
@@ -86,11 +86,12 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
     private static IncrementalValuesProvider<HandlerDescriptor> Handlers(
         IncrementalGeneratorInitializationContext context,
         string attributeName,
-        int keyArgumentIndex) =>
+        int keyArgumentIndex,
+        int inputTypeArgumentIndex) =>
         context.SyntaxProvider.ForAttributeWithMetadataName(
             attributeName,
             static (node, _) => true,
-            (syntaxContext, _) => BuildHandler(syntaxContext, keyArgumentIndex));
+            (syntaxContext, _) => BuildHandler(syntaxContext, keyArgumentIndex, inputTypeArgumentIndex));
 
     private static IncrementalValuesProvider<ModalFormDescriptor> ModalForms(
         IncrementalGeneratorInitializationContext context) =>
@@ -116,10 +117,14 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
             method.ToDisplayString(),
             method.ReturnType.ToDisplayString(),
             EndsWithCancellationToken(method),
+            ReadParameterTypes(method),
             LocationInfo.From(method.Locations.FirstOrDefault() ?? Location.None));
     }
 
-    private static HandlerDescriptor BuildHandler(GeneratorAttributeSyntaxContext context, int keyArgumentIndex)
+    private static HandlerDescriptor BuildHandler(
+        GeneratorAttributeSyntaxContext context,
+        int keyArgumentIndex,
+        int inputTypeArgumentIndex)
     {
         IMethodSymbol method = (IMethodSymbol)context.TargetSymbol;
         AttributeData attribute = context.Attributes[0];
@@ -129,6 +134,8 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
             method.ToDisplayString(),
             method.ReturnType.ToDisplayString(),
             EndsWithCancellationToken(method),
+            ReadParameterTypes(method),
+            inputTypeArgumentIndex < 0 ? null : ReadTypeDisplayName(attribute, inputTypeArgumentIndex),
             LocationInfo.From(method.Locations.FirstOrDefault() ?? Location.None));
     }
 
@@ -207,15 +214,42 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
                 ReadString(option, 1) ?? string.Empty,
                 ReadBoolean(option, 2),
                 choiceCount,
-                autocomplete is null ? null : ReadString(autocomplete, 0)));
+                autocomplete is null ? null : ReadString(autocomplete, 0),
+                parameter.Type.ToDisplayString(),
+                IsSupportedOptionType(parameter.Type)));
         }
 
         return options.ToImmutable();
     }
 
+    private static bool IsSupportedOptionType(ITypeSymbol type) =>
+        type.TypeKind == TypeKind.Enum
+        || type.SpecialType is SpecialType.System_String
+            or SpecialType.System_Boolean
+            or SpecialType.System_Int32
+            or SpecialType.System_Int64;
+
+    private static ImmutableArray<string> ReadParameterTypes(IMethodSymbol method)
+    {
+        ImmutableArray<string>.Builder types = ImmutableArray.CreateBuilder<string>(method.Parameters.Length);
+
+        foreach (IParameterSymbol parameter in method.Parameters)
+        {
+            types.Add(parameter.Type.ToDisplayString());
+        }
+
+        return types.ToImmutable();
+    }
+
     private static bool EndsWithCancellationToken(IMethodSymbol method) =>
         method.Parameters.Length > 0
         && method.Parameters[method.Parameters.Length - 1].Type.ToDisplayString() == CancellationTokenType;
+
+    private static string? ReadTypeDisplayName(AttributeData attribute, int index) =>
+        attribute.ConstructorArguments.Length > index
+        && attribute.ConstructorArguments[index].Value is ITypeSymbol type
+            ? type.ToDisplayString()
+            : null;
 
     private static string? ReadString(AttributeData attribute, int index) =>
         attribute.ConstructorArguments.Length > index
