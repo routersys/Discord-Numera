@@ -4,101 +4,123 @@ using Numera.Persistence.Sqlite.Repositories;
 
 namespace Numera.Persistence.Sqlite.Transactions;
 
-public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
+public sealed partial class SqliteBankingUnitOfWork : IBankingUnitOfWork
 {
-    internal SqliteBankingUnitOfWork(SqliteUnitOfWork unitOfWork)
-    {
-        Parties = new SqlitePartyRepository(unitOfWork);
-        CustomerAccounts = new SqliteCustomerAccountRepository(unitOfWork);
-        DiscordIdentityLinks = new SqliteDiscordIdentityLinkRepository(unitOfWork);
-        BusinessOperations = new SqliteBusinessOperationRepository(unitOfWork);
-        Outbox = new SqliteOutboxRepository(unitOfWork);
-        InteractionSessions = new SqliteInteractionSessionRepository(unitOfWork);
-        Banks = new SqliteBankRepository(unitOfWork);
-        Relationships = new SqliteBankCustomerRelationshipRepository(unitOfWork);
-        LedgerAccounts = new SqliteLedgerAccountRepository(unitOfWork);
-        DepositAccounts = new SqliteDepositAccountRepository(unitOfWork);
-        AccountProducts = new SqliteAccountProductRepository(unitOfWork);
-        Branches = new SqliteBranchRepository(unitOfWork);
-        AccountingPeriods = new SqliteAccountingPeriodRepository(unitOfWork);
-        AccountingTransactions = new SqliteAccountingTransactionRepository(unitOfWork);
-        Holds = new SqliteHoldRepository(unitOfWork);
-        PaymentOrders = new SqlitePaymentOrderRepository(unitOfWork);
-        EconomyCalendars = new SqliteEconomyCalendarRepository(unitOfWork);
-        FeeSchedules = new SqliteFeeScheduleRepository(unitOfWork);
-        FeeWaiverCounters = new SqliteFeeWaiverCounterRepository(unitOfWork);
-        FeeAssessments = new SqliteFeeAssessmentRepository(unitOfWork);
-        BankPolicies = new SqliteBankPolicyRepository(unitOfWork);
-        AccountLimitPreferences = new SqliteAccountLimitPreferenceRepository(unitOfWork);
-        SettlementInstructions = new SqliteSettlementInstructionRepository(unitOfWork);
-        SettlementParticipations = new SqliteSettlementParticipationRepository(unitOfWork);
-        CentralBankSettlementAccounts = new SqliteCentralBankSettlementAccountRepository(unitOfWork);
-        PaymentPreferences = new SqlitePaymentPreferenceRepository(unitOfWork);
-        PaymentNetworks = new SqlitePaymentNetworkRepository(unitOfWork);
-        Clearing = new SqliteClearingRepository(unitOfWork);
-        SystemOwners = new SqliteSystemOwnerRepository(unitOfWork);
-        GuildEconomies = new SqliteGuildEconomyRepository(unitOfWork);
-    }
+    private readonly SqliteUnitOfWork unitOfWork;
 
-    public IPartyRepository Parties { get; }
+    private IPartyRepository? parties;
+    private ICustomerAccountRepository? customerAccounts;
+    private IDiscordIdentityLinkRepository? discordIdentityLinks;
+    private IBusinessOperationRepository? businessOperations;
+    private IOutboxRepository? outbox;
+    private IInteractionSessionRepository? interactionSessions;
+    private IBankRepository? banks;
+    private IBankCustomerRelationshipRepository? relationships;
+    private ILedgerAccountRepository? ledgerAccounts;
+    private IDepositAccountRepository? depositAccounts;
+    private IAccountProductRepository? accountProducts;
+    private IBranchRepository? branches;
+    private IAccountingPeriodRepository? accountingPeriods;
+    private IAccountingTransactionRepository? accountingTransactions;
+    private IHoldRepository? holds;
+    private IPaymentOrderRepository? paymentOrders;
+    private IEconomyCalendarRepository? economyCalendars;
+    private IFeeScheduleRepository? feeSchedules;
+    private IFeeWaiverCounterRepository? feeWaiverCounters;
+    private IFeeAssessmentRepository? feeAssessments;
+    private IBankPolicyRepository? bankPolicies;
+    private IAccountLimitPreferenceRepository? accountLimitPreferences;
+    private ISettlementInstructionRepository? settlementInstructions;
+    private ISettlementParticipationRepository? settlementParticipations;
+    private ICentralBankSettlementAccountRepository? centralBankSettlementAccounts;
+    private IPaymentPreferenceRepository? paymentPreferences;
+    private IPaymentNetworkRepository? paymentNetworks;
+    private IClearingRepository? clearing;
+    private ISystemOwnerRepository? systemOwners;
+    private IGuildEconomyRepository? guildEconomies;
 
-    public ICustomerAccountRepository CustomerAccounts { get; }
+    internal SqliteBankingUnitOfWork(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
 
-    public IDiscordIdentityLinkRepository DiscordIdentityLinks { get; }
+    public IPartyRepository Parties => parties ??= new SqlitePartyRepository(unitOfWork);
 
-    public IBusinessOperationRepository BusinessOperations { get; }
+    public ICustomerAccountRepository CustomerAccounts =>
+        customerAccounts ??= new SqliteCustomerAccountRepository(unitOfWork);
 
-    public IOutboxRepository Outbox { get; }
+    public IDiscordIdentityLinkRepository DiscordIdentityLinks =>
+        discordIdentityLinks ??= new SqliteDiscordIdentityLinkRepository(unitOfWork);
 
-    public IInteractionSessionRepository InteractionSessions { get; }
+    public IBusinessOperationRepository BusinessOperations =>
+        businessOperations ??= new SqliteBusinessOperationRepository(unitOfWork);
 
-    public IBankRepository Banks { get; }
+    public IOutboxRepository Outbox => outbox ??= new SqliteOutboxRepository(unitOfWork);
 
-    public IBankCustomerRelationshipRepository Relationships { get; }
+    public IInteractionSessionRepository InteractionSessions =>
+        interactionSessions ??= new SqliteInteractionSessionRepository(unitOfWork);
 
-    public ILedgerAccountRepository LedgerAccounts { get; }
+    public IBankRepository Banks => banks ??= new SqliteBankRepository(unitOfWork);
 
-    public IDepositAccountRepository DepositAccounts { get; }
+    public IBankCustomerRelationshipRepository Relationships =>
+        relationships ??= new SqliteBankCustomerRelationshipRepository(unitOfWork);
 
-    public IAccountProductRepository AccountProducts { get; }
+    public ILedgerAccountRepository LedgerAccounts =>
+        ledgerAccounts ??= new SqliteLedgerAccountRepository(unitOfWork);
 
-    public IBranchRepository Branches { get; }
+    public IDepositAccountRepository DepositAccounts =>
+        depositAccounts ??= new SqliteDepositAccountRepository(unitOfWork);
 
-    public IAccountingPeriodRepository AccountingPeriods { get; }
+    public IAccountProductRepository AccountProducts =>
+        accountProducts ??= new SqliteAccountProductRepository(unitOfWork);
 
-    public IAccountingTransactionRepository AccountingTransactions { get; }
+    public IBranchRepository Branches => branches ??= new SqliteBranchRepository(unitOfWork);
 
-    public IHoldRepository Holds { get; }
+    public IAccountingPeriodRepository AccountingPeriods =>
+        accountingPeriods ??= new SqliteAccountingPeriodRepository(unitOfWork);
 
-    public IPaymentOrderRepository PaymentOrders { get; }
+    public IAccountingTransactionRepository AccountingTransactions =>
+        accountingTransactions ??= new SqliteAccountingTransactionRepository(unitOfWork);
 
-    public IEconomyCalendarRepository EconomyCalendars { get; }
+    public IHoldRepository Holds => holds ??= new SqliteHoldRepository(unitOfWork);
 
-    public IFeeScheduleRepository FeeSchedules { get; }
+    public IPaymentOrderRepository PaymentOrders =>
+        paymentOrders ??= new SqlitePaymentOrderRepository(unitOfWork);
 
-    public IFeeWaiverCounterRepository FeeWaiverCounters { get; }
+    public IEconomyCalendarRepository EconomyCalendars =>
+        economyCalendars ??= new SqliteEconomyCalendarRepository(unitOfWork);
 
-    public IFeeAssessmentRepository FeeAssessments { get; }
+    public IFeeScheduleRepository FeeSchedules => feeSchedules ??= new SqliteFeeScheduleRepository(unitOfWork);
 
-    public IBankPolicyRepository BankPolicies { get; }
+    public IFeeWaiverCounterRepository FeeWaiverCounters =>
+        feeWaiverCounters ??= new SqliteFeeWaiverCounterRepository(unitOfWork);
 
-    public IAccountLimitPreferenceRepository AccountLimitPreferences { get; }
+    public IFeeAssessmentRepository FeeAssessments =>
+        feeAssessments ??= new SqliteFeeAssessmentRepository(unitOfWork);
 
-    public ISettlementInstructionRepository SettlementInstructions { get; }
+    public IBankPolicyRepository BankPolicies => bankPolicies ??= new SqliteBankPolicyRepository(unitOfWork);
 
-    public ISettlementParticipationRepository SettlementParticipations { get; }
+    public IAccountLimitPreferenceRepository AccountLimitPreferences =>
+        accountLimitPreferences ??= new SqliteAccountLimitPreferenceRepository(unitOfWork);
 
-    public ICentralBankSettlementAccountRepository CentralBankSettlementAccounts { get; }
+    public ISettlementInstructionRepository SettlementInstructions =>
+        settlementInstructions ??= new SqliteSettlementInstructionRepository(unitOfWork);
 
-    public IPaymentPreferenceRepository PaymentPreferences { get; }
+    public ISettlementParticipationRepository SettlementParticipations =>
+        settlementParticipations ??= new SqliteSettlementParticipationRepository(unitOfWork);
 
-    public IPaymentNetworkRepository PaymentNetworks { get; }
+    public ICentralBankSettlementAccountRepository CentralBankSettlementAccounts =>
+        centralBankSettlementAccounts ??= new SqliteCentralBankSettlementAccountRepository(unitOfWork);
 
-    public IClearingRepository Clearing { get; }
+    public IPaymentPreferenceRepository PaymentPreferences =>
+        paymentPreferences ??= new SqlitePaymentPreferenceRepository(unitOfWork);
 
-    public ISystemOwnerRepository SystemOwners { get; }
+    public IPaymentNetworkRepository PaymentNetworks =>
+        paymentNetworks ??= new SqlitePaymentNetworkRepository(unitOfWork);
 
-    public IGuildEconomyRepository GuildEconomies { get; }
+    public IClearingRepository Clearing => clearing ??= new SqliteClearingRepository(unitOfWork);
+
+    public ISystemOwnerRepository SystemOwners => systemOwners ??= new SqliteSystemOwnerRepository(unitOfWork);
+
+    public IGuildEconomyRepository GuildEconomies =>
+        guildEconomies ??= new SqliteGuildEconomyRepository(unitOfWork);
 }
 
 public sealed class SqliteBankingWriteGateway : IBankingWriteGateway

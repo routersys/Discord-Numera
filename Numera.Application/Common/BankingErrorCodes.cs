@@ -1,6 +1,6 @@
 namespace Numera.Application.Common;
 
-public static class BankingErrorCodes
+public static partial class BankingErrorCodes
 {
     public static string HandleFormatInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 1);
 

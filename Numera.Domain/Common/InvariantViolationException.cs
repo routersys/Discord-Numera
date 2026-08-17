@@ -25,7 +25,7 @@ public sealed class InvariantViolationException : Exception
     public static InvariantViolationException Create(string code) => new(code);
 }
 
-public static class InvariantViolationCode
+public static partial class InvariantViolationCode
 {
     public const string Unspecified = "INVARIANT_UNSPECIFIED";
     public const string MoneyOutOfRange = "MONEY_OUT_OF_RANGE";

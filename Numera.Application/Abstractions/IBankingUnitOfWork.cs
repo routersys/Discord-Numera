@@ -63,7 +63,7 @@ public interface IInteractionSessionRepository
     int PurgeTerminal(UtcTimestamp completedBefore, int batchSize);
 }
 
-public interface IBankingUnitOfWork
+public partial interface IBankingUnitOfWork
 {
     IPartyRepository Parties { get; }
 
