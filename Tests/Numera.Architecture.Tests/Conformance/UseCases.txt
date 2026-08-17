@@ -1,0 +1,32 @@
+/account register|RegisterCustomerAccount
+/account status|GetCustomerAccountStatus
+/account link|CreateLinkGrant,ConsumeLinkGrant
+/account unlink|UnlinkDiscordIdentity
+/bank list|ListBanks
+|GetBankDetail,ListBankProducts
+/bank open|OpenDepositAccount
+/bank accounts|ListCustomerBankAccounts
+|GetDepositAccountDetail,SetPaymentPreference
+/bank transfer|CreatePaymentOrder
+/bank statement|GetAccountStatement
+/bank payments|ListBeneficiaries,ListScheduledPayments,ListDirectDebitMandates
+/bank card|GetBankCard,IssueBankCard,SetBankCardLock,SetCashCardLock,SetDebitCardLock,ReplaceBankCard
+/bank atm|OpenAtmSession,AtmWithdraw,AtmDeposit,AtmBalanceInquiry,AtmTransfer
+/bank close|CloseDepositAccount
+|GetLoanProducts,ApplyLoan
+/fx rate|GetFxRateVisual
+/fx board|GetFxBoardVisual
+/fx chart|GetFxChartVisual
+/fx market|GetFxMarket
+/fx order|GetFxMarket,PlaceFxOrder
+/fx orders|ListFxOrders
+/fx cancel|CancelFxOrder
+/fx history|GetFxHistory
+/shop browse|BrowseMerchantStores,ListMerchantProducts
+|CreateCommerceCheckout,ReviewCommerceCheckout
+|ConfirmCommerceCheckout
+/shop orders|GetCommerceOrders,RequestCommerceReturn
+/manage|
+/system|
+|PrepareTransferToCustomer
+|PrepareTransferToCustomer

@@ -1,0 +1,207 @@
+[FX_VISUAL]
+invariant = INV-FX-014..015, INV-FX-021, INV-FX-027..028
+state-transition = 48.3E
+linearization = 49.4D
+canonical-data-contract = fx_market_summaries, fx_ohlc_buckets, fx_markets
+command-permission = /fx rate, /fx board, /fx chart, /fx history
+public-application-api = IFxApplicationService
+expected-outcome-test = 53.5, 53.10
+resource-budget = 54.3A
+[FX_ORDER_LIFECYCLE]
+invariant = INV-FX-001..007, INV-FX-009..012, INV-FX-021, INV-FX-023
+state-transition = 48.3E, 48.4, 48.14
+linearization = 49.4, 49.4A
+canonical-data-contract = fx_markets, fx_orders, fx_trades, holds
+command-permission = /fx order, /fx orders, /fx cancel
+public-application-api = IFxApplicationService
+expected-outcome-test = 53.5, 53.10
+resource-budget = 54.1, 54.4
+[FX_EXACT_MATH]
+invariant = INV-FX-008, INV-FX-018..020
+state-transition = 48.3E, 48.4
+linearization = 49.4
+canonical-data-contract = fx_markets, fx_orders, fx_trades
+command-permission = /fx order
+public-application-api = IFxApplicationService, IAtmApplicationService, ICommerceApplicationService
+expected-outcome-test = 53.5, 53.10, 53.14A
+resource-budget = 54.1, 54.4
+[FX_FEE_SPLIT]
+invariant = INV-FX-013, INV-FX-022..023
+state-transition = 48.4
+linearization = 49.4
+canonical-data-contract = fx_orders, fx_trades, fee_schedule_versions
+command-permission = /fx order
+public-application-api = IFxApplicationService
+expected-outcome-test = 53.5, 53.10
+resource-budget = 54.4
+[FX_SETTLEMENT_LEGS]
+invariant = INV-FX-024..026, INV-FX-029..033
+state-transition = 48.4A, 48.4B
+linearization = 49.4
+canonical-data-contract = fx_settlement_endpoints, fx_settlement_legs, fx_settlement_leg_components, clearing_instructions
+command-permission = 
+public-application-api = IFxApplicationService
+expected-outcome-test = 53.5, 53.10
+resource-budget = 54.4
+[FX_APPROVAL]
+invariant = INV-FX-002, INV-ADM-001..011
+state-transition = 48.3E
+linearization = 49.4C
+canonical-data-contract = fx_markets
+command-permission = /manage panel
+public-application-api = IFxAdministrationApplicationService
+expected-outcome-test = 53.8A, 53.10
+resource-budget = 54.4
+[FX_ROLLING_STATS]
+invariant = INV-FX-014, INV-FX-027..028
+state-transition = 48.3E
+linearization = 49.4D
+canonical-data-contract = fx_market_summaries, fx_ohlc_buckets, fx_trades
+command-permission = /fx rate, /fx chart, /fx history
+public-application-api = IFxApplicationService
+expected-outcome-test = 53.10
+resource-budget = 54.3A, 54.4
+[BASE_MONEY_SUPPLY]
+invariant = INV-CUR-004..008, INV-CASH-001, INV-CASH-005
+state-transition = 48.1B
+linearization = 49.7, 49.9C
+canonical-data-contract = currencies, currency_supply_operations, accounting_transactions, journal_entries
+command-permission = /manage currency-issue, /manage currency-burn, /manage panel
+public-application-api = ICurrencyAdministrationApplicationService
+expected-outcome-test = 53.6, 53.10
+resource-budget = 54.4
+[CROSS_GUILD_ATM]
+invariant = INV-ATM-008, INV-ATM-011..013, INV-ATM-015..019, INV-FX-016..017, INV-FX-026
+state-transition = 48.3C, 48.3D, 48.27, 48.4, 48.4A, 48.4B
+linearization = 49.4B, 49.9A, 49.9C
+canonical-data-contract = atm_terminals, atm_placement_agreements, atm_terminal_currency_services, atm_transactions, atm_cash_cassettes, fx_orders, fx_settlement_legs, payment_orders
+command-permission = /bank atm
+public-application-api = IAtmApplicationService
+expected-outcome-test = 53.4A, 53.10
+resource-budget = 54.1, 54.4
+[THIRD_PARTY_ATM_DEPOSIT]
+invariant = INV-ATM-014, INV-ATM-020, INV-CASH-001..004
+state-transition = 48.3C, 48.27, 48.19
+linearization = 49.9B
+canonical-data-contract = atm_transactions, cash_movements, cash_positions, payment_orders, clearing_instructions
+command-permission = /bank atm
+public-application-api = IAtmApplicationService
+expected-outcome-test = 53.4A, 53.10
+resource-budget = 54.1, 54.4
+[OPTIONAL_DEPOSIT_INSURANCE]
+invariant = INV-RESOLUTION-003..005, INV-INS-001..009
+state-transition = 48.32, 48.40, 48.41, 48.41A, 48.41B, 48.41C
+linearization = 49.16
+canonical-data-contract = deposit_insurance_schemes, deposit_insurance_funds, deposit_insurance_scheme_versions, deposit_insurance_enrollments, deposit_insurance_premium_payments, deposit_insurance_reservations, deposit_insurance_claims, insurance_settlement_wallets, insurance_settlement_wallet_payouts
+command-permission = /bank payments, /manage panel
+public-application-api = IDepositInsuranceApplicationService, IDepositInsuranceAdministrationApplicationService
+expected-outcome-test = 53.15, 53.17
+resource-budget = 54.11
+[PRESENTATION_PROFILE]
+invariant = INV-UI-001..004, INV-PRES-001..004
+state-transition = 48.42
+linearization = 49.17
+canonical-data-contract = presentation_profile_versions, interaction_sessions.payload_json, ResolvedPresentationSnapshot
+command-permission = /manage panel
+public-application-api = IPresentationProfileAdministrationApplicationService
+expected-outcome-test = 53.18, 53.19
+resource-budget = 54.11
+[PRUDENTIAL_POLICY]
+invariant = INV-PRUD-001..003, INV-PRUD-005
+state-transition = 48.41E
+linearization = 49.16A
+canonical-data-contract = prudential_policy_versions
+command-permission = /manage panel
+public-application-api = IPrudentialAdministrationApplicationService
+expected-outcome-test = 53.16
+resource-budget = 54.11
+[BANK_RESOLUTION_TRIGGER]
+invariant = INV-PRUD-004, INV-RESOLUTION-001..007
+state-transition = 48.1A, 48.31
+linearization = 49.16A, 49.16C
+canonical-data-contract = banks, resolution_cases, resolution_transfers
+command-permission = /manage panel, /system reconcile
+public-application-api = IResolutionAdministrationApplicationService
+expected-outcome-test = 53.16
+resource-budget = 54.11
+[PAYMENT_NETWORK_POLICY]
+invariant = INV-PAY-023..024
+state-transition = 48.41D
+linearization = 49.16B
+canonical-data-contract = payment_networks, payment_network_policy_versions, payment_network_prefunds, payment_orders.payment_network_policy_version_id
+command-permission = /manage panel
+public-application-api = IPaymentNetworkAdministrationApplicationService
+expected-outcome-test = 53.16
+resource-budget = 54.11
+[ATM_DISCORD_INSTALLATION]
+invariant = INV-ATMUI-001..004
+state-transition = 48.43
+linearization = 49.19
+canonical-data-contract = atm_discord_installations, bank_assets, ATM_BANNER/PUBLIC_BANNER
+command-permission = /manage panel
+public-application-api = IAtmInstallationAdministrationApplicationService
+expected-outcome-test = 53.12A
+resource-budget = 54.12
+[BANK_OPERATOR_GRANT]
+invariant = INV-ADM-012..013
+state-transition = 48.51
+linearization = 49.21
+canonical-data-contract = bank_operator_grants
+command-permission = /manage panel
+public-application-api = IBankOperatorGrantApplicationService
+expected-outcome-test = 53.12A
+resource-budget = 54.12
+[CURRENCY_TRUST]
+invariant = INV-TRUST-001..005
+state-transition = 48.44, 48.47
+linearization = 49.18
+canonical-data-contract = currency_trust_policy_versions, currency_trust_designations
+command-permission = /manage panel
+public-application-api = ICurrencyTrustAdministrationApplicationService
+expected-outcome-test = 53.12A
+resource-budget = 54.12
+[INSTITUTIONAL_FX]
+invariant = INV-FX-034..035, INV-FX-041..042, INV-RESERVE-001
+state-transition = 48.4, 48.45, 48.46, 48.48, 48.49
+linearization = 49.20
+canonical-data-contract = bank_treasury_fx_accounts, fx_funding_endpoints, fx_orders, fx_settlement_endpoints, fx_settlement_legs, official_reserve_portfolios, official_reserve_positions, holds
+command-permission = /manage panel, /fx order
+public-application-api = IBankTreasuryFxApplicationService, IMonetaryAuthorityAdministrationApplicationService, IFxApplicationService
+expected-outcome-test = 53.12A
+resource-budget = 54.12
+[FX_INTERVENTION]
+invariant = INV-FX-036..040
+state-transition = 48.50
+linearization = 49.20
+canonical-data-contract = fx_intervention_mandates, monetary_authorities, official_reserve_positions, fx_orders
+command-permission = /manage panel
+public-application-api = IMonetaryAuthorityAdministrationApplicationService
+expected-outcome-test = 53.12A
+resource-budget = 54.12
+[MERCHANT_PAYMENT_RAIL]
+invariant = INV-MERCHANT-001..004, INV-MERCHANT-007, INV-MERCHANT-011..020, INV-PAY-008..014
+state-transition = 48.3F, 48.38, 48.52, 48.56
+linearization = 49.14, 49.14C, 49.14D, 49.14E
+canonical-data-contract = merchant_profiles, merchant_operator_grants, debit_card_authorizations, debit_card_captures, debit_card_refunds, commerce_payments, commerce_checkout_confirmations, commerce_returns, commerce_return_lines, commerce_fulfillments, commerce_fulfillment_reversals
+command-permission = /manage panel, /shop
+public-application-api = IMerchantAdministrationApplicationService, IMerchantOperatorGrantApplicationService, ICommerceApplicationService
+expected-outcome-test = 53.14, 53.14A
+resource-budget = 54.13
+[COMMERCE_CATALOG]
+invariant = INV-MERCHANT-004..006, INV-MERCHANT-012, INV-MERCHANT-015..016, INV-MERCHANT-019..020
+state-transition = 48.53, 48.54, 48.55, 48.56, 48.57, 48.58, 48.58A, 48.59, 48.60, 48.60A
+linearization = 49.14B, 49.14C, 49.14D, 49.14E, 49.14
+canonical-data-contract = merchant_products, merchant_product_price_versions, merchant_product_purchase_policy_versions, merchant_fulfillment_policy_versions, merchant_inventory_positions, merchant_inventory_movements, commerce_orders, commerce_order_lines, commerce_payments, commerce_checkout_confirmations, commerce_returns, commerce_return_lines, commerce_fulfillments, commerce_fulfillment_reversals
+command-permission = /shop browse, /shop orders, /manage panel
+public-application-api = ICommerceApplicationService, IMerchantAdministrationApplicationService
+expected-outcome-test = 53.14A
+resource-budget = 54.13
+[CROSS_GUILD_COMMERCE]
+invariant = INV-MERCHANT-002..003, INV-MERCHANT-008..010, INV-MERCHANT-013..014, INV-MERCHANT-017..018
+state-transition = 48.3F, 48.55, 48.56, 48.4, 48.4A, 48.4B
+linearization = 49.14
+canonical-data-contract = merchant_profiles, commerce_orders, commerce_order_lines, commerce_payments, commerce_checkout_confirmations, commerce_returns, debit_card_authorizations, debit_card_captures, debit_card_refunds, fx_settlement_endpoints, fx_orders, fx_trades, fx_settlement_legs
+command-permission = /shop
+public-application-api = ICommerceApplicationService, IMerchantAdministrationApplicationService
+expected-outcome-test = 53.14A
+resource-budget = 54.13
