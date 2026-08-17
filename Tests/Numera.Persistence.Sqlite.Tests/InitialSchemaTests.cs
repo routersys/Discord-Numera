@@ -44,6 +44,9 @@ public sealed class InitialSchemaTests
         "fee_assessments",
         "bank_policy_versions",
         "account_limit_preferences",
+        "central_bank_settlement_accounts",
+        "settlement_participations",
+        "settlement_instructions",
     ];
 
     private static SqliteDatabaseFixture Initialized()

@@ -123,4 +123,17 @@ public static class InvariantViolationCode
     public const string FeeAssessmentEndpointsInvalid = "FEE_ASSESSMENT_ENDPOINTS_INVALID";
     public const string LimitValueNegative = "LIMIT_VALUE_NEGATIVE";
     public const string LimitUsageInvalid = "LIMIT_USAGE_INVALID";
+    public const string SettlementInstructionTransitionInvalid = "SETTLEMENT_INSTRUCTION_TRANSITION_INVALID";
+    public const string SettlementInstructionStatusUnknown = "SETTLEMENT_INSTRUCTION_STATUS_UNKNOWN";
+    public const string SettlementInstructionAmountInvalid = "SETTLEMENT_INSTRUCTION_AMOUNT_INVALID";
+    public const string SettlementInstructionEndpointsInvalid = "SETTLEMENT_INSTRUCTION_ENDPOINTS_INVALID";
+    public const string SettlementInstructionFinalityInconsistent = "SETTLEMENT_INSTRUCTION_FINALITY_INCONSISTENT";
+    public const string SettlementParticipationTransitionInvalid = "SETTLEMENT_PARTICIPATION_TRANSITION_INVALID";
+    public const string SettlementParticipationStatusUnknown = "SETTLEMENT_PARTICIPATION_STATUS_UNKNOWN";
+    public const string SettlementParticipationModeUnknown = "SETTLEMENT_PARTICIPATION_MODE_UNKNOWN";
+    public const string SettlementParticipationModeInconsistent = "SETTLEMENT_PARTICIPATION_MODE_INCONSISTENT";
+    public const string CentralBankSettlementAccountTransitionInvalid =
+        "CENTRAL_BANK_SETTLEMENT_ACCOUNT_TRANSITION_INVALID";
+    public const string CentralBankSettlementAccountStatusUnknown =
+        "CENTRAL_BANK_SETTLEMENT_ACCOUNT_STATUS_UNKNOWN";
 }

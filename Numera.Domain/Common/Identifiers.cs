@@ -270,6 +270,34 @@ public readonly record struct FeeAssessmentId(EntityIdValue Value) : IEntityId<F
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct SettlementInstructionId(EntityIdValue Value) : IEntityId<SettlementInstructionId>
+{
+    public static string EntityName => "settlement_instruction";
+
+    public static SettlementInstructionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct SettlementParticipationId(EntityIdValue Value) : IEntityId<SettlementParticipationId>
+{
+    public static string EntityName => "settlement_participation";
+
+    public static SettlementParticipationId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct CentralBankSettlementAccountId(EntityIdValue Value)
+    : IEntityId<CentralBankSettlementAccountId>
+{
+    public static string EntityName => "central_bank_settlement_account";
+
+    public static CentralBankSettlementAccountId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
 public readonly record struct AtmNetworkId(EntityIdValue Value) : IEntityId<AtmNetworkId>
 {
     public static string EntityName => "atm_network";

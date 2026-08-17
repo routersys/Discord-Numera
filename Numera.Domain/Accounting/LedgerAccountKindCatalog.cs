@@ -29,6 +29,7 @@ public static class LedgerAccountKindCatalog
         LedgerAccountKind.IncomingSettlementSuspense => "INCOMING_SETTLEMENT_SUSPENSE",
         LedgerAccountKind.InterbankBorrowing => "INTERBANK_BORROWING",
         LedgerAccountKind.ClientBankSettlementDeposit => "CLIENT_BANK_SETTLEMENT_DEPOSIT",
+        LedgerAccountKind.CentralBankSettlementLiability => "CENTRAL_BANK_SETTLEMENT_LIABILITY",
         LedgerAccountKind.CentralBankIntradayBorrowing => "CENTRAL_BANK_INTRADAY_BORROWING",
         LedgerAccountKind.CentralBankOvernightBorrowing => "CENTRAL_BANK_OVERNIGHT_BORROWING",
         LedgerAccountKind.CashOutstandingLiability => "CASH_OUTSTANDING_LIABILITY",
@@ -80,6 +81,7 @@ public static class LedgerAccountKindCatalog
         LedgerAccountKind.IncomingSettlementSuspense => AccountingType.Liability,
         LedgerAccountKind.InterbankBorrowing => AccountingType.Liability,
         LedgerAccountKind.ClientBankSettlementDeposit => AccountingType.Liability,
+        LedgerAccountKind.CentralBankSettlementLiability => AccountingType.Liability,
         LedgerAccountKind.CentralBankIntradayBorrowing => AccountingType.Liability,
         LedgerAccountKind.CentralBankOvernightBorrowing => AccountingType.Liability,
         LedgerAccountKind.CashOutstandingLiability => AccountingType.Liability,
@@ -182,6 +184,9 @@ public static class LedgerAccountKindCatalog
                 return true;
             case "CLIENT_BANK_SETTLEMENT_DEPOSIT":
                 kind = LedgerAccountKind.ClientBankSettlementDeposit;
+                return true;
+            case "CENTRAL_BANK_SETTLEMENT_LIABILITY":
+                kind = LedgerAccountKind.CentralBankSettlementLiability;
                 return true;
             case "CENTRAL_BANK_INTRADAY_BORROWING":
                 kind = LedgerAccountKind.CentralBankIntradayBorrowing;
