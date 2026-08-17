@@ -270,6 +270,15 @@ public readonly record struct FeeAssessmentId(EntityIdValue Value) : IEntityId<F
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct PaymentPreferenceId(EntityIdValue Value) : IEntityId<PaymentPreferenceId>
+{
+    public static string EntityName => "payment_preference";
+
+    public static PaymentPreferenceId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
 public readonly record struct SettlementInstructionId(EntityIdValue Value) : IEntityId<SettlementInstructionId>
 {
     public static string EntityName => "settlement_instruction";
