@@ -293,6 +293,34 @@ public sealed class SqlitePaymentNetworkRepository : IPaymentNetworkRepository
             : null;
     }
 
+    public PaymentNetworkPrefund? FindPrefund(
+        PaymentNetworkId paymentNetworkId,
+        BankId bankId,
+        CurrencyId currencyId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT payment_network_prefund_id, payment_network_id, bank_id, currency_id,
+                prefund_liability_ledger_account_id, created_at, version
+            FROM payment_network_prefunds
+            WHERE payment_network_id = $network AND bank_id = $bank AND currency_id = $currency;
+            """);
+        command.Parameters.AddWithValue("$network", SqliteValueMapper.ToBlob(paymentNetworkId.Value));
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(currencyId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read()
+            ? PaymentNetworkPrefund.Create(
+                PaymentNetworkPrefundId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                PaymentNetworkId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                SqliteValueMapper.ReadTimestamp(reader, 5),
+                reader.GetInt64(6))
+            : null;
+    }
+
     public PaymentNetworkPolicyVersion? FindPolicy(PaymentNetworkPolicyVersionId paymentNetworkPolicyVersionId)
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""

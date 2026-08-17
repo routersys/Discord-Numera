@@ -319,6 +319,22 @@ public sealed class SqlitePaymentOrderRepository : IPaymentOrderRepository
         return MoneyMinor.FromMinor(Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture));
     }
 
+    public MoneyMinor SumUnfinalisedPreCreditExposure(BankId sourceBankId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(o.amount_minor), 0) FROM payment_orders o
+            JOIN deposit_accounts a ON a.deposit_account_id = o.source_deposit_account_id
+            WHERE a.bank_id = $bank
+              AND o.settlement_mode = 'CLEARING'
+              AND o.beneficiary_posting_policy = 'GUARANTEED_PRE_CREDIT'
+              AND o.beneficiary_posted_at IS NOT NULL
+              AND o.settlement_finalized_at IS NULL;
+            """);
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(sourceBankId.Value));
+
+        return MoneyMinor.FromMinor(Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture));
+    }
+
     private static void Bind(SqliteCommand command, PaymentOrder order)
     {
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(order.Id.Value));

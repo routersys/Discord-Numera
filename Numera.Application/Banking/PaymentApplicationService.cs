@@ -992,9 +992,18 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         acceptance.ApplyProjections(unitOfWork, acceptanceAccounts, now);
         RecordFee(unitOfWork, order, plan, source, sourceLedger, now);
 
+        bool preCredited = order.BeneficiaryPostingPolicy == BeneficiaryPostingPolicy.GuaranteedPreCredit &&
+            unitOfWork.PaymentNetworks.FindRouting(sourceBank.EconomyScopeId) is { } network &&
+            PaymentRoutePolicy.CoversPreCredit(
+                unitOfWork, network, policy, source.BankId, order.CurrencyId, order.Amount);
+
         LedgerPostingBuilder claim = new();
         claim.Add(PostingLine.Institutional(receivable, EntrySide.Debit, order.Amount));
-        claim.Add(PostingLine.Institutional(suspense, EntrySide.Credit, order.Amount));
+
+        claim.Add(preCredited
+            ? PostingLine.Deposit(
+                unitOfWork.LedgerAccounts.Find(destination.LedgerAccountId)!, EntrySide.Credit, order.Amount)
+            : PostingLine.Institutional(suspense, EntrySide.Credit, order.Amount));
 
         LedgerAccount[] claimAccounts = claim.OrderedAccounts();
 
@@ -1046,6 +1055,12 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             MoneyMinor.Zero);
 
         order.Accept();
+
+        if (preCredited)
+        {
+            order.RecordBeneficiaryPosting(now);
+        }
+
         unitOfWork.PaymentOrders.Update(order);
 
         source.RecordCustomerActivity(now);
@@ -1191,6 +1206,22 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         Bank destinationBank = unitOfWork.Banks.Find(destination.BankId)!;
         UtcTimestamp now = clock.Now();
         BusinessDate businessDate = BusinessDateOf(now);
+
+        if (order.BeneficiaryPostedAt is not null)
+        {
+            order.Complete(now);
+            unitOfWork.PaymentOrders.Update(order);
+            CommitOperation(unitOfWork, order.BusinessOperationId, now);
+
+            unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+                OutboxEventId.FromValue(idGenerator.NextId()),
+                order.BusinessOperationId,
+                CompletedEventType,
+                Payload(order),
+                now));
+
+            return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+        }
 
         if (unitOfWork.AccountingPeriods.FindOpen(destinationBank.GeneralLedgerBookId, businessDate)
             is not { } period)

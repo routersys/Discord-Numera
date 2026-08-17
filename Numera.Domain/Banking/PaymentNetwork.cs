@@ -121,6 +121,34 @@ public readonly record struct PaymentNetworkPolicyVersion(
     }
 }
 
+public readonly record struct PaymentNetworkPrefund(
+    PaymentNetworkPrefundId Id,
+    PaymentNetworkId PaymentNetworkId,
+    BankId BankId,
+    CurrencyId CurrencyId,
+    LedgerAccountId PrefundLiabilityLedgerAccountId,
+    UtcTimestamp CreatedAt,
+    long Version)
+{
+    public static PaymentNetworkPrefund Create(
+        PaymentNetworkPrefundId id,
+        PaymentNetworkId paymentNetworkId,
+        BankId bankId,
+        CurrencyId currencyId,
+        LedgerAccountId prefundLiabilityLedgerAccountId,
+        UtcTimestamp createdAt,
+        long version) =>
+        version < 1
+            ? throw InvariantViolationException.Create(InvariantViolationCode.PaymentNetworkPolicyInconsistent)
+            : new PaymentNetworkPrefund(
+                id, paymentNetworkId, bankId, currencyId, prefundLiabilityLedgerAccountId, createdAt, version);
+
+    public MoneyMinor AvailableAmount(MoneyMinor postedBalance, MoneyMinor unfinalisedExposure) =>
+        postedBalance.Subtract(unfinalisedExposure) is { IsNegative: false } available
+            ? available
+            : MoneyMinor.Zero;
+}
+
 public sealed class PaymentNetwork : VersionedEntity
 {
     public const int MaximumNetworkCodeLength = 32;

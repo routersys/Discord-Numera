@@ -278,6 +278,8 @@ public interface IPaymentOrderRepository
         DepositAccountId sourceDepositAccountId,
         UtcTimestamp fromInclusive,
         UtcTimestamp toExclusive);
+
+    MoneyMinor SumUnfinalisedPreCreditExposure(BankId sourceBankId);
 }
 
 public sealed record TransferLimitSet(MoneyMinor? PerTransfer, MoneyMinor? DailyOutgoing);
@@ -358,6 +360,11 @@ public interface IPaymentNetworkRepository
 
     Numera.Domain.Banking.PaymentNetworkPolicyVersion? FindPolicy(
         PaymentNetworkPolicyVersionId paymentNetworkPolicyVersionId);
+
+    Numera.Domain.Banking.PaymentNetworkPrefund? FindPrefund(
+        PaymentNetworkId paymentNetworkId,
+        BankId bankId,
+        CurrencyId currencyId);
 }
 
 public interface ISettlementParticipationRepository

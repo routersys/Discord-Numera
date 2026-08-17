@@ -450,6 +450,58 @@ public sealed class TransferTests
                 """);
         }
 
+        public void PublishPreCreditNetwork(long exposureLimit, long prefundBalance)
+        {
+            Execute($"""
+                INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+                VALUES({Blob(140)}, 'SYSTEM', '清算機関', 'ACTIVE', 1, 1);
+
+                INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                    created_at, version)
+                VALUES({Blob(141)}, {Blob(140)}, 'SYSTEM', 'OPEN', 1, 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
+                    account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                    owner_reference_type, owner_reference_id, status, created_at, version)
+                VALUES
+                    ({Blob(142)}, {Blob(141)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT', {Blob(2)}, 1,
+                        NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(145)}, {Blob(4)}, NULL, '2400', 'CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(146)}, {Blob(21)}, NULL, '1400', 'CLEARING_RECEIVABLE', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(147)}, {Blob(4)}, NULL, '1400', 'CLEARING_RECEIVABLE', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(148)}, {Blob(21)}, NULL, '2400', 'CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(149)}, {Blob(141)}, NULL, '2500', 'SUSPENSE_LIABILITY', 'LIABILITY', 'CREDIT',
+                        {Blob(2)}, 1, 'BANK', {Blob(5)}, 'ACTIVE', 1, 1);
+
+                INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
+                    accounting_book_id, liquid_asset_ledger_account_id, status, current_policy_version_id, version)
+                VALUES({Blob(143)}, {Blob(1)}, 'ZENGIN', {Blob(140)}, {Blob(141)}, {Blob(142)}, 'DRAFT', NULL, 1);
+
+                INSERT INTO payment_network_policy_versions(payment_network_policy_version_id, payment_network_id,
+                    settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor,
+                    clearing_cycle_interval_seconds, precredit_enabled, precredit_prefund_ratio_bps,
+                    per_bank_precredit_exposure_limit_minor, created_at, version)
+                VALUES({Blob(144)}, {Blob(143)}, 'CLEARING', 'GUARANTEED_PRE_CREDIT', NULL, 3600, 1, 10000,
+                    {exposureLimit}, 1, 1);
+
+                UPDATE payment_networks
+                SET status = 'ACTIVE', current_policy_version_id = {Blob(144)}, version = 2
+                WHERE payment_network_id = {Blob(143)};
+
+                INSERT INTO payment_network_prefunds(payment_network_prefund_id, payment_network_id, bank_id,
+                    currency_id, prefund_liability_ledger_account_id, created_at, version)
+                VALUES({Blob(150)}, {Blob(143)}, {Blob(5)}, {Blob(2)}, {Blob(149)}, 1, 1);
+
+                INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                    version, updated_at)
+                VALUES({Blob(149)}, {prefundBalance}, 0, 1, 1);
+                """);
+        }
+
         public void LockClearingCycles() => Execute("""
             UPDATE clearing_cycles
             SET status = 'LOCKED', locked_at = 1, version = version + 1
@@ -2132,6 +2184,115 @@ public sealed class TransferTests
         Assert.AreEqual(0, second.Examined);
         Assert.AreEqual(300L, harness.Balance(harness.RemoteDepositAccountId()));
         Assert.AreEqual(0L, harness.LedgerBalanceOf(ClearingPayableSeed));
+    }
+
+    private static async Task<(Harness Harness, DepositAccountView Remote)> PreCreditAsync(
+        long exposureLimit,
+        long prefundBalance,
+        long amount)
+    {
+        Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        harness.PublishPreCreditNetwork(exposureLimit, prefundBalance);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, amount);
+
+        return (harness, remote);
+    }
+
+    [TestMethod]
+    public async Task CoveredPreCreditCreditsTheBeneficiaryAtAcceptance()
+    {
+        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 1_000, 300);
+
+        await using (harness)
+        {
+            Assert.AreEqual(300L, harness.Balance(remote.Id));
+            Assert.AreEqual(0L, harness.LedgerBalanceOf(IncomingSuspenseSeed));
+            Assert.AreEqual("ACCEPTED", harness.ReadText("SELECT status FROM payment_orders;"));
+        }
+    }
+
+    [TestMethod]
+    public async Task PreCreditDoesNotImplyInterbankFinality()
+    {
+        (Harness harness, DepositAccountView _) = await PreCreditAsync(10_000, 1_000, 300);
+
+        await using (harness)
+        {
+            Assert.AreEqual("1", harness.ReadText("""
+                SELECT CAST(count(*) AS TEXT) FROM payment_orders
+                WHERE beneficiary_posted_at IS NOT NULL AND settlement_finalized_at IS NULL;
+                """));
+        }
+    }
+
+    [TestMethod]
+    public async Task PreCreditedPaymentCompletesWithoutASecondBeneficiaryCredit()
+    {
+        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 1_000, 300);
+
+        await using (harness)
+        {
+            harness.Clock.Advance(ClearingIntervalMilliseconds);
+            await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+
+            Assert.AreEqual("COMPLETED", harness.ReadText("SELECT status FROM payment_orders;"));
+            Assert.AreEqual(300L, harness.Balance(remote.Id));
+            Assert.AreEqual(0L, harness.LedgerBalanceOf(ClearingReceivableSeed));
+        }
+    }
+
+    [TestMethod]
+    public async Task PrefundShortfallKeepsTheBeneficiaryUncredited()
+    {
+        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 299, 300);
+
+        await using (harness)
+        {
+            Assert.AreEqual(0L, harness.Balance(remote.Id));
+            Assert.AreEqual(300L, harness.LedgerBalanceOf(IncomingSuspenseSeed));
+            Assert.AreEqual("0", harness.ReadText(
+                "SELECT CAST(count(*) AS TEXT) FROM payment_orders WHERE beneficiary_posted_at IS NOT NULL;"));
+        }
+    }
+
+    [TestMethod]
+    public async Task ExposureLimitBlocksTheSecondPreCredit()
+    {
+        Harness harness = Harness.Create(withSettlement: true);
+
+        await using (harness)
+        {
+            Parties parties = await SetupAsync(harness, funding: 5_000);
+            harness.FundReserve(5_000);
+            harness.PublishPreCreditNetwork(exposureLimit: 300, prefundBalance: 10_000);
+            DepositAccountView remote = await RemoteAccountAsync(harness);
+
+            await InterbankTransferAsync(harness, parties, remote, 300);
+            await InterbankTransferAsync(harness, parties, remote, 100, "interaction-2");
+
+            Assert.AreEqual(300L, harness.Balance(remote.Id));
+            Assert.AreEqual(100L, harness.LedgerBalanceOf(IncomingSuspenseSeed));
+        }
+    }
+
+    [TestMethod]
+    public async Task UncoveredPreCreditIsPostedAfterFinalSettlement()
+    {
+        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 0, 300);
+
+        await using (harness)
+        {
+            harness.Clock.Advance(ClearingIntervalMilliseconds);
+            await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+
+            Assert.AreEqual("COMPLETED", harness.ReadText("SELECT status FROM payment_orders;"));
+            Assert.AreEqual(300L, harness.Balance(remote.Id));
+            Assert.AreEqual(0L, harness.LedgerBalanceOf(IncomingSuspenseSeed));
+        }
     }
 
     [TestMethod]
