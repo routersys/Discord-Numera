@@ -50,7 +50,6 @@ public sealed class SchemaConformanceTests
         "commerce_return_lines",
         "commerce_returns",
         "currency_denominations",
-        "currency_supply_operations",
         "currency_trust_designations",
         "currency_trust_policy_versions",
         "debit_card_authorizations",
