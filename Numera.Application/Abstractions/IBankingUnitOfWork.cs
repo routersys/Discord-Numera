@@ -65,3 +65,31 @@ public interface IBankingWriteGateway
         Func<IBankingUnitOfWork, Result<TValue>> operation,
         CancellationToken cancellationToken);
 }
+
+public interface IBankReadRepository
+{
+    IReadOnlyList<Numera.Application.Banking.BankSuggestion> ListSuggestible(
+        EconomyScopeId economyScopeId,
+        IReadOnlyList<Numera.Domain.Banking.BankStatus> selectableStatuses,
+        ulong? operatorDiscordUserId,
+        int limit);
+}
+
+public interface ICurrencyReadRepository
+{
+    IReadOnlyList<Numera.Application.Banking.CurrencySuggestion> ListSuggestible(
+        EconomyScopeId economyScopeId,
+        int limit);
+}
+
+public interface IBankingReadContext
+{
+    IBankReadRepository Banks { get; }
+
+    ICurrencyReadRepository Currencies { get; }
+}
+
+public interface IBankingReadGateway
+{
+    TResult Execute<TResult>(Func<IBankingReadContext, TResult> query);
+}
