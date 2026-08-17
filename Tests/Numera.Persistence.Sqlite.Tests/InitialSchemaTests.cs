@@ -37,6 +37,11 @@ public sealed class InitialSchemaTests
         "interaction_sessions",
         "bank_operator_grants",
         "audit_records",
+        "economy_calendar_overrides",
+        "fee_schedule_versions",
+        "fee_rules",
+        "fee_waiver_usage_counters",
+        "fee_assessments",
     ];
 
     private static SqliteDatabaseFixture Initialized()
