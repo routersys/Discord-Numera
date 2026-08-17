@@ -18,7 +18,6 @@ public sealed class SchemaConformanceTests
     private static readonly string[] TablesAwaitingImplementation =
     [
         "account_link_grants",
-        "account_opening_applications",
         "account_product_version_assignments",
         "account_restrictions",
         "atm_cash_cassettes",
@@ -99,7 +98,6 @@ public sealed class SchemaConformanceTests
         "official_reserve_positions",
         "operation_results",
         "presentation_profile_versions",
-        "prudential_policy_versions",
         "reconciliation_issues",
         "reconciliation_runs",
         "resolution_cases",

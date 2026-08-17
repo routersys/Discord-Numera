@@ -11,6 +11,8 @@ public sealed class StateMachineClosureTests
 {
     private static readonly Dictionary<string, string[]> DomainStatusTokens = new(StringComparer.Ordinal)
     {
+        ["account_opening_applications"] =
+            Tokens<AccountOpeningApplicationStatus>(static value => value.ToToken()),
         ["parties"] = Tokens<PartyStatus>(static value => value.ToToken()),
         ["customer_accounts"] = Tokens<CustomerAccountStatus>(static value => value.ToToken()),
         ["discord_identity_links"] = Tokens<DiscordIdentityLinkStatus>(static value => value.ToToken()),
@@ -43,6 +45,7 @@ public sealed class StateMachineClosureTests
         "currencies",
         "guild_economies",
         "idempotency_records",
+        "prudential_policy_versions",
     ];
 
     private static string[] Tokens<TStatus>(Func<TStatus, string> toToken)
