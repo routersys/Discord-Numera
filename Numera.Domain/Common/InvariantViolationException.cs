@@ -147,4 +147,10 @@ public static class InvariantViolationCode
         "CENTRAL_BANK_SETTLEMENT_ACCOUNT_TRANSITION_INVALID";
     public const string CentralBankSettlementAccountStatusUnknown =
         "CENTRAL_BANK_SETTLEMENT_ACCOUNT_STATUS_UNKNOWN";
+    public const string PaymentNetworkTransitionInvalid = "PAYMENT_NETWORK_TRANSITION_INVALID";
+    public const string PaymentNetworkStatusUnknown = "PAYMENT_NETWORK_STATUS_UNKNOWN";
+    public const string PaymentNetworkCodeInvalid = "PAYMENT_NETWORK_CODE_INVALID";
+    public const string PaymentNetworkPolicyInconsistent = "PAYMENT_NETWORK_POLICY_INCONSISTENT";
+    public const string PaymentNetworkPolicyPrefundRatioInvalid = "PAYMENT_NETWORK_POLICY_PREFUND_RATIO_INVALID";
+    public const string PaymentNetworkPolicyIntervalInvalid = "PAYMENT_NETWORK_POLICY_INTERVAL_INVALID";
 }

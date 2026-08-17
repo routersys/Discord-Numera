@@ -342,3 +342,31 @@ public readonly record struct AtmNetworkId(EntityIdValue Value) : IEntityId<AtmN
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct PaymentNetworkId(EntityIdValue Value) : IEntityId<PaymentNetworkId>
+{
+    public static string EntityName => "payment_network";
+
+    public static PaymentNetworkId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct PaymentNetworkPolicyVersionId(EntityIdValue Value)
+    : IEntityId<PaymentNetworkPolicyVersionId>
+{
+    public static string EntityName => "payment_network_policy_version";
+
+    public static PaymentNetworkPolicyVersionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct PaymentNetworkPrefundId(EntityIdValue Value) : IEntityId<PaymentNetworkPrefundId>
+{
+    public static string EntityName => "payment_network_prefund";
+
+    public static PaymentNetworkPrefundId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

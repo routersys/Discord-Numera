@@ -335,7 +335,7 @@ public sealed class SqlitePaymentOrderRepository : IPaymentOrderRepository
         command.Parameters.AddWithValue(
             "$policyVersion",
             order.PaymentNetworkPolicyVersionId is { } version
-                ? SqliteValueMapper.ToBlob(version)
+                ? SqliteValueMapper.ToBlob(version.Value)
                 : DBNull.Value);
         command.Parameters.AddWithValue("$memo", (object?)order.Memo ?? DBNull.Value);
         command.Parameters.AddWithValue("$status", order.Status.ToToken());
@@ -357,7 +357,9 @@ public sealed class SqlitePaymentOrderRepository : IPaymentOrderRepository
         reader.GetString(7),
         PaymentOrderCatalog.ParseSettlementModeToken(reader.GetString(8)),
         PaymentOrderCatalog.ParsePostingPolicyToken(reader.GetString(9)),
-        reader.IsDBNull(10) ? null : SqliteValueMapper.ReadEntityId(reader, 10),
+        reader.IsDBNull(10)
+            ? null
+            : PaymentNetworkPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 10)),
         reader.IsDBNull(11) ? null : reader.GetString(11),
         PaymentOrderCatalog.ParseStatusToken(reader.GetString(12)),
         reader.IsDBNull(13) ? null : SqliteValueMapper.ReadTimestamp(reader, 13),

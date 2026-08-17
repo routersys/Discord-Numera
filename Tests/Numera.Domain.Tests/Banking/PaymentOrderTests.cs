@@ -126,7 +126,7 @@ public sealed class PaymentOrderTests
             "INTERNAL_TRANSFER",
             SettlementMode.Internal,
             BeneficiaryPostingPolicy.ImmediateAfterAcceptance,
-            EntityIdValue.FromBits(9),
+            PaymentNetworkPolicyVersionId.FromValue(EntityIdValue.FromBits(9)),
             memo: null,
             CreatedAt));
 

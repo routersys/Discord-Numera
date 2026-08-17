@@ -55,7 +55,7 @@ public sealed class PaymentOrder : VersionedEntity
         string method,
         SettlementMode settlementMode,
         BeneficiaryPostingPolicy beneficiaryPostingPolicy,
-        EntityIdValue? paymentNetworkPolicyVersionId,
+        PaymentNetworkPolicyVersionId? paymentNetworkPolicyVersionId,
         string? memo,
         PaymentOrderStatus status,
         UtcTimestamp? beneficiaryPostedAt,
@@ -104,7 +104,7 @@ public sealed class PaymentOrder : VersionedEntity
 
     public BeneficiaryPostingPolicy BeneficiaryPostingPolicy { get; }
 
-    public EntityIdValue? PaymentNetworkPolicyVersionId { get; }
+    public PaymentNetworkPolicyVersionId? PaymentNetworkPolicyVersionId { get; }
 
     public string? Memo { get; }
 
@@ -135,7 +135,7 @@ public sealed class PaymentOrder : VersionedEntity
         string method,
         SettlementMode settlementMode,
         BeneficiaryPostingPolicy beneficiaryPostingPolicy,
-        EntityIdValue? paymentNetworkPolicyVersionId,
+        PaymentNetworkPolicyVersionId? paymentNetworkPolicyVersionId,
         string? memo,
         UtcTimestamp createdAt)
     {
@@ -187,7 +187,7 @@ public sealed class PaymentOrder : VersionedEntity
         string method,
         SettlementMode settlementMode,
         BeneficiaryPostingPolicy beneficiaryPostingPolicy,
-        EntityIdValue? paymentNetworkPolicyVersionId,
+        PaymentNetworkPolicyVersionId? paymentNetworkPolicyVersionId,
         string? memo,
         PaymentOrderStatus status,
         UtcTimestamp? beneficiaryPostedAt,
@@ -329,14 +329,14 @@ public sealed class PaymentOrder : VersionedEntity
     private static void EnsurePolicySnapshot(
         SettlementMode settlementMode,
         BeneficiaryPostingPolicy beneficiaryPostingPolicy,
-        EntityIdValue? paymentNetworkPolicyVersionId)
+        PaymentNetworkPolicyVersionId? paymentNetworkPolicyVersionId)
     {
         bool consistent = settlementMode switch
         {
             SettlementMode.Internal => paymentNetworkPolicyVersionId is null
                 && beneficiaryPostingPolicy == BeneficiaryPostingPolicy.ImmediateAfterAcceptance,
-            SettlementMode.Rtgs => paymentNetworkPolicyVersionId is null
-                && beneficiaryPostingPolicy == BeneficiaryPostingPolicy.AfterFinalSettlement,
+            SettlementMode.Rtgs =>
+                beneficiaryPostingPolicy == BeneficiaryPostingPolicy.AfterFinalSettlement,
             SettlementMode.Clearing => paymentNetworkPolicyVersionId is not null
                 && beneficiaryPostingPolicy is BeneficiaryPostingPolicy.AfterFinalSettlement
                     or BeneficiaryPostingPolicy.GuaranteedPreCredit,
