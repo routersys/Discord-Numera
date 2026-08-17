@@ -14,8 +14,10 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
     private readonly IDiscordCredentialProvider credentials;
     private readonly IDiscordDiagnostics diagnostics;
     private readonly ITextCatalog catalog;
+    private readonly IApplicationCommandSynchronizer synchronizer;
 
     private bool subscribed;
+    private int synchronizationStarted;
 
     internal DiscordGatewayConnection(
         DiscordSocketClient client,
@@ -23,7 +25,8 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
         DiscordInteractionRouter router,
         IDiscordCredentialProvider credentials,
         IDiscordDiagnostics diagnostics,
-        ITextCatalog catalog)
+        ITextCatalog catalog,
+        IApplicationCommandSynchronizer synchronizer)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(interactionService);
@@ -31,6 +34,7 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
         ArgumentNullException.ThrowIfNull(credentials);
         ArgumentNullException.ThrowIfNull(diagnostics);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(synchronizer);
 
         this.client = client;
         this.interactionService = interactionService;
@@ -38,6 +42,7 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
         this.credentials = credentials;
         this.diagnostics = diagnostics;
         this.catalog = catalog;
+        this.synchronizer = synchronizer;
     }
 
     public async Task LoginAsync(CancellationToken cancellationToken)
@@ -102,8 +107,30 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
     private Task OnInteractionExecutedAsync(ICommandInfo command, IInteractionContext context, IResult result) =>
         router.HandleExecutedAsync(context.Interaction, result);
 
+    internal async Task SynchronizeCommandsOnceAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.CompareExchange(ref synchronizationStarted, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            DiscordCommandSyncOutcome outcome =
+                await synchronizer.SynchronizeAsync(cancellationToken).ConfigureAwait(false);
+
+            diagnostics.CommandSyncCompleted(outcome);
+        }
+        catch (Exception exception)
+        {
+            diagnostics.CommandSyncFailed(exception);
+        }
+    }
+
     private async Task OnReadyAsync()
     {
+        await SynchronizeCommandsOnceAsync(CancellationToken.None).ConfigureAwait(false);
+
         await client
             .SetGameAsync(
                 catalog.Resolve(TextCatalogKeys.PresenceActivity),

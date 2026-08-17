@@ -18,6 +18,11 @@ public sealed record DiscordInteractionCorrelation(
 
 public sealed record DiscordCommandSyncOutcome(int Created, int Edited, int Deleted, int Unchanged);
 
+public sealed record DiscordCommandRegistrationOptions(
+    bool UseGuildRegistration,
+    ulong TestGuildId,
+    ulong ControlGuildId);
+
 public interface IDiscordDiagnostics
 {
     IDisposable BeginInteractionScope(DiscordInteractionCorrelation correlation);
