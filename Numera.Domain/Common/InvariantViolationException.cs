@@ -89,4 +89,10 @@ public static class InvariantViolationCode
     public const string DepositAccountStatusUnknown = "DEPOSIT_ACCOUNT_STATUS_UNKNOWN";
     public const string ClosureReasonUnknown = "CLOSURE_REASON_UNKNOWN";
     public const string ClosureReasonInconsistent = "CLOSURE_REASON_INCONSISTENT";
+    public const string BusinessOperationTransitionInvalid = "BUSINESS_OPERATION_TRANSITION_INVALID";
+    public const string IdempotencyKeyInvalid = "IDEMPOTENCY_KEY_INVALID";
+    public const string OutboxTransitionInvalid = "OUTBOX_TRANSITION_INVALID";
+    public const string OutboxStatusUnknown = "OUTBOX_STATUS_UNKNOWN";
+    public const string OutboxAttemptExhausted = "OUTBOX_ATTEMPT_EXHAUSTED";
+    public const string OutboxPayloadInvalid = "OUTBOX_PAYLOAD_INVALID";
 }
