@@ -4,12 +4,17 @@ public readonly struct AccountNumber : IEquatable<AccountNumber>
 {
     public const int MinimumLength = 6;
     public const int MaximumLength = 16;
+    public const int SuffixLength = 4;
 
     private readonly string value;
 
     private AccountNumber(string value) => this.value = value;
 
     public string Value => value ?? string.Empty;
+
+    public string Suffix => Value is { Length: >= SuffixLength } number
+        ? number[^SuffixLength..]
+        : Value;
 
     public static bool IsValid(ReadOnlySpan<char> candidate) =>
         AsciiDigitCode.IsValid(candidate, MinimumLength, MaximumLength);

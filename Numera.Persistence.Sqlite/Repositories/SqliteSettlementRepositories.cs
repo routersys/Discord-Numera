@@ -93,6 +93,83 @@ public sealed class SqliteSettlementInstructionRepository : ISettlementInstructi
         reader.GetInt64(10));
 }
 
+public sealed class SqlitePaymentPreferenceRepository : IPaymentPreferenceRepository
+{
+    private const string Columns = """
+        payment_preference_id, customer_account_id, preference_kind, deposit_account_id,
+        disabled_at, created_at, version
+        """;
+
+    private readonly SqliteUnitOfWork unitOfWork;
+
+    internal SqlitePaymentPreferenceRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
+
+    public void Add(PaymentPreference preference)
+    {
+        ArgumentNullException.ThrowIfNull(preference);
+
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            INSERT INTO payment_preferences({Columns})
+            VALUES($id, $customer, $kind, $deposit, $disabled, $created, $version);
+            """);
+        Bind(command, preference);
+        command.ExecuteNonQuery();
+    }
+
+    public void Update(PaymentPreference preference)
+    {
+        ArgumentNullException.ThrowIfNull(preference);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE payment_preferences
+            SET deposit_account_id = $deposit, disabled_at = $disabled, version = $version
+            WHERE payment_preference_id = $id AND version = $expected;
+            """);
+        Bind(command, preference);
+        command.Parameters.AddWithValue("$expected", preference.PersistedVersion);
+
+        if (command.ExecuteNonQuery() != 1)
+        {
+            throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
+        }
+    }
+
+    public PaymentPreference? Find(CustomerAccountId customerAccountId, PaymentPreferenceKind kind)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM payment_preferences
+            WHERE customer_account_id = $customer AND preference_kind = $kind;
+            """);
+        command.Parameters.AddWithValue("$customer", SqliteValueMapper.ToBlob(customerAccountId.Value));
+        command.Parameters.AddWithValue("$kind", kind.ToToken());
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read()
+            ? PaymentPreference.Rehydrate(
+                PaymentPreferenceId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                CustomerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                PaymentPreferenceCatalog.ParseToken(reader.GetString(2)),
+                DepositAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                SqliteValueMapper.ReadNullableTimestamp(reader, 4),
+                SqliteValueMapper.ReadTimestamp(reader, 5),
+                reader.GetInt64(6))
+            : null;
+    }
+
+    private static void Bind(SqliteCommand command, PaymentPreference preference)
+    {
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(preference.Id.Value));
+        command.Parameters.AddWithValue(
+            "$customer", SqliteValueMapper.ToBlob(preference.CustomerAccountId.Value));
+        command.Parameters.AddWithValue("$kind", preference.Kind.ToToken());
+        command.Parameters.AddWithValue(
+            "$deposit", SqliteValueMapper.ToBlob(preference.DepositAccountId.Value));
+        command.Parameters.AddWithValue("$disabled", SqliteValueMapper.ToParameter(preference.DisabledAt));
+        command.Parameters.AddWithValue("$created", preference.CreatedAt.UnixMilliseconds);
+        command.Parameters.AddWithValue("$version", preference.Version);
+    }
+}
+
 public sealed class SqliteSettlementParticipationRepository : ISettlementParticipationRepository
 {
     private readonly SqliteUnitOfWork unitOfWork;

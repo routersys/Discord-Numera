@@ -112,6 +112,8 @@ public interface IBankingUnitOfWork
     ISettlementParticipationRepository SettlementParticipations { get; }
 
     ICentralBankSettlementAccountRepository CentralBankSettlementAccounts { get; }
+
+    IPaymentPreferenceRepository PaymentPreferences { get; }
 }
 
 public interface IBankingWriteGateway
@@ -269,6 +271,17 @@ public interface ISettlementInstructionRepository
 
     Numera.Domain.Banking.SettlementInstruction? FindByBusinessOperation(
         BusinessOperationId businessOperationId);
+}
+
+public interface IPaymentPreferenceRepository
+{
+    void Add(Numera.Domain.Banking.PaymentPreference preference);
+
+    void Update(Numera.Domain.Banking.PaymentPreference preference);
+
+    Numera.Domain.Banking.PaymentPreference? Find(
+        CustomerAccountId customerAccountId,
+        Numera.Domain.Banking.PaymentPreferenceKind kind);
 }
 
 public interface ISettlementParticipationRepository

@@ -28,10 +28,24 @@ public sealed record PaymentOrderView(
     MoneyMinor SourcePostedBalance,
     MoneyMinor SourceAvailableBalance);
 
+public sealed record SetPaymentPreferenceCommand(
+    CustomerAccountId CustomerAccountId,
+    PaymentPreferenceKind Kind,
+    DepositAccountId DepositAccountId);
+
+public sealed record PaymentPreferenceView(
+    PaymentPreferenceKind Kind,
+    DepositAccountId DepositAccountId,
+    string AccountNumberSuffix);
+
 public interface IPaymentApplicationService
 {
     Task<Result<PaymentOrderView>> CreatePaymentOrderAsync(
         CreatePaymentOrderCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<PaymentPreferenceView>> SetPaymentPreferenceAsync(
+        SetPaymentPreferenceCommand command,
         CancellationToken cancellationToken);
 }
 
@@ -123,6 +137,80 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         return await writeGateway.ExecuteAsync(
             unitOfWork => PostBeneficiaryCredit(unitOfWork, orderId, idempotencyKey),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<Result<PaymentPreferenceView>> SetPaymentPreferenceAsync(
+        SetPaymentPreferenceCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => SetPaymentPreference(unitOfWork, command),
+            cancellationToken);
+    }
+
+    private Result<PaymentPreferenceView> SetPaymentPreference(
+        IBankingUnitOfWork unitOfWork,
+        SetPaymentPreferenceCommand command)
+    {
+        if (unitOfWork.CustomerAccounts.Find(command.CustomerAccountId) is not { } customer)
+        {
+            return Result<PaymentPreferenceView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        if (customer.Status != CustomerAccountStatus.Active)
+        {
+            return Result<PaymentPreferenceView>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.CustomerAccountNotOperable);
+        }
+
+        DepositAccount? account = unitOfWork.DepositAccounts.Find(command.DepositAccountId);
+        if (account is null || account.CustomerAccountId != command.CustomerAccountId)
+        {
+            ApplicationError denied = TargetAccessPolicy.ToError(
+                TargetAccess.NotOwned,
+                BankingErrorCodes.DepositAccountNotFound,
+                BankingErrorCodes.DepositAccountNotOperable);
+
+            return Result<PaymentPreferenceView>.Failure(denied.Category, denied.Code);
+        }
+
+        AccountOperation required = command.Kind is PaymentPreferenceKind.DefaultPayment
+            or PaymentPreferenceKind.TaxPayment
+            ? AccountOperation.OutgoingTransfer
+            : AccountOperation.ExternalCredit;
+
+        if (account.Permits(required) is StatusPermission.Denied or StatusPermission.HistoryOnly)
+        {
+            return Result<PaymentPreferenceView>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.DepositAccountNotOperable);
+        }
+
+        UtcTimestamp now = clock.Now();
+        PaymentPreference? existing = unitOfWork.PaymentPreferences.Find(
+            command.CustomerAccountId, command.Kind);
+
+        if (existing is null)
+        {
+            PaymentPreference created = PaymentPreference.Select(
+                PaymentPreferenceId.FromValue(idGenerator.NextId()),
+                command.CustomerAccountId,
+                command.Kind,
+                account.Id,
+                now);
+
+            unitOfWork.PaymentPreferences.Add(created);
+        }
+        else
+        {
+            existing.Reselect(account.Id);
+            unitOfWork.PaymentPreferences.Update(existing);
+        }
+
+        return Result<PaymentPreferenceView>.Success(new PaymentPreferenceView(
+            command.Kind, account.Id, account.AccountNumber.Suffix));
     }
 
     private readonly record struct ReservedTransfer(PaymentOrderId OrderId, SettlementMode Mode);
