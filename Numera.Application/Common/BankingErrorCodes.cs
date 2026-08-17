@@ -61,6 +61,9 @@ public static class BankingErrorCodes
     public static string DailyOutgoingLimitExceeded { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 5);
 
+    public static string ActiveHoldLimitExceeded { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 6);
+
     public static string AmountLimitExceeded { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 7);
 
     public static string AvailableBalanceInsufficient { get; } = ErrorCodeFormat.Compose(ErrorCategory.InsufficientFunds, 1);

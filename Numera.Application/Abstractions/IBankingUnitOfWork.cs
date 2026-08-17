@@ -246,6 +246,8 @@ public sealed record TransferLimitSet(MoneyMinor? PerTransfer, MoneyMinor? Daily
 public interface IBankPolicyRepository
 {
     TransferLimitSet? FindTransferLimits(BankPolicyVersionId bankPolicyVersionId);
+
+    MoneyMinor? FindMaximumActiveHolds(BankPolicyVersionId bankPolicyVersionId);
 }
 
 public interface IAccountLimitPreferenceRepository

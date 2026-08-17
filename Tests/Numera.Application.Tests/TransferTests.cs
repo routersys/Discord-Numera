@@ -178,7 +178,11 @@ public sealed class TransferTests
                 """);
         }
 
-        public void PublishBankLimits(int policySeed, long? perTransfer = null, long? dailyOutgoing = null)
+        public void PublishBankLimits(
+            int policySeed,
+            long? perTransfer = null,
+            long? dailyOutgoing = null,
+            long? maximumActiveHolds = null)
         {
             Execute($"""
                 INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
@@ -191,8 +195,8 @@ public sealed class TransferTests
                     daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
                     maximum_active_holds_minor, effective_from, effective_to, version)
                 VALUES({Blob(policySeed)}, {Blob(5)}, 1, 0, 0, 0, 1, 1, 1, 1, 0, 'NONE', 1, NULL, 12,
-                    {Nullable(perTransfer)}, {Nullable(dailyOutgoing)}, NULL, NULL, NULL, NULL, NULL, NULL,
-                    1, NULL, 1);
+                    {Nullable(perTransfer)}, {Nullable(dailyOutgoing)}, NULL, NULL, NULL, NULL, NULL,
+                    {Nullable(maximumActiveHolds)}, 1, NULL, 1);
 
                 UPDATE banks SET current_policy_version_id = {Blob(policySeed)}, version = version + 1
                 WHERE bank_id = {Blob(5)};
@@ -1082,6 +1086,39 @@ public sealed class TransferTests
 
         Assert.AreEqual(1L, harness.Count("payment_orders"));
         Assert.AreEqual(300L, harness.Balance(parties.Destination.Id));
+    }
+
+    [TestMethod]
+    public async Task ActiveHoldCeilingCountsThePrincipalAndTheFee()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, maximumActiveHolds: 302);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.AccountRestricted, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.ActiveHoldLimitExceeded, result.Error.Code);
+        Assert.AreEqual(0L, harness.Count("holds"));
+        Assert.AreEqual(1_000L, harness.Balance(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task ActiveHoldCeilingAllowsExactlyTheReservedTotal()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, maximumActiveHolds: 305);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(695L, harness.Balance(parties.Source.Id));
     }
 
     private const long TwoHoursInMilliseconds = 2 * 60 * 60 * 1000;

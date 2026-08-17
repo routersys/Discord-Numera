@@ -282,6 +282,14 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         LedgerBalance sourceBalance = unitOfWork.LedgerAccounts.FindProjection(source.LedgerAccountId)
             ?? LedgerBalance.Empty;
 
+        Result holdLimit = TransferLimitPolicy.EvaluateActiveHolds(
+            unitOfWork, sourceBank, sourceBalance.HeldAmount, totalDebit);
+
+        if (!holdLimit.IsSuccess)
+        {
+            return Result<PaymentOrderId>.Failure(holdLimit.Error!);
+        }
+
         if (!sourceBalance.CanReserve(totalDebit))
         {
             return Result<PaymentOrderId>.Failure(

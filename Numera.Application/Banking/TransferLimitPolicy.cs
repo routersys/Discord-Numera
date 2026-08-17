@@ -59,6 +59,25 @@ internal static class TransferLimitPolicy
             field: null);
     }
 
+    internal static Result EvaluateActiveHolds(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        MoneyMinor alreadyHeld,
+        MoneyMinor amount)
+    {
+        if (bank.CurrentPolicyVersionId is not { } policyVersionId)
+        {
+            return Result.Failure(ErrorCategory.BankUnavailable, BankingErrorCodes.BankPolicyUnavailable);
+        }
+
+        return Translate(
+            MoneyLimit.Of(unitOfWork.BankPolicies.FindMaximumActiveHolds(policyVersionId))
+                .Evaluate(alreadyHeld, amount),
+            BankingErrorCodes.ActiveHoldLimitExceeded,
+            ErrorCategory.AccountRestricted,
+            field: null);
+    }
+
     private static Result Translate(
         LimitOutcome outcome,
         string exceededCode,

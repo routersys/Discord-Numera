@@ -55,6 +55,18 @@ public sealed class SqliteBankPolicyRepository : IBankPolicyRepository
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? TransferLimitReader.Read(reader) : null;
     }
+
+    public MoneyMinor? FindMaximumActiveHolds(BankPolicyVersionId bankPolicyVersionId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT maximum_active_holds_minor FROM bank_policy_versions
+            WHERE bank_policy_version_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(bankPolicyVersionId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() && !reader.IsDBNull(0) ? MoneyMinor.FromMinor(reader.GetInt64(0)) : null;
+    }
 }
 
 public sealed class SqliteAccountLimitPreferenceRepository : IAccountLimitPreferenceRepository
