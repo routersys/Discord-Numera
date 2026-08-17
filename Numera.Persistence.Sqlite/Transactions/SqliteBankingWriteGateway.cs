@@ -36,6 +36,8 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
         PaymentPreferences = new SqlitePaymentPreferenceRepository(unitOfWork);
         PaymentNetworks = new SqlitePaymentNetworkRepository(unitOfWork);
         Clearing = new SqliteClearingRepository(unitOfWork);
+        SystemOwners = new SqliteSystemOwnerRepository(unitOfWork);
+        GuildEconomies = new SqliteGuildEconomyRepository(unitOfWork);
     }
 
     public IPartyRepository Parties { get; }
@@ -93,6 +95,10 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
     public IPaymentNetworkRepository PaymentNetworks { get; }
 
     public IClearingRepository Clearing { get; }
+
+    public ISystemOwnerRepository SystemOwners { get; }
+
+    public IGuildEconomyRepository GuildEconomies { get; }
 }
 
 public sealed class SqliteBankingWriteGateway : IBankingWriteGateway

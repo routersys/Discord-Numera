@@ -65,6 +65,24 @@ public static class BankingErrorCodes
 
     public static string ClearingCycleNotFound { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 5);
 
+    public static string PaymentNetworkNotFound { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 6);
+
+    public static string PaymentNetworkOperatorNotFound { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.NotFound, 7);
+
+    public static string PaymentNetworkAlreadyExists { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 5);
+
+    public static string PaymentNetworkAlreadyActive { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 6);
+
+    public static string PaymentNetworkNotDraft { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 7);
+
+    public static string PaymentNetworkNotOperating { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 8);
+
+    public static string PaymentNetworkPolicyInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 8);
+
+    public static string ManagementAuthorityMissing { get; } = ErrorCodeFormat.Compose(ErrorCategory.Forbidden, 2);
+
     public static string CurrencyMismatch { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 5);
 
     public static string SelfTransferRejected { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 6);

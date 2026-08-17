@@ -117,6 +117,10 @@ public interface IBankingUnitOfWork
 
     IClearingRepository Clearing { get; }
 
+    ISystemOwnerRepository SystemOwners { get; }
+
+    IGuildEconomyRepository GuildEconomies { get; }
+
     ICentralBankSettlementAccountRepository CentralBankSettlementAccounts { get; }
 
     IPaymentPreferenceRepository PaymentPreferences { get; }
@@ -365,6 +369,28 @@ public interface IPaymentNetworkRepository
         PaymentNetworkId paymentNetworkId,
         BankId bankId,
         CurrencyId currencyId);
+
+    Numera.Domain.Banking.PaymentNetwork? Find(PaymentNetworkId paymentNetworkId);
+
+    Numera.Domain.Banking.PaymentNetwork? FindByCode(EconomyScopeId economyScopeId, string networkCode);
+
+    void Add(Numera.Domain.Banking.PaymentNetwork network);
+
+    void Update(Numera.Domain.Banking.PaymentNetwork network);
+
+    void AddPolicy(Numera.Domain.Banking.PaymentNetworkPolicyVersion policy);
+
+    long NextPolicyVersion(PaymentNetworkId paymentNetworkId);
+}
+
+public interface ISystemOwnerRepository
+{
+    bool Contains(string discordUserId);
+}
+
+public interface IGuildEconomyRepository
+{
+    string? FindGuildId(EconomyScopeId economyScopeId);
 }
 
 public interface ISettlementParticipationRepository

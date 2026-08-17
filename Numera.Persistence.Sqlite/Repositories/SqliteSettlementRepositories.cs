@@ -262,35 +262,147 @@ public sealed class SqliteCentralBankSettlementAccountRepository : ICentralBankS
 
 public sealed class SqlitePaymentNetworkRepository : IPaymentNetworkRepository
 {
+    private const string NetworkColumns = """
+        payment_network_id, economy_scope_id, network_code, operator_party_id, accounting_book_id,
+        liquid_asset_ledger_account_id, status, current_policy_version_id, version
+        """;
+
     private readonly SqliteUnitOfWork unitOfWork;
 
     internal SqlitePaymentNetworkRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
 
     public PaymentNetwork? FindRouting(EconomyScopeId economyScopeId)
     {
-        using SqliteCommand command = unitOfWork.CreateCommand("""
-            SELECT payment_network_id, economy_scope_id, network_code, operator_party_id, accounting_book_id,
-                liquid_asset_ledger_account_id, status, current_policy_version_id, version
-            FROM payment_networks
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {NetworkColumns} FROM payment_networks
             WHERE economy_scope_id = $scope AND status = 'ACTIVE';
             """);
         command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
 
         using SqliteDataReader reader = command.ExecuteReader();
-        return reader.Read()
-            ? PaymentNetwork.Rehydrate(
-                PaymentNetworkId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
-                EconomyScopeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
-                reader.GetString(2),
-                PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
-                AccountingBookId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
-                LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
-                PaymentNetworkCatalog.ParseToken(reader.GetString(6)),
-                reader.IsDBNull(7)
-                    ? null
-                    : PaymentNetworkPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
-                reader.GetInt64(8))
-            : null;
+        return reader.Read() ? ReadNetwork(reader) : null;
+    }
+
+    private static PaymentNetwork ReadNetwork(SqliteDataReader reader) => PaymentNetwork.Rehydrate(
+        PaymentNetworkId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+        EconomyScopeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+        reader.GetString(2),
+        PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+        AccountingBookId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+        LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+        PaymentNetworkCatalog.ParseToken(reader.GetString(6)),
+        reader.IsDBNull(7)
+            ? null
+            : PaymentNetworkPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
+        reader.GetInt64(8));
+
+    public PaymentNetwork? Find(PaymentNetworkId paymentNetworkId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {NetworkColumns} FROM payment_networks WHERE payment_network_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(paymentNetworkId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? ReadNetwork(reader) : null;
+    }
+
+    public PaymentNetwork? FindByCode(EconomyScopeId economyScopeId, string networkCode)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {NetworkColumns} FROM payment_networks
+            WHERE economy_scope_id = $scope AND network_code = $code;
+            """);
+        command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
+        command.Parameters.AddWithValue("$code", networkCode);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? ReadNetwork(reader) : null;
+    }
+
+    public void Add(PaymentNetwork network)
+    {
+        ArgumentNullException.ThrowIfNull(network);
+
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            INSERT INTO payment_networks({NetworkColumns})
+            VALUES($id, $scope, $code, $operator, $book, $asset, $status, $policy, $version);
+            """);
+        BindNetwork(command, network);
+        command.ExecuteNonQuery();
+    }
+
+    public void Update(PaymentNetwork network)
+    {
+        ArgumentNullException.ThrowIfNull(network);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE payment_networks
+            SET status = $status, current_policy_version_id = $policy, version = $version
+            WHERE payment_network_id = $id AND version = $expected;
+            """);
+        BindNetwork(command, network);
+        command.Parameters.AddWithValue("$expected", network.PersistedVersion);
+
+        if (command.ExecuteNonQuery() != 1)
+        {
+            throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
+        }
+    }
+
+    public void AddPolicy(PaymentNetworkPolicyVersion policy)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO payment_network_policy_versions(payment_network_policy_version_id, payment_network_id,
+                settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor,
+                clearing_cycle_interval_seconds, precredit_enabled, precredit_prefund_ratio_bps,
+                per_bank_precredit_exposure_limit_minor, created_at, version)
+            VALUES($id, $network, $mode, $posting, $threshold, $interval, $precredit, $ratio, $limit,
+                $created, $version);
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(policy.Id.Value));
+        command.Parameters.AddWithValue("$network", SqliteValueMapper.ToBlob(policy.PaymentNetworkId.Value));
+        command.Parameters.AddWithValue("$mode", policy.SettlementMode.ToToken());
+        command.Parameters.AddWithValue("$posting", policy.BeneficiaryPostingPolicy.ToToken());
+        command.Parameters.AddWithValue(
+            "$threshold", policy.RtgsThreshold is { } threshold ? threshold.Value : DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$interval", (object?)policy.ClearingCycleIntervalSeconds ?? DBNull.Value);
+        command.Parameters.AddWithValue("$precredit", policy.PrecreditEnabled ? 1 : 0);
+        command.Parameters.AddWithValue("$ratio", policy.PrecreditPrefundRatioBasisPoints);
+        command.Parameters.AddWithValue("$limit", policy.PerBankPrecreditExposureLimit.Value);
+        command.Parameters.AddWithValue("$created", policy.CreatedAt.UnixMilliseconds);
+        command.Parameters.AddWithValue("$version", policy.Version);
+        command.ExecuteNonQuery();
+    }
+
+    public long NextPolicyVersion(PaymentNetworkId paymentNetworkId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(MAX(version), 0) + 1 FROM payment_network_policy_versions
+            WHERE payment_network_id = $network;
+            """);
+        command.Parameters.AddWithValue("$network", SqliteValueMapper.ToBlob(paymentNetworkId.Value));
+
+        return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static void BindNetwork(SqliteCommand command, PaymentNetwork network)
+    {
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(network.Id.Value));
+        command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(network.EconomyScopeId.Value));
+        command.Parameters.AddWithValue("$code", network.NetworkCode);
+        command.Parameters.AddWithValue("$operator", SqliteValueMapper.ToBlob(network.OperatorPartyId.Value));
+        command.Parameters.AddWithValue("$book", SqliteValueMapper.ToBlob(network.AccountingBookId.Value));
+        command.Parameters.AddWithValue(
+            "$asset", SqliteValueMapper.ToBlob(network.LiquidAssetLedgerAccountId.Value));
+        command.Parameters.AddWithValue("$status", network.Status.ToToken());
+        command.Parameters.AddWithValue(
+            "$policy",
+            network.CurrentPolicyVersionId is { } policy
+                ? SqliteValueMapper.ToBlob(policy.Value)
+                : DBNull.Value);
+        command.Parameters.AddWithValue("$version", network.Version);
     }
 
     public PaymentNetworkPrefund? FindPrefund(
@@ -348,5 +460,39 @@ public sealed class SqlitePaymentNetworkRepository : IPaymentNetworkRepository
                 SqliteValueMapper.ReadTimestamp(reader, 9),
                 reader.GetInt64(10))
             : null;
+    }
+}
+
+public sealed class SqliteSystemOwnerRepository : ISystemOwnerRepository
+{
+    private readonly SqliteUnitOfWork unitOfWork;
+
+    internal SqliteSystemOwnerRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
+
+    public bool Contains(string discordUserId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT 1 FROM system_owner_identities WHERE discord_user_id = $user;
+            """);
+        command.Parameters.AddWithValue("$user", discordUserId);
+
+        return command.ExecuteScalar() is not null;
+    }
+}
+
+public sealed class SqliteGuildEconomyRepository : IGuildEconomyRepository
+{
+    private readonly SqliteUnitOfWork unitOfWork;
+
+    internal SqliteGuildEconomyRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
+
+    public string? FindGuildId(EconomyScopeId economyScopeId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT guild_id FROM guild_economies WHERE economy_scope_id = $scope AND status = 'ACTIVE';
+            """);
+        command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
+
+        return command.ExecuteScalar() as string;
     }
 }
