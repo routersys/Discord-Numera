@@ -9,6 +9,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Migrations\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Numera.Application\Numera.Application.csproj" />
     <ProjectReference Include="..\Numera.Domain\Numera.Domain.csproj" />
     <ProjectReference Include="..\Numera.Analyzers\Numera.Analyzers.csproj"
