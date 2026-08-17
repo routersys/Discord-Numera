@@ -372,6 +372,14 @@ public sealed class TransferTests
             command.ExecuteNonQuery();
         }
 
+        public byte[] ReadBlob(string sql)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = sql;
+            return (byte[])(command.ExecuteScalar() ?? Array.Empty<byte>());
+        }
+
         public long Count(string table)
         {
             using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
@@ -888,6 +896,103 @@ public sealed class TransferTests
                 SELECT status FROM business_operations
                 WHERE idempotency_scope = '{PaymentApplicationService.OperationType}';
                 """));
+    }
+
+    private static string QueuedOperationSql =>
+        "SELECT business_operation_id FROM settlement_instructions WHERE status = 'QUEUED';";
+
+    private static BusinessOperationId QueuedOperation(Harness harness) =>
+        BusinessOperationId.FromValue(EntityIdValue.FromBytes(harness.ReadBlob(QueuedOperationSql)));
+
+    [TestMethod]
+    public async Task CancellingAQueuedSettlementRestoresTheSourceCustomer()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(100);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        BusinessOperationId operation = QueuedOperation(harness);
+
+        Result<PaymentOrderView> result = await harness.Maintenance.CancelQueuedAsync(
+            operation, CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Cancelled, result.Value.Status);
+        Assert.AreEqual(1_000L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(0L, harness.Balance(remote.Id));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(SettlementPayableSeed));
+        Assert.AreEqual("CANCELLED", harness.ReadText("SELECT status FROM settlement_instructions;"));
+    }
+
+    [TestMethod]
+    public async Task CancellationIsPostedAsASeparateReversalOperation()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(100);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        BusinessOperationId operation = QueuedOperation(harness);
+        await harness.Maintenance.CancelQueuedAsync(operation, CancellationToken.None);
+
+        Assert.AreEqual(2L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(4L, harness.Count("journal_entries"));
+        Assert.AreEqual(
+            "COMMITTED",
+            harness.ReadText($"""
+                SELECT status FROM business_operations
+                WHERE idempotency_scope = '{PaymentApplicationService.ReversalOperationType}';
+                """));
+        Assert.AreEqual(
+            "COMMITTED",
+            harness.ReadText($"""
+                SELECT status FROM business_operations
+                WHERE idempotency_scope = '{PaymentApplicationService.OperationType}';
+                """));
+    }
+
+    [TestMethod]
+    public async Task CancellingTwiceHasNoAdditionalEffect()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(100);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        BusinessOperationId operation = QueuedOperation(harness);
+
+        await harness.Maintenance.CancelQueuedAsync(operation, CancellationToken.None);
+        Result<PaymentOrderView> second = await harness.Maintenance.CancelQueuedAsync(
+            operation, CancellationToken.None);
+
+        Assert.IsTrue(second.IsSuccess);
+        Assert.AreEqual(2L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(1_000L, harness.Balance(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task SettledPaymentCannotBeCancelled()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        BusinessOperationId operation = BusinessOperationId.FromValue(
+            EntityIdValue.FromBytes(harness.ReadBlob(
+                "SELECT business_operation_id FROM settlement_instructions;")));
+
+        Result<PaymentOrderView> result = await harness.Maintenance.CancelQueuedAsync(
+            operation, CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.ConcurrentModification, result.Error!.Code);
+        Assert.AreEqual(300L, harness.Balance(remote.Id));
     }
 
     [TestMethod]

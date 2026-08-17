@@ -92,6 +92,10 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     public const string SettlementDescriptionCode = "SETTLEMENT";
     public const string BeneficiaryDescriptionCode = "BENEFICIARY_CREDIT";
     public const string AcceptedEventType = "PAYMENT_ACCEPTED";
+    public const string CancelledEventType = "PAYMENT_CANCELLED";
+    public const string ReversalOperationType = "PAYMENT_REVERSAL";
+    public const string ReversalTransactionType = "RTGS_CANCELLATION";
+    public const string ReversalDescriptionCode = "REVERSAL";
 
     private const FeeChannel TransferChannel = FeeChannel.Discord;
 
@@ -1015,6 +1019,107 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             OutboxEventId.FromValue(idGenerator.NextId()),
             order.BusinessOperationId,
             CompletedEventType,
+            Payload(order),
+            now));
+
+        return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+    }
+
+    internal Result<PaymentOrderView> CancelQueuedSettlement(
+        IBankingUnitOfWork unitOfWork,
+        PaymentOrderId paymentOrderId)
+    {
+        PaymentOrder order = unitOfWork.PaymentOrders.Find(paymentOrderId)!;
+        DepositAccount source = unitOfWork.DepositAccounts.Find(order.SourceDepositAccountId)!;
+        DepositAccount destination = unitOfWork.DepositAccounts.Find(order.DestinationDepositAccountId)!;
+        Hold hold = unitOfWork.Holds.FindByBusinessOperation(order.BusinessOperationId)!;
+        MoneyMinor feeAmount = hold.Amount.Subtract(order.Amount);
+
+        if (order.Status == PaymentOrderStatus.Cancelled)
+        {
+            return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+        }
+
+        SettlementInstruction? instruction =
+            unitOfWork.SettlementInstructions.FindByBusinessOperation(order.BusinessOperationId);
+
+        if (order.Status != PaymentOrderStatus.Queued ||
+            instruction is null ||
+            instruction.Status != SettlementInstructionStatus.Queued)
+        {
+            return Conflict();
+        }
+
+        Bank bank = unitOfWork.Banks.Find(source.BankId)!;
+        UtcTimestamp now = clock.Now();
+        BusinessDate businessDate = BusinessDateOf(now);
+
+        if (unitOfWork.AccountingPeriods.FindOpen(bank.GeneralLedgerBookId, businessDate) is not { } period)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        LedgerAccount? payable = unitOfWork.LedgerAccounts.FindPostingByKind(
+            bank.GeneralLedgerBookId, LedgerAccountKind.SettlementPayable, order.CurrencyId);
+
+        if (payable is null)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+        }
+
+        BusinessOperation reversal = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            ReversalOperationType,
+            bank.EconomyScopeId,
+            actorPartyId: null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(ReversalOperationType, order.Id.Value.ToString()),
+            now);
+
+        unitOfWork.BusinessOperations.Add(reversal);
+
+        LedgerAccount sourceLedger = unitOfWork.LedgerAccounts.Find(source.LedgerAccountId)!;
+
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.Institutional(payable, EntrySide.Debit, order.Amount));
+        posting.Add(PostingLine.Deposit(sourceLedger, EntrySide.Credit, order.Amount));
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                bank.GeneralLedgerBookId,
+                reversal.Id,
+                order.CurrencyId,
+                businessDate,
+                now,
+                now,
+                ReversalTransactionType,
+                ReversalDescriptionCode,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            period);
+
+        posting.ApplyProjections(unitOfWork, ordered, now);
+
+        instruction.Cancel();
+        unitOfWork.SettlementInstructions.Update(instruction);
+
+        order.Cancel();
+        unitOfWork.PaymentOrders.Update(order);
+
+        CommitOperation(unitOfWork, order.BusinessOperationId, now);
+
+        reversal.Commit(now);
+        unitOfWork.BusinessOperations.Update(reversal);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            reversal.Id,
+            CancelledEventType,
             Payload(order),
             now));
 

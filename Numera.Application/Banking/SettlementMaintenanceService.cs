@@ -50,6 +50,13 @@ public sealed class SettlementMaintenanceService
         return new SettlementMaintenanceReport(due.Value.Count, settled);
     }
 
+    public Task<Result<PaymentOrderView>> CancelQueuedAsync(
+        BusinessOperationId businessOperationId,
+        CancellationToken cancellationToken) =>
+        writeGateway.ExecuteAsync(
+            unitOfWork => Resume(unitOfWork, businessOperationId, payments.CancelQueuedSettlement),
+            cancellationToken);
+
     private async Task<bool> TrySettleAsync(
         BusinessOperationId operationId,
         CancellationToken cancellationToken)
