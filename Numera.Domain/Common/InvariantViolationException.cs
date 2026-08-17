@@ -82,4 +82,11 @@ public static class InvariantViolationCode
     public const string BankKindInconsistent = "BANK_KIND_INCONSISTENT";
     public const string RelationshipTransitionInvalid = "RELATIONSHIP_TRANSITION_INVALID";
     public const string RelationshipStatusUnknown = "RELATIONSHIP_STATUS_UNKNOWN";
+    public const string BranchCodeInvalid = "BRANCH_CODE_INVALID";
+    public const string CustomerNumberInvalid = "CUSTOMER_NUMBER_INVALID";
+    public const string AccountNumberInvalid = "ACCOUNT_NUMBER_INVALID";
+    public const string DepositAccountTransitionInvalid = "DEPOSIT_ACCOUNT_TRANSITION_INVALID";
+    public const string DepositAccountStatusUnknown = "DEPOSIT_ACCOUNT_STATUS_UNKNOWN";
+    public const string ClosureReasonUnknown = "CLOSURE_REASON_UNKNOWN";
+    public const string ClosureReasonInconsistent = "CLOSURE_REASON_INCONSISTENT";
 }
