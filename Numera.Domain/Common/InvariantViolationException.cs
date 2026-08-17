@@ -100,4 +100,13 @@ public static class InvariantViolationCode
     public const string InteractionSessionTokenInvalid = "INTERACTION_SESSION_TOKEN_INVALID";
     public const string InteractionSessionPayloadInvalid = "INTERACTION_SESSION_PAYLOAD_INVALID";
     public const string InteractionSessionExpiryInvalid = "INTERACTION_SESSION_EXPIRY_INVALID";
+    public const string PaymentOrderTransitionInvalid = "PAYMENT_ORDER_TRANSITION_INVALID";
+    public const string PaymentOrderStatusUnknown = "PAYMENT_ORDER_STATUS_UNKNOWN";
+    public const string PaymentOrderAmountInvalid = "PAYMENT_ORDER_AMOUNT_INVALID";
+    public const string PaymentOrderEndpointsInvalid = "PAYMENT_ORDER_ENDPOINTS_INVALID";
+    public const string PaymentOrderSettlementModeUnknown = "PAYMENT_ORDER_SETTLEMENT_MODE_UNKNOWN";
+    public const string PaymentOrderPostingPolicyUnknown = "PAYMENT_ORDER_POSTING_POLICY_UNKNOWN";
+    public const string PaymentOrderPolicySnapshotInconsistent = "PAYMENT_ORDER_POLICY_SNAPSHOT_INCONSISTENT";
+    public const string PaymentOrderFinalityInconsistent = "PAYMENT_ORDER_FINALITY_INCONSISTENT";
+    public const string PaymentOrderMemoInvalid = "PAYMENT_ORDER_MEMO_INVALID";
 }
