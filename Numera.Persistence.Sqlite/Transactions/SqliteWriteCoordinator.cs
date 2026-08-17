@@ -56,6 +56,18 @@ public sealed class SqliteWriteCoordinator : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
+        return ExecuteWithDecisionAsync(
+            lane,
+            unitOfWork => WriteDecision<TResult>.Commit(operation(unitOfWork)),
+            cancellationToken);
+    }
+
+    public Task<WriteOutcome<TResult>> ExecuteWithDecisionAsync<TResult>(
+        WriteLane lane,
+        Func<SqliteUnitOfWork, WriteDecision<TResult>> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
         ObjectDisposedException.ThrowIf(disposed, this);
 
         if (cancellationToken.IsCancellationRequested)
@@ -243,11 +255,13 @@ public sealed class SqliteWriteCoordinator : IAsyncDisposable
 
     private sealed class WriteRequest<TResult> : WriteRequest
     {
-        private readonly Func<SqliteUnitOfWork, TResult> operation;
+        private readonly Func<SqliteUnitOfWork, WriteDecision<TResult>> operation;
         private readonly TaskCompletionSource<WriteOutcome<TResult>> completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public WriteRequest(Func<SqliteUnitOfWork, TResult> operation, CancellationToken cancellationToken)
+        public WriteRequest(
+            Func<SqliteUnitOfWork, WriteDecision<TResult>> operation,
+            CancellationToken cancellationToken)
         {
             this.operation = operation;
             CancellationToken = cancellationToken;
@@ -262,10 +276,17 @@ public sealed class SqliteWriteCoordinator : IAsyncDisposable
             using SqliteConnection connection = connectionFactory.OpenRuntimeConnection();
             using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
 
-            TResult result = operation(new SqliteUnitOfWork(connection, transaction));
-            transaction.Commit();
+            WriteDecision<TResult> decision = operation(new SqliteUnitOfWork(connection, transaction));
 
-            completion.TrySetResult(WriteOutcome<TResult>.Committed(result));
+            if (decision.ShouldCommit)
+            {
+                transaction.Commit();
+                completion.TrySetResult(WriteOutcome<TResult>.Committed(decision.Value));
+                return;
+            }
+
+            transaction.Rollback();
+            completion.TrySetResult(WriteOutcome<TResult>.RolledBack(decision.Value));
         }
 
         public override void CancelBeforeExecution() =>

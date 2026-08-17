@@ -20,6 +20,11 @@ public sealed class FinancialWriteCoordinator
         CancellationToken cancellationToken) =>
         inner.ExecuteAsync(WriteLane.Background, WrapWithInvariantCheck(operation), cancellationToken);
 
+    public Task<WriteOutcome<TResult>> ExecuteWithDecisionAsync<TResult>(
+        Func<SqliteUnitOfWork, WriteDecision<TResult>> operation,
+        CancellationToken cancellationToken) =>
+        inner.ExecuteWithDecisionAsync(WriteLane.Foreground, WrapWithInvariantCheck(operation), cancellationToken);
+
     private static Func<SqliteUnitOfWork, TResult> WrapWithInvariantCheck<TResult>(
         Func<SqliteUnitOfWork, TResult> operation)
     {
@@ -30,6 +35,24 @@ public sealed class FinancialWriteCoordinator
             TResult result = operation(unitOfWork);
             LedgerInvariantGuard.EnsureSatisfied(unitOfWork);
             return result;
+        };
+    }
+
+    private static Func<SqliteUnitOfWork, WriteDecision<TResult>> WrapWithInvariantCheck<TResult>(
+        Func<SqliteUnitOfWork, WriteDecision<TResult>> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return unitOfWork =>
+        {
+            WriteDecision<TResult> decision = operation(unitOfWork);
+
+            if (decision.ShouldCommit)
+            {
+                LedgerInvariantGuard.EnsureSatisfied(unitOfWork);
+            }
+
+            return decision;
         };
     }
 }
