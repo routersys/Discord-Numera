@@ -19,7 +19,7 @@ public sealed class FinancialWriteCoordinatorTests
     private static SqliteRetryPolicy Policy() =>
         new(maximumAttempts: 3, baseDelayMilliseconds: 1, jitterMillisecondsProvider: static () => 0);
 
-    private static string Blob(int seed) => $"x'{seed:x2}{new string('0', 30)}'";
+    private static string Blob(int seed) => $"x'{new string('0', 30)}{seed:x2}'";
 
     private static void Execute(SqliteDatabaseFixture fixture, string sql)
     {

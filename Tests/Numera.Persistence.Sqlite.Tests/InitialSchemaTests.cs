@@ -59,7 +59,7 @@ public sealed class InitialSchemaTests
     private const string EmptyJson = "{}";
 
     private static string Blob(int seed) =>
-        $"x'{seed:x2}{new string('0', 30)}'";
+        $"x'{new string('0', 30)}{seed:x2}'";
 
     [TestMethod]
     public void EmbeddedCatalogContainsInitialMigration()
