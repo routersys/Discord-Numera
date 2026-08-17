@@ -65,4 +65,14 @@ public static class InvariantViolationCode
     public const string HoldNotExpirable = "HOLD_NOT_EXPIRABLE";
     public const string HoldStatusUnknown = "HOLD_STATUS_UNKNOWN";
     public const string StateTransitionSelfLoop = "STATE_TRANSITION_SELF_LOOP";
+    public const string EntityVersionInvalid = "ENTITY_VERSION_INVALID";
+    public const string PublicHandleInvalid = "PUBLIC_HANDLE_INVALID";
+    public const string DisplayNameInvalid = "DISPLAY_NAME_INVALID";
+    public const string CustomerAccountTransitionInvalid = "CUSTOMER_ACCOUNT_TRANSITION_INVALID";
+    public const string CustomerAccountStatusUnknown = "CUSTOMER_ACCOUNT_STATUS_UNKNOWN";
+    public const string DiscordIdentityLinkTransitionInvalid = "DISCORD_IDENTITY_LINK_TRANSITION_INVALID";
+    public const string DiscordIdentityLinkStatusUnknown = "DISCORD_IDENTITY_LINK_STATUS_UNKNOWN";
+    public const string DiscordUserIdInvalid = "DISCORD_USER_ID_INVALID";
+    public const string PartyTransitionInvalid = "PARTY_TRANSITION_INVALID";
+    public const string PartyTypeUnknown = "PARTY_TYPE_UNKNOWN";
 }
