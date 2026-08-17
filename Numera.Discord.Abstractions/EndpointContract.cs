@@ -92,7 +92,11 @@ public interface IEconomyEndpoint;
 
 public sealed class EconomyAutocompleteOption
 {
-    public EconomyAutocompleteOption(string name, string value)
+    public const int MinimumNameLength = 1;
+    public const int MaximumNameLength = 100;
+    public const int MaximumValueLength = 100;
+
+    private EconomyAutocompleteOption(string name, string value)
     {
         Name = name;
         Value = value;
@@ -101,4 +105,34 @@ public sealed class EconomyAutocompleteOption
     public string Name { get; }
 
     public string Value { get; }
+
+    public static bool IsAcceptable(string? name, string? value) =>
+        name is not null
+        && value is not null
+        && name.Length >= MinimumNameLength
+        && name.Length <= MaximumNameLength
+        && value.Length <= MaximumValueLength;
+
+    public static bool TryCreate(string? name, string? value, out EconomyAutocompleteOption? option)
+    {
+        if (!IsAcceptable(name, value))
+        {
+            option = null;
+            return false;
+        }
+
+        option = new EconomyAutocompleteOption(name!, value!);
+        return true;
+    }
+
+    public static EconomyAutocompleteOption Create(string name, string value) =>
+        TryCreate(name, value, out EconomyAutocompleteOption? option)
+            ? option!
+            : throw new ArgumentException(AutocompleteFailure.OptionOutOfRange, nameof(name));
+}
+
+public static class AutocompleteFailure
+{
+    public const string OptionOutOfRange =
+        "Autocomplete Option の名前は1文字以上100文字以下、値は100文字以下でなければなりません。";
 }
