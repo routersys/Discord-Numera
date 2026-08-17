@@ -60,6 +60,12 @@ public static class BankingErrorCodes
     public static string SettlementAccountUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 12);
 
+    public static string PaymentNetworkPolicyUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 13);
+
+    public static string ClearingSettlementUnsupported { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 14);
+
     public static string CurrencyMismatch { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 5);
 
     public static string SelfTransferRejected { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 6);

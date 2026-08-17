@@ -113,6 +113,8 @@ public interface IBankingUnitOfWork
 
     ISettlementParticipationRepository SettlementParticipations { get; }
 
+    IPaymentNetworkRepository PaymentNetworks { get; }
+
     ICentralBankSettlementAccountRepository CentralBankSettlementAccounts { get; }
 
     IPaymentPreferenceRepository PaymentPreferences { get; }
@@ -311,6 +313,14 @@ public interface IPaymentPreferenceRepository
     Numera.Domain.Banking.PaymentPreference? Find(
         CustomerAccountId customerAccountId,
         Numera.Domain.Banking.PaymentPreferenceKind kind);
+}
+
+public interface IPaymentNetworkRepository
+{
+    Numera.Domain.Banking.PaymentNetwork? FindRouting(EconomyScopeId economyScopeId);
+
+    Numera.Domain.Banking.PaymentNetworkPolicyVersion? FindPolicy(
+        PaymentNetworkPolicyVersionId paymentNetworkPolicyVersionId);
 }
 
 public interface ISettlementParticipationRepository

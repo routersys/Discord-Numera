@@ -34,6 +34,7 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
         SettlementParticipations = new SqliteSettlementParticipationRepository(unitOfWork);
         CentralBankSettlementAccounts = new SqliteCentralBankSettlementAccountRepository(unitOfWork);
         PaymentPreferences = new SqlitePaymentPreferenceRepository(unitOfWork);
+        PaymentNetworks = new SqlitePaymentNetworkRepository(unitOfWork);
     }
 
     public IPartyRepository Parties { get; }
@@ -87,6 +88,8 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
     public ICentralBankSettlementAccountRepository CentralBankSettlementAccounts { get; }
 
     public IPaymentPreferenceRepository PaymentPreferences { get; }
+
+    public IPaymentNetworkRepository PaymentNetworks { get; }
 }
 
 public sealed class SqliteBankingWriteGateway : IBankingWriteGateway

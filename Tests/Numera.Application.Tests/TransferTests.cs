@@ -406,6 +406,57 @@ public sealed class TransferTests
 
         private static string Text(string? value) => value is null ? "NULL" : $"'{value}'";
 
+        public void PublishPaymentNetwork(string settlementMode, long? rtgsThreshold)
+        {
+            Execute($"""
+                INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+                VALUES({Blob(140)}, 'SYSTEM', '清算機関', 'ACTIVE', 1, 1);
+
+                INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                    created_at, version)
+                VALUES({Blob(141)}, {Blob(140)}, 'SYSTEM', 'OPEN', 1, 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
+                    account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                    owner_reference_type, owner_reference_id, status, created_at, version)
+                VALUES({Blob(142)}, {Blob(141)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT', {Blob(2)}, 1,
+                    NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
+                    accounting_book_id, liquid_asset_ledger_account_id, status, current_policy_version_id, version)
+                VALUES({Blob(143)}, {Blob(1)}, 'ZENGIN', {Blob(140)}, {Blob(141)}, {Blob(142)}, 'DRAFT', NULL, 1);
+
+                INSERT INTO payment_network_policy_versions(payment_network_policy_version_id, payment_network_id,
+                    settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor,
+                    clearing_cycle_interval_seconds, precredit_enabled, precredit_prefund_ratio_bps,
+                    per_bank_precredit_exposure_limit_minor, created_at, version)
+                VALUES({Blob(144)}, {Blob(143)}, '{settlementMode}', 'AFTER_FINAL_SETTLEMENT',
+                    {Nullable(rtgsThreshold)},
+                    {(settlementMode == "CLEARING" ? "3600" : "NULL")}, 0, 10000, 0, 1, 1);
+
+                UPDATE payment_networks
+                SET status = 'ACTIVE', current_policy_version_id = {Blob(144)}, version = 2
+                WHERE payment_network_id = {Blob(143)};
+                """);
+        }
+
+        public void SuspendPaymentNetwork() => Execute($"""
+            UPDATE payment_networks SET status = 'SUSPENDED', version = version + 1
+            WHERE payment_network_id = {Blob(143)};
+            """);
+
+        public string? PolicyVersionOf(PaymentOrderId orderId)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT payment_network_policy_version_id FROM payment_orders WHERE payment_order_id = $id;";
+            command.Parameters.AddWithValue("$id", orderId.Value.ToByteArray());
+
+            object? value = command.ExecuteScalar();
+            return value is byte[] bytes ? Convert.ToHexString(bytes) : null;
+        }
+
         public void OverrideCalendarDay(string localDate, string dayClass) => Execute($"""
             INSERT INTO economy_calendar_overrides(economy_scope_id, local_date, day_class, description, version)
             VALUES({Blob(1)}, '{localDate}', '{dayClass}', NULL, 1);
@@ -1748,5 +1799,98 @@ public sealed class TransferTests
                 SELECT CAST(last_customer_activity_at AS TEXT) FROM deposit_accounts
                 WHERE account_number = '{parties.Source.AccountNumber}';
                 """));
+    }
+
+    [TestMethod]
+    public async Task InterbankTransferStaysRealTimeWithoutAPaymentNetwork()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
+        Assert.IsNull(harness.PolicyVersionOf(result.Value.Id));
+    }
+
+    [TestMethod]
+    public async Task RealTimeNetworkPolicyIsSnapshotOnThePaymentOrder()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        harness.PublishPaymentNetwork("RTGS", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
+        Assert.IsNotNull(harness.PolicyVersionOf(result.Value.Id));
+    }
+
+    [TestMethod]
+    public async Task AmountAtTheRealTimeThresholdBypassesClearing()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: 300);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
+    }
+
+    [TestMethod]
+    public async Task AmountBelowTheRealTimeThresholdRoutesToClearing()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: 300);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 299);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.ClearingSettlementUnsupported, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task SuspendedPaymentNetworkFallsBackToRealTimeSettlement()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        harness.SuspendPaymentNetwork();
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
+        Assert.IsNull(harness.PolicyVersionOf(result.Value.Id));
+    }
+
+    [TestMethod]
+    public async Task SameBankTransferIgnoresThePaymentNetwork()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
+        Assert.IsNull(harness.PolicyVersionOf(result.Value.Id));
     }
 }

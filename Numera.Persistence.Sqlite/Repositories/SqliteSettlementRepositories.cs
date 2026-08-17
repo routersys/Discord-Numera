@@ -259,3 +259,66 @@ public sealed class SqliteCentralBankSettlementAccountRepository : ICentralBankS
             : null;
     }
 }
+
+public sealed class SqlitePaymentNetworkRepository : IPaymentNetworkRepository
+{
+    private readonly SqliteUnitOfWork unitOfWork;
+
+    internal SqlitePaymentNetworkRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
+
+    public PaymentNetwork? FindRouting(EconomyScopeId economyScopeId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT payment_network_id, economy_scope_id, network_code, operator_party_id, accounting_book_id,
+                liquid_asset_ledger_account_id, status, current_policy_version_id, version
+            FROM payment_networks
+            WHERE economy_scope_id = $scope AND status = 'ACTIVE';
+            """);
+        command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read()
+            ? PaymentNetwork.Rehydrate(
+                PaymentNetworkId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                EconomyScopeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                reader.GetString(2),
+                PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                AccountingBookId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+                PaymentNetworkCatalog.ParseToken(reader.GetString(6)),
+                reader.IsDBNull(7)
+                    ? null
+                    : PaymentNetworkPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
+                reader.GetInt64(8))
+            : null;
+    }
+
+    public PaymentNetworkPolicyVersion? FindPolicy(PaymentNetworkPolicyVersionId paymentNetworkPolicyVersionId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT payment_network_policy_version_id, payment_network_id, settlement_mode,
+                beneficiary_posting_policy, rtgs_threshold_minor, clearing_cycle_interval_seconds,
+                precredit_enabled, precredit_prefund_ratio_bps, per_bank_precredit_exposure_limit_minor,
+                created_at, version
+            FROM payment_network_policy_versions
+            WHERE payment_network_policy_version_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(paymentNetworkPolicyVersionId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read()
+            ? PaymentNetworkPolicyVersion.Create(
+                PaymentNetworkPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                PaymentNetworkId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                PaymentOrderCatalog.ParseSettlementModeToken(reader.GetString(2)),
+                PaymentOrderCatalog.ParsePostingPolicyToken(reader.GetString(3)),
+                reader.IsDBNull(4) ? null : MoneyMinor.FromMinor(reader.GetInt64(4)),
+                reader.IsDBNull(5) ? null : reader.GetInt32(5),
+                reader.GetInt64(6) == 1,
+                reader.GetInt32(7),
+                MoneyMinor.FromMinor(reader.GetInt64(8)),
+                SqliteValueMapper.ReadTimestamp(reader, 9),
+                reader.GetInt64(10))
+            : null;
+    }
+}

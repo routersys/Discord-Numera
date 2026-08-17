@@ -441,6 +441,16 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 ErrorCategory.AccountRestricted, BankingErrorCodes.DestinationAccountNotOperable);
         }
 
+        Result<PaymentRoute> routed = PaymentRoutePolicy.Resolve(
+            unitOfWork, command.EconomyScopeId, interbank, request.Amount);
+
+        if (!routed.IsSuccess)
+        {
+            return Result<ReservedTransfer>.Failure(routed.Error!);
+        }
+
+        PaymentRoute route = routed.Value;
+
         if (interbank)
         {
             Result eligibility = InterbankSettlementPolicy.EnsureEligible(
@@ -530,12 +540,10 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             destination.Id,
             source.CurrencyId,
             request.Amount,
-            interbank ? InterbankPaymentMethod : PaymentMethod,
-            interbank ? SettlementMode.Rtgs : SettlementMode.Internal,
-            interbank
-                ? BeneficiaryPostingPolicy.AfterFinalSettlement
-                : BeneficiaryPostingPolicy.ImmediateAfterAcceptance,
-            paymentNetworkPolicyVersionId: null,
+            route.Method,
+            route.Mode,
+            route.PostingPolicy,
+            route.PolicyVersionId,
             command.Memo,
             now);
 
