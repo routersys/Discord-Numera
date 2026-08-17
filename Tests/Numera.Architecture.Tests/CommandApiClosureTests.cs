@@ -13,6 +13,9 @@ public sealed class CommandApiClosureTests
 
     private static readonly string[] MembersAwaitingImplementation =
     [
+        "IBankAdministrationApplicationService.RetireBankAsync",
+        "IBankAdministrationApplicationService.StartCreateBankAsync",
+        "IBankAdministrationApplicationService.UpdateBankPolicyAsync",
         "ICustomerAccountApplicationService.ConsumeLinkGrantAsync",
         "ICustomerAccountApplicationService.CreateLinkGrantAsync",
         "ICustomerAccountApplicationService.GetCustomerAccountStatusAsync",

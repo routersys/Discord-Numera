@@ -1,4 +1,3 @@
-using System.Globalization;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
 using Numera.Domain.Accounting;
@@ -32,8 +31,9 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
 {
     public const string OperationType = "ACCOUNT_OPEN";
     public const string OpenedEventType = "DEPOSIT_ACCOUNT_OPENED";
-    public const string DemandDepositControlCode = "2000";
-    public const int NumberDigits = 10;
+    public const string SubmittedEventType = "ACCOUNT_OPENING_SUBMITTED";
+    public const string DemandDepositControlCode = AccountOpeningWorkflow.DemandDepositControlCode;
+    public const int NumberDigits = AccountOpeningWorkflow.NumberDigits;
 
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
@@ -113,7 +113,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
         AccountProductSelection? product = unitOfWork.AccountProducts.FindDefault(bank.Id);
         if (product is null)
         {
-            return Failure(ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
+            return Failure(ErrorCategory.BankUnavailable, BankingErrorCodes.AccountProductUnavailable);
         }
 
         LedgerAccount? control = unitOfWork.LedgerAccounts.FindByCode(
@@ -125,43 +125,13 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
 
         UtcTimestamp now = clock.Now();
 
-        BankCustomerRelationship relationship = ResolveRelationship(unitOfWork, bank, customer, now);
-        if (!relationship.AllowsNewAccount)
+        Result<AccountOpeningContract?> resolved = AccountOpeningWorkflow.ResolveContract(
+            unitOfWork, command.EconomyScopeId, bank, product, control.CurrencyId, now);
+
+        if (!resolved.IsSuccess)
         {
-            return Failure(ErrorCategory.AccountRestricted, BankingErrorCodes.CustomerAccountNotOperable);
+            return Result<DepositAccountView>.Failure(resolved.Error!);
         }
-
-        AccountNumber accountNumber = AccountNumber.Parse(
-            Sequence(unitOfWork.DepositAccounts.CountByBranch(bank.Id, product.BranchId) + 1));
-
-        LedgerAccountId ledgerAccountId = LedgerAccountId.FromValue(idGenerator.NextId());
-        DepositAccountId depositAccountId = DepositAccountId.FromValue(idGenerator.NextId());
-
-        LedgerAccount postingAccount = LedgerAccount.CreatePosting(
-            ledgerAccountId,
-            bank.GeneralLedgerBookId,
-            control.Id,
-            $"{DemandDepositControlCode}-{accountNumber.Value}",
-            LedgerAccountKind.DemandDepositControl,
-            control.CurrencyId,
-            LedgerOwnerReferenceType.DepositAccount,
-            depositAccountId.Value);
-
-        DepositAccount account = DepositAccount.OpenPending(
-            depositAccountId,
-            bank.Id,
-            product.BranchId,
-            relationship.Id,
-            customer.Id,
-            control.CurrencyId,
-            product.ProductId,
-            product.ProductVersionId,
-            ledgerAccountId,
-            accountNumber,
-            publicReceivingEnabled: true,
-            now);
-
-        account.FinalizeOpening();
 
         BusinessOperation operation = BusinessOperation.Start(
             BusinessOperationId.FromValue(idGenerator.NextId()),
@@ -172,62 +142,138 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
             idempotencyKey,
             now);
 
-        unitOfWork.LedgerAccounts.Add(postingAccount);
-        unitOfWork.LedgerAccounts.UpsertProjection(ledgerAccountId, LedgerBalance.Empty, now);
-        unitOfWork.DepositAccounts.Add(account);
-        unitOfWork.BusinessOperations.Add(operation);
+        Result<AccountOpeningOutcome> outcome = resolved.Value is { } contract
+            ? OpenUnderContract(unitOfWork, bank, customer, product, control, contract, now)
+            : OpenWithoutContract(unitOfWork, bank, customer, product, control, now);
 
+        if (!outcome.IsSuccess)
+        {
+            return Result<DepositAccountView>.Failure(outcome.Error!);
+        }
+
+        unitOfWork.BusinessOperations.Add(operation);
         operation.Commit(now);
         unitOfWork.BusinessOperations.Update(operation);
+
+        Publish(unitOfWork, operation, outcome.Value, now);
+
+        return Result<DepositAccountView>.Success(ToView(bank, outcome.Value));
+    }
+
+    private Result<AccountOpeningOutcome> OpenWithoutContract(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        CustomerAccount customer,
+        AccountProductSelection product,
+        LedgerAccount control,
+        UtcTimestamp now)
+    {
+        DepositAccount account = AccountOpeningWorkflow.Provision(
+            unitOfWork, idGenerator, bank, customer, product, control, publicReceivingEnabled: true, now);
+
+        account.FinalizeOpening();
+        unitOfWork.DepositAccounts.Update(account);
+
+        return Result<AccountOpeningOutcome>.Success(new AccountOpeningOutcome(null, account, bank));
+    }
+
+    private Result<AccountOpeningOutcome> OpenUnderContract(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        CustomerAccount customer,
+        AccountProductSelection product,
+        LedgerAccount control,
+        AccountOpeningContract contract,
+        UtcTimestamp now)
+    {
+        Result eligible = AccountOpeningWorkflow.EnsureEligible(
+            unitOfWork, bank, customer, contract, control.CurrencyId, now);
+
+        if (!eligible.IsSuccess)
+        {
+            return Result<AccountOpeningOutcome>.Failure(eligible.Error!);
+        }
+
+        if (unitOfWork.BankAdministration.FindPendingOpeningApplication(bank.Id, customer.Id) is not null)
+        {
+            return Result<AccountOpeningOutcome>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.AccountOpeningApplicationAlreadyPending);
+        }
+
+        AccountOpeningApplication application = AccountOpeningWorkflow.Submit(
+            idGenerator, bank, customer, product, contract, now);
+
+        unitOfWork.BankAdministration.AddOpeningApplication(application);
+
+        if (contract.Policy.RequiresManualApproval)
+        {
+            return Result<AccountOpeningOutcome>.Success(new AccountOpeningOutcome(application, null, bank));
+        }
+
+        application.Approve(now, decidedByDiscordUserId: null);
+
+        Result<AccountOpeningOutcome> advanced = AccountOpeningWorkflow.Advance(
+            unitOfWork,
+            idGenerator,
+            bank,
+            customer,
+            product,
+            control,
+            contract,
+            application,
+            control.CurrencyId,
+            now);
+
+        if (advanced.IsSuccess)
+        {
+            unitOfWork.BankAdministration.UpdateOpeningApplication(application);
+        }
+
+        return advanced;
+    }
+
+    private void Publish(
+        IBankingUnitOfWork unitOfWork,
+        BusinessOperation operation,
+        AccountOpeningOutcome outcome,
+        UtcTimestamp now)
+    {
+        if (outcome.Account is { } account)
+        {
+            unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+                OutboxEventId.FromValue(idGenerator.NextId()),
+                operation.Id,
+                OpenedEventType,
+                $$"""{"deposit_account_id":"{{account.Id.Value}}","account_number":"{{account.AccountNumber.Value}}"}""",
+                now));
+
+            return;
+        }
 
         unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
             OutboxEventId.FromValue(idGenerator.NextId()),
             operation.Id,
-            OpenedEventType,
-            $$"""{"deposit_account_id":"{{depositAccountId.Value}}","account_number":"{{accountNumber.Value}}"}""",
+            SubmittedEventType,
+            $$"""{"account_opening_application_id":"{{outcome.Application!.Id.Value}}"}""",
             now));
-
-        return Result<DepositAccountView>.Success(new DepositAccountView(
-            account.Id,
-            bank.InstitutionCode.Value,
-            account.AccountNumber.Value,
-            account.Status,
-            MoneyMinor.Zero,
-            MoneyMinor.Zero));
     }
 
-    private BankCustomerRelationship ResolveRelationship(
-        IBankingUnitOfWork unitOfWork,
-        Bank bank,
-        CustomerAccount customer,
-        UtcTimestamp now)
-    {
-        BankCustomerRelationship? existing = unitOfWork.Relationships.Find(bank.Id, customer.PartyId);
-
-        if (existing is not null)
-        {
-            if (existing.Status == RelationshipStatus.Pending)
-            {
-                existing.Activate();
-                unitOfWork.Relationships.Update(existing);
-            }
-
-            return existing;
-        }
-
-        BankCustomerRelationship created = BankCustomerRelationship.Open(
-            BankCustomerRelationshipId.FromValue(idGenerator.NextId()),
-            bank.Id,
-            customer.PartyId,
-            CustomerNumber.Parse(Sequence(unitOfWork.Relationships.CountByBank(bank.Id) + 1)),
-            now);
-
-        unitOfWork.Relationships.Add(created);
-        created.Activate();
-        unitOfWork.Relationships.Update(created);
-
-        return created;
-    }
+    private static DepositAccountView ToView(Bank bank, AccountOpeningOutcome outcome) =>
+        outcome.Account is { } account
+            ? new DepositAccountView(
+                account.Id,
+                bank.InstitutionCode.Value,
+                account.AccountNumber.Value,
+                account.Status,
+                MoneyMinor.Zero,
+                MoneyMinor.Zero)
+            : new DepositAccountView(
+                DepositAccountId.FromValue(EntityIdValue.Empty),
+                bank.InstitutionCode.Value,
+                string.Empty,
+                DepositAccountStatus.Pending,
+                MoneyMinor.Zero,
+                MoneyMinor.Zero);
 
     private static DepositAccountView ToView(
         IBankingUnitOfWork unitOfWork,
@@ -248,7 +294,4 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
 
     private static Result<DepositAccountView> Failure(ErrorCategory category, string code) =>
         Result<DepositAccountView>.Failure(category, code);
-
-    private static string Sequence(long value) =>
-        value.ToString(CultureInfo.InvariantCulture).PadLeft(NumberDigits, '0');
 }

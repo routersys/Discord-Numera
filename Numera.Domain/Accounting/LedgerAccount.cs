@@ -88,7 +88,7 @@ public sealed class LedgerAccount
     public static LedgerAccount CreatePosting(
         LedgerAccountId id,
         AccountingBookId bookId,
-        LedgerAccountId parentAccountId,
+        LedgerAccountId? parentAccountId,
         string accountCode,
         LedgerAccountKind kind,
         CurrencyId currencyId,
