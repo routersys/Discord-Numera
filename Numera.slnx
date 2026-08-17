@@ -18,6 +18,7 @@
     <Project Path="Tests/Numera.Discord.Tests/Numera.Discord.Tests.csproj" />
     <Project Path="Tests/Numera.Generators.Tests/Numera.Generators.Tests.csproj" />
     <Project Path="Tests/Numera.Architecture.Tests/Numera.Architecture.Tests.csproj" />
+    <Project Path="Tests/Numera.Host.Tests/Numera.Host.Tests.csproj" />
   </Folder>
   <Folder Name="/Benchmarks/">
     <Project Path="Benchmarks/Numera.Benchmarks/Numera.Benchmarks.csproj" />
