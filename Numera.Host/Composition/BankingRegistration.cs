@@ -1,0 +1,44 @@
+using Microsoft.Extensions.DependencyInjection;
+using Numera.Application.Abstractions;
+using Numera.Application.Banking;
+using Numera.Application.Common;
+using Numera.Host.Configuration;
+using Numera.Host.Workers;
+using Numera.Persistence.Sqlite;
+using Numera.Persistence.Sqlite.Repositories;
+using Numera.Persistence.Sqlite.Transactions;
+
+namespace Numera.Host.Composition;
+
+internal static class BankingRegistration
+{
+    internal static IServiceCollection AddNumeraBanking(this IServiceCollection services, NumeraOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(options);
+
+        services.AddSingleton(SqliteDatabaseOptions.Create(options.DatabasePath, options.DatabaseBusyTimeoutSeconds));
+        services.AddSingleton(static provider =>
+            new SqliteConnectionFactory(provider.GetRequiredService<SqliteDatabaseOptions>()));
+        services.AddSingleton(static _ => new SqliteRetryPolicy());
+        services.AddSingleton(static provider => new SqliteWriteCoordinator(
+            provider.GetRequiredService<SqliteConnectionFactory>(),
+            provider.GetRequiredService<SqliteRetryPolicy>()));
+        services.AddSingleton(static provider =>
+            new FinancialWriteCoordinator(provider.GetRequiredService<SqliteWriteCoordinator>()));
+
+        services.AddSingleton<IClock>(static provider => new SystemClock(provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IIdGenerator, UuidVersion7IdGenerator>();
+
+        services.AddSingleton<IBankingWriteGateway>(static provider =>
+            new SqliteBankingWriteGateway(provider.GetRequiredService<FinancialWriteCoordinator>()));
+        services.AddSingleton<IBankingReadGateway>(static provider =>
+            new SqliteBankingReadGateway(provider.GetRequiredService<SqliteConnectionFactory>()));
+
+        services.AddSingleton<PaymentApplicationService>();
+        services.AddSingleton<SettlementMaintenanceService>();
+        services.AddSingleton<ISettlementMaintenanceRunner, SettlementMaintenanceRunner>();
+
+        return services;
+    }
+}
