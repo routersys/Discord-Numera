@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Numera.Host.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Numera.Discord\Numera.Discord.csproj" />
     <ProjectReference Include="..\Numera.Application\Numera.Application.csproj" />
     <ProjectReference Include="..\Numera.Persistence.Sqlite\Numera.Persistence.Sqlite.csproj" />
