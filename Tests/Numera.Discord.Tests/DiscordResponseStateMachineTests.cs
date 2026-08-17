@@ -199,14 +199,14 @@ public sealed class TextCatalogTests
 {
     private static TextCatalog Catalog() => TextCatalog.Create(new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        [TextCatalogKeys.ErrorTitle] = "処理を完了できません",
-        [TextCatalogKeys.ErrorValidation] = "{field} の入力内容を確認してください。",
-        [TextCatalogKeys.ErrorFooter] = "操作ID: {operationPublicId} / エラーコード: {errorCode}",
+        [TextCatalogKeys.ErrorValidationTitle] = "処理を完了できません",
+        [TextCatalogKeys.ErrorValidationDescription] = "{field} の入力内容を確認してください。",
+        [TextCatalogKeys.ErrorFooterWithCode] = "操作ID: {operationPublicId} / エラーコード: {errorCode}",
     });
 
     [TestMethod]
     public void RegisteredKeyIsResolved() =>
-        Assert.AreEqual("処理を完了できません", Catalog().Resolve(TextCatalogKeys.ErrorTitle));
+        Assert.AreEqual("処理を完了できません", Catalog().Resolve(TextCatalogKeys.ErrorValidationTitle));
 
     [TestMethod]
     public void MissingKeyIsRejected() =>
@@ -216,7 +216,7 @@ public sealed class TextCatalogTests
     public void PlaceholdersAreSubstituted()
     {
         string text = Catalog().Format(
-            TextCatalogKeys.ErrorFooter,
+            TextCatalogKeys.ErrorFooterWithCode,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["operationPublicId"] = "OP-1",
@@ -229,7 +229,7 @@ public sealed class TextCatalogTests
     [TestMethod]
     public void UnboundPlaceholderIsRejected() =>
         Assert.ThrowsExactly<FormatException>(() => Catalog().Format(
-            TextCatalogKeys.ErrorFooter,
+            TextCatalogKeys.ErrorFooterWithCode,
             new Dictionary<string, string>(StringComparer.Ordinal)));
 
     [TestMethod]
@@ -254,41 +254,106 @@ public sealed class TextCatalogTests
 [TestClass]
 public sealed class ErrorRendererTests
 {
-    private static ErrorRenderer Renderer() => new(TextCatalog.Create(
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [TextCatalogKeys.ErrorTitle] = "処理を完了できません",
-            [TextCatalogKeys.ErrorValidation] = "{field} の入力内容を確認してください。",
-            [TextCatalogKeys.ErrorConflict] = "同じ操作が既に完了しています。",
-            [TextCatalogKeys.ErrorUnexpected] = "システムで問題が発生しました。",
-            [TextCatalogKeys.ErrorFooter] = "操作ID: {operationPublicId} / エラーコード: {errorCode}",
-        }));
+    private static ErrorRenderer Renderer() => new(CanonicalTextCatalog.Create());
 
     [TestMethod]
-    public void ValidationErrorUsesConfiguredText()
+    public void ValidationErrorUsesCanonicalText()
     {
         RenderedError rendered = Renderer().Render(
             ApplicationError.Create(ErrorCategory.Validation, BankingErrorCodes.HandleFormatInvalid, "public_handle"),
             "OP-1");
 
-        Assert.AreEqual("処理を完了できません", rendered.Title);
-        Assert.AreEqual("public_handle の入力内容を確認してください。", rendered.Description);
-        Assert.AreEqual("操作ID: OP-1 / エラーコード: BANK-VAL-001", rendered.Footer);
+        Assert.AreEqual("入力内容を確認してください", rendered.Title);
+        Assert.AreEqual("入力内容に問題があります。表示された項目を修正してください。", rendered.Description);
+        Assert.AreEqual("操作ID: OP-1", rendered.Footer);
         Assert.AreEqual(ErrorRenderer.CanonicalErrorColor, rendered.Color);
         Assert.IsTrue(rendered.Ephemeral);
     }
 
     [TestMethod]
-    public void EveryCategoryMapsToADistinctCatalogKey()
+    public void EveryCategoryMapsToADistinctTitleKey()
     {
         HashSet<string> keys = [];
 
         foreach (ErrorCategory category in Enum.GetValues<ErrorCategory>())
         {
-            keys.Add(ErrorRenderer.CatalogKeyFor(category));
+            keys.Add(ErrorRenderer.TitleKeyFor(category));
         }
 
         Assert.AreEqual(Enum.GetValues<ErrorCategory>().Length, keys.Count);
+    }
+
+    [TestMethod]
+    public void EveryCategoryMapsToADistinctDescriptionKey()
+    {
+        HashSet<string> keys = [];
+
+        foreach (ErrorCategory category in Enum.GetValues<ErrorCategory>())
+        {
+            keys.Add(ErrorRenderer.DescriptionKeyFor(category));
+        }
+
+        Assert.AreEqual(Enum.GetValues<ErrorCategory>().Length, keys.Count);
+    }
+
+    [TestMethod]
+    public void EveryCategoryProducesADistinctTitle()
+    {
+        HashSet<string> titles = [];
+
+        foreach (ErrorCategory category in Enum.GetValues<ErrorCategory>())
+        {
+            titles.Add(CanonicalTextCatalog.Entries[ErrorRenderer.TitleKeyFor(category)]);
+        }
+
+        Assert.AreEqual(Enum.GetValues<ErrorCategory>().Length, titles.Count);
+    }
+
+    [TestMethod]
+    public void CanonicalCatalogCoversEveryCategory()
+    {
+        foreach (ErrorCategory category in Enum.GetValues<ErrorCategory>())
+        {
+            RenderedError rendered = Renderer().Render(
+                ApplicationError.Create(category, ErrorCodeFormat.Compose(category, 1)),
+                "OP-1");
+
+            Assert.IsFalse(string.IsNullOrWhiteSpace(rendered.Title));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(rendered.Description));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(rendered.Footer));
+        }
+    }
+
+    [TestMethod]
+    [DataRow(ErrorCategory.Unexpected)]
+    [DataRow(ErrorCategory.InfrastructureUnavailable)]
+    public void DiagnosticCategoriesExposeErrorCodeInFooter(ErrorCategory category)
+    {
+        RenderedError rendered = Renderer().Render(
+            ApplicationError.Create(category, ErrorCodeFormat.Compose(category, 1)),
+            "OP-9");
+
+        StringAssert.Contains(rendered.Footer, "エラーコード: ");
+        StringAssert.Contains(rendered.Footer, "操作ID: OP-9");
+    }
+
+    [TestMethod]
+    [DataRow(ErrorCategory.Validation)]
+    [DataRow(ErrorCategory.NotFound)]
+    [DataRow(ErrorCategory.Forbidden)]
+    [DataRow(ErrorCategory.Conflict)]
+    [DataRow(ErrorCategory.InsufficientFunds)]
+    [DataRow(ErrorCategory.BankUnavailable)]
+    [DataRow(ErrorCategory.AccountRestricted)]
+    [DataRow(ErrorCategory.OperationExpired)]
+    [DataRow(ErrorCategory.ConcurrencyConflict)]
+    public void OrdinaryCategoriesHideErrorCodeInFooter(ErrorCategory category)
+    {
+        RenderedError rendered = Renderer().Render(
+            ApplicationError.Create(category, ErrorCodeFormat.Compose(category, 1)),
+            "OP-3");
+
+        Assert.AreEqual("操作ID: OP-3", rendered.Footer);
     }
 
     [TestMethod]
@@ -298,7 +363,7 @@ public sealed class ErrorRendererTests
             ApplicationError.Create(ErrorCategory.Unexpected, "BANK-UNEXPECTED-001"),
             "OP-9");
 
-        Assert.AreEqual("システムで問題が発生しました。", rendered.Description);
+        Assert.AreEqual("処理中にエラーが発生しました", rendered.Title);
         Assert.IsFalse(rendered.Description.Contains("SQL", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(rendered.Description.Contains("Exception", StringComparison.OrdinalIgnoreCase));
     }
@@ -306,14 +371,7 @@ public sealed class ErrorRendererTests
     [TestMethod]
     public void ErrorColorIsConfigurable()
     {
-        ErrorRenderer renderer = new(
-            TextCatalog.Create(new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [TextCatalogKeys.ErrorTitle] = "題名",
-                [TextCatalogKeys.ErrorConflict] = "本文",
-                [TextCatalogKeys.ErrorFooter] = "脚注",
-            }),
-            errorColor: 0x112233);
+        ErrorRenderer renderer = new(CanonicalTextCatalog.Create(), errorColor: 0x112233);
 
         RenderedError rendered = renderer.Render(
             ApplicationError.Create(ErrorCategory.Conflict, BankingErrorCodes.HandleAlreadyTaken), "OP-2");
