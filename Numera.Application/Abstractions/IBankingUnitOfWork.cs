@@ -106,6 +106,12 @@ public interface IBankingUnitOfWork
     IBankPolicyRepository BankPolicies { get; }
 
     IAccountLimitPreferenceRepository AccountLimitPreferences { get; }
+
+    ISettlementInstructionRepository SettlementInstructions { get; }
+
+    ISettlementParticipationRepository SettlementParticipations { get; }
+
+    ICentralBankSettlementAccountRepository CentralBankSettlementAccounts { get; }
 }
 
 public interface IBankingWriteGateway
@@ -253,6 +259,31 @@ public interface IBankPolicyRepository
 public interface IAccountLimitPreferenceRepository
 {
     TransferLimitSet? FindTransferLimits(DepositAccountId depositAccountId);
+}
+
+public interface ISettlementInstructionRepository
+{
+    void Add(Numera.Domain.Banking.SettlementInstruction instruction);
+
+    void Update(Numera.Domain.Banking.SettlementInstruction instruction);
+
+    Numera.Domain.Banking.SettlementInstruction? FindByBusinessOperation(
+        BusinessOperationId businessOperationId);
+}
+
+public interface ISettlementParticipationRepository
+{
+    Numera.Domain.Banking.SettlementParticipation? FindLive(BankId bankId);
+}
+
+public sealed record CentralBankSettlementAccountView(
+    LedgerAccountId CentralBankLedgerAccountId,
+    CurrencyId CurrencyId,
+    Numera.Domain.Banking.CentralBankSettlementAccountStatus Status);
+
+public interface ICentralBankSettlementAccountRepository
+{
+    CentralBankSettlementAccountView? Find(CentralBankSettlementAccountId centralBankSettlementAccountId);
 }
 
 public interface IAccountProductRepository
