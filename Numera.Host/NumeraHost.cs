@@ -67,7 +67,19 @@ internal static class NumeraHost
                 return NumeraHostExitCode.StartupFailed;
             }
 
-            marker?.WriteRunning(Guid.CreateVersion7());
+            StartupRecoveryReport recovery = StartupRecoveryMachine.Run(
+                composer.BindRecovery(static () => StartupCheckResult.Passed));
+
+            if (!MayStartHost(recovery))
+            {
+                fatal.Write(
+                    BootstrapFatalEvents.RecoveryRequiredId,
+                    BootstrapFatalEvents.RecoveryRequiredName,
+                    "Startup entered RECOVERY_REQUIRED and neither Discord nor write admission was started.",
+                    recovery.Detail);
+
+                return NumeraHostExitCode.RecoveryRequired;
+            }
 
             Configure(builder, options);
 
@@ -102,6 +114,15 @@ internal static class NumeraHost
         {
             instanceLock?.Dispose();
         }
+    }
+
+    internal static bool MayStartHost(StartupRecoveryReport recovery)
+    {
+        ArgumentNullException.ThrowIfNull(recovery);
+
+        return recovery.Outcome == StartupRecoveryOutcome.Recovered
+            && recovery.MayAcceptFinancialWrites
+            && recovery.MayConnectDiscord;
     }
 
     internal static void Configure(HostApplicationBuilder builder, NumeraOptions options)

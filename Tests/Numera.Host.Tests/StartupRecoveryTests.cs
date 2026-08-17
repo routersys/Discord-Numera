@@ -182,6 +182,28 @@ public sealed class StartupRecoveryMachineTests
     }
 
     [TestMethod]
+    public void RecoveryRequiredKeepsTheHostFromStarting()
+    {
+        foreach (RecoveryStage stage in FailClosedStages)
+        {
+            RecoveryStepRecorder recorder = new() { Previous = PreviousStartupClassification.Unclean };
+            recorder.Overrides[stage] = StartupCheckResult.Failed("check");
+
+            StartupRecoveryReport report = StartupRecoveryMachine.Run(recorder.Build());
+
+            Assert.IsFalse(NumeraHost.MayStartHost(report), stage.ToString());
+        }
+    }
+
+    [TestMethod]
+    public void ARecoveredStartupLetsTheHostStart()
+    {
+        RecoveryStepRecorder recorder = new();
+
+        Assert.IsTrue(NumeraHost.MayStartHost(StartupRecoveryMachine.Run(recorder.Build())));
+    }
+
+    [TestMethod]
     public void UnavailableChecksAreReportedAsSkippedWithoutBlockingStartup()
     {
         RecoveryStepRecorder recorder = new();
