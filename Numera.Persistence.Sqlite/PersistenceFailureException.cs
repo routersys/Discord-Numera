@@ -48,4 +48,5 @@ public static class PersistenceFailureCode
     public const string RetryPolicyInvalid = "RETRY_POLICY_INVALID";
     public const string LedgerUnbalanced = "LEDGER_UNBALANCED";
     public const string LedgerProjectionInvalid = "LEDGER_PROJECTION_INVALID";
+    public const string ConcurrencyConflict = "CONCURRENCY_CONFLICT";
 }

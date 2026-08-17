@@ -1,0 +1,64 @@
+using Numera.Application.Abstractions;
+using Numera.Application.Common;
+using Numera.Persistence.Sqlite.Repositories;
+
+namespace Numera.Persistence.Sqlite.Transactions;
+
+public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
+{
+    internal SqliteBankingUnitOfWork(SqliteUnitOfWork unitOfWork)
+    {
+        Parties = new SqlitePartyRepository(unitOfWork);
+        CustomerAccounts = new SqliteCustomerAccountRepository(unitOfWork);
+        DiscordIdentityLinks = new SqliteDiscordIdentityLinkRepository(unitOfWork);
+        BusinessOperations = new SqliteBusinessOperationRepository(unitOfWork);
+        Outbox = new SqliteOutboxRepository(unitOfWork);
+    }
+
+    public IPartyRepository Parties { get; }
+
+    public ICustomerAccountRepository CustomerAccounts { get; }
+
+    public IDiscordIdentityLinkRepository DiscordIdentityLinks { get; }
+
+    public IBusinessOperationRepository BusinessOperations { get; }
+
+    public IOutboxRepository Outbox { get; }
+}
+
+public sealed class SqliteBankingWriteGateway : IBankingWriteGateway
+{
+    private readonly FinancialWriteCoordinator coordinator;
+
+    public SqliteBankingWriteGateway(FinancialWriteCoordinator coordinator)
+    {
+        ArgumentNullException.ThrowIfNull(coordinator);
+        this.coordinator = coordinator;
+    }
+
+    public async Task<Result<TValue>> ExecuteAsync<TValue>(
+        Func<IBankingUnitOfWork, Result<TValue>> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        WriteOutcome<Result<TValue>> outcome = await coordinator.ExecuteWithDecisionAsync(
+            unitOfWork =>
+            {
+                Result<TValue> result = operation(new SqliteBankingUnitOfWork(unitOfWork));
+
+                return result.IsSuccess
+                    ? WriteDecision<Result<TValue>>.Commit(result)
+                    : WriteDecision<Result<TValue>>.Rollback(result);
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return outcome.Status switch
+        {
+            WriteOutcomeStatus.Committed or WriteOutcomeStatus.RolledBack => outcome.Value,
+            WriteOutcomeStatus.RejectedSystemBusy => Result<TValue>.Failure(
+                ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.SystemBusy),
+            _ => Result<TValue>.Failure(ErrorCategory.OperationExpired, BankingErrorCodes.OperationCancelled),
+        };
+    }
+}
