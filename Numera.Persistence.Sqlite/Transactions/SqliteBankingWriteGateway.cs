@@ -14,6 +14,11 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
         BusinessOperations = new SqliteBusinessOperationRepository(unitOfWork);
         Outbox = new SqliteOutboxRepository(unitOfWork);
         InteractionSessions = new SqliteInteractionSessionRepository(unitOfWork);
+        Banks = new SqliteBankRepository(unitOfWork);
+        Relationships = new SqliteBankCustomerRelationshipRepository(unitOfWork);
+        LedgerAccounts = new SqliteLedgerAccountRepository(unitOfWork);
+        DepositAccounts = new SqliteDepositAccountRepository(unitOfWork);
+        AccountProducts = new SqliteAccountProductRepository(unitOfWork);
     }
 
     public IPartyRepository Parties { get; }
@@ -27,6 +32,16 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
     public IOutboxRepository Outbox { get; }
 
     public IInteractionSessionRepository InteractionSessions { get; }
+
+    public IBankRepository Banks { get; }
+
+    public IBankCustomerRelationshipRepository Relationships { get; }
+
+    public ILedgerAccountRepository LedgerAccounts { get; }
+
+    public IDepositAccountRepository DepositAccounts { get; }
+
+    public IAccountProductRepository AccountProducts { get; }
 }
 
 public sealed class SqliteBankingWriteGateway : IBankingWriteGateway

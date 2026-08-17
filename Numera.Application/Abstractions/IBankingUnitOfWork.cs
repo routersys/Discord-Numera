@@ -74,6 +74,16 @@ public interface IBankingUnitOfWork
     IOutboxRepository Outbox { get; }
 
     IInteractionSessionRepository InteractionSessions { get; }
+
+    IBankRepository Banks { get; }
+
+    IBankCustomerRelationshipRepository Relationships { get; }
+
+    ILedgerAccountRepository LedgerAccounts { get; }
+
+    IDepositAccountRepository DepositAccounts { get; }
+
+    IAccountProductRepository AccountProducts { get; }
 }
 
 public interface IBankingWriteGateway
@@ -110,3 +120,57 @@ public interface IBankingReadGateway
 {
     TResult Execute<TResult>(Func<IBankingReadContext, TResult> query);
 }
+
+public interface IBankRepository
+{
+    Numera.Domain.Banking.Bank? FindByInstitutionCode(EconomyScopeId economyScopeId, string institutionCode);
+
+    Numera.Domain.Banking.Bank? Find(BankId id);
+}
+
+public interface IBankCustomerRelationshipRepository
+{
+    void Add(Numera.Domain.Banking.BankCustomerRelationship relationship);
+
+    void Update(Numera.Domain.Banking.BankCustomerRelationship relationship);
+
+    Numera.Domain.Banking.BankCustomerRelationship? Find(BankId bankId, PartyId partyId);
+
+    long CountByBank(BankId bankId);
+}
+
+public interface ILedgerAccountRepository
+{
+    void Add(Numera.Domain.Accounting.LedgerAccount account);
+
+    Numera.Domain.Accounting.LedgerAccount? Find(LedgerAccountId id);
+
+    Numera.Domain.Accounting.LedgerAccount? FindByCode(AccountingBookId bookId, string accountCode);
+
+    void UpsertProjection(LedgerAccountId id, Numera.Domain.Accounting.LedgerBalance balance, UtcTimestamp updatedAt);
+
+    Numera.Domain.Accounting.LedgerBalance? FindProjection(LedgerAccountId id);
+}
+
+public interface IDepositAccountRepository
+{
+    void Add(Numera.Domain.Banking.DepositAccount account);
+
+    void Update(Numera.Domain.Banking.DepositAccount account);
+
+    Numera.Domain.Banking.DepositAccount? Find(DepositAccountId id);
+
+    Numera.Domain.Banking.DepositAccount? FindByCustomer(BankId bankId, CustomerAccountId customerAccountId);
+
+    long CountByBranch(BankId bankId, BranchId branchId);
+}
+
+public interface IAccountProductRepository
+{
+    AccountProductSelection? FindDefault(BankId bankId);
+}
+
+public sealed record AccountProductSelection(
+    AccountProductId ProductId,
+    AccountProductVersionId ProductVersionId,
+    BranchId BranchId);
