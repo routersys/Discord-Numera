@@ -42,6 +42,8 @@ public sealed class InitialSchemaTests
         "fee_rules",
         "fee_waiver_usage_counters",
         "fee_assessments",
+        "bank_policy_versions",
+        "account_limit_preferences",
     ];
 
     private static SqliteDatabaseFixture Initialized()
