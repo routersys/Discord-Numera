@@ -419,8 +419,13 @@ public sealed class TransferTests
                 INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
                     account_kind, accounting_type, normal_side, currency_id, posting_allowed,
                     owner_reference_type, owner_reference_id, status, created_at, version)
-                VALUES({Blob(142)}, {Blob(141)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT', {Blob(2)}, 1,
-                    NULL, NULL, 'ACTIVE', 1, 1);
+                VALUES
+                    ({Blob(142)}, {Blob(141)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT', {Blob(2)}, 1,
+                        NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(145)}, {Blob(4)}, NULL, '2400', 'CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(146)}, {Blob(21)}, NULL, '1400', 'CLEARING_RECEIVABLE', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
 
                 INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
                     accounting_book_id, liquid_asset_ledger_account_id, status, current_policy_version_id, version)
@@ -1847,6 +1852,9 @@ public sealed class TransferTests
         Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
     }
 
+    private const int ClearingPayableSeed = 145;
+    private const int ClearingReceivableSeed = 146;
+
     [TestMethod]
     public async Task AmountBelowTheRealTimeThresholdRoutesToClearing()
     {
@@ -1858,8 +1866,104 @@ public sealed class TransferTests
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 299);
 
-        Assert.IsFalse(result.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.ClearingSettlementUnsupported, result.Error!.Code);
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Accepted, result.Value.Status);
+    }
+
+    [TestMethod]
+    public async Task ClearingAcceptanceDebitsThePayerAndCreditsClearingPayable()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual(700L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(0L, harness.Held(parties.Source.Id));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(ClearingPayableSeed));
+    }
+
+    [TestMethod]
+    public async Task ClearingAcceptanceRecognisesTheReceivableWithoutCreditingTheBeneficiary()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(ClearingReceivableSeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(IncomingSuspenseSeed));
+        Assert.AreEqual(0L, harness.Balance(remote.Id));
+    }
+
+    [TestMethod]
+    public async Task ClearingAcceptanceLeavesBothFinalityFactsUnset()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual("0", harness.ReadText(
+            "SELECT CAST(count(*) AS TEXT) FROM payment_orders WHERE beneficiary_posted_at IS NOT NULL;"));
+        Assert.AreEqual("0", harness.ReadText(
+            "SELECT CAST(count(*) AS TEXT) FROM payment_orders WHERE settlement_finalized_at IS NOT NULL;"));
+    }
+
+    [TestMethod]
+    public async Task ClearingAcceptanceEnrolsTheInstructionIntoAnOpenCycle()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual("ACCEPTED", harness.ReadText("SELECT status FROM clearing_instructions;"));
+        Assert.AreEqual("OPEN", harness.ReadText("SELECT status FROM clearing_cycles;"));
+        Assert.AreEqual("1", harness.ReadText(
+            "SELECT CAST(count(*) AS TEXT) FROM clearing_instructions WHERE clearing_cycle_id IS NOT NULL;"));
+    }
+
+    [TestMethod]
+    public async Task ClearingPositionsNetToZeroAcrossParticipants()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual("2", harness.ReadText("SELECT CAST(count(*) AS TEXT) FROM clearing_positions;"));
+        Assert.AreEqual("0", harness.ReadText(
+            "SELECT CAST(coalesce(sum(net_minor), 0) AS TEXT) FROM clearing_positions;"));
+        Assert.AreEqual("300", harness.ReadText(
+            "SELECT CAST(sum(gross_payable_minor) AS TEXT) FROM clearing_positions;"));
+    }
+
+    [TestMethod]
+    public async Task TwoClearingPaymentsInTheSameIntervalShareOneCycle()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        await InterbankTransferAsync(harness, parties, remote, 200, "interaction-2");
+
+        Assert.AreEqual("1", harness.ReadText("SELECT CAST(count(*) AS TEXT) FROM clearing_cycles;"));
+        Assert.AreEqual("2", harness.ReadText("SELECT CAST(count(*) AS TEXT) FROM clearing_instructions;"));
+        Assert.AreEqual("500", harness.ReadText(
+            "SELECT CAST(sum(gross_payable_minor) AS TEXT) FROM clearing_positions;"));
     }
 
     [TestMethod]

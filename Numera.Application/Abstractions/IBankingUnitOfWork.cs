@@ -115,6 +115,8 @@ public interface IBankingUnitOfWork
 
     IPaymentNetworkRepository PaymentNetworks { get; }
 
+    IClearingRepository Clearing { get; }
+
     ICentralBankSettlementAccountRepository CentralBankSettlementAccounts { get; }
 
     IPaymentPreferenceRepository PaymentPreferences { get; }
@@ -313,6 +315,37 @@ public interface IPaymentPreferenceRepository
     Numera.Domain.Banking.PaymentPreference? Find(
         CustomerAccountId customerAccountId,
         Numera.Domain.Banking.PaymentPreferenceKind kind);
+}
+
+public interface IClearingRepository
+{
+    Numera.Domain.Banking.ClearingCycle? FindCycle(
+        EconomyScopeId economyScopeId,
+        CurrencyId currencyId,
+        string cycleKey);
+
+    void AddCycle(Numera.Domain.Banking.ClearingCycle cycle);
+
+    void UpdateCycle(Numera.Domain.Banking.ClearingCycle cycle);
+
+    void AddInstruction(Numera.Domain.Banking.ClearingInstruction instruction);
+
+    void UpdateInstruction(Numera.Domain.Banking.ClearingInstruction instruction);
+
+    Numera.Domain.Banking.ClearingInstruction? FindInstructionByBusinessOperation(
+        BusinessOperationId businessOperationId);
+
+    IReadOnlyList<Numera.Domain.Banking.ClearingInstruction> ListInstructions(ClearingCycleId clearingCycleId);
+
+    IReadOnlyList<Numera.Domain.Banking.ClearingPosition> ListPositions(ClearingCycleId clearingCycleId);
+
+    void AccumulatePosition(
+        ClearingPositionId identity,
+        ClearingCycleId clearingCycleId,
+        BankId bankId,
+        CurrencyId currencyId,
+        MoneyMinor receivableDelta,
+        MoneyMinor payableDelta);
 }
 
 public interface IPaymentNetworkRepository

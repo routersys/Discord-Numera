@@ -13,9 +13,12 @@ internal readonly record struct PaymentRoute(
     internal static PaymentRoute Internal => new(
         SettlementMode.Internal, BeneficiaryPostingPolicy.ImmediateAfterAcceptance, PolicyVersionId: null);
 
-    internal string Method => Mode == SettlementMode.Internal
-        ? PaymentApplicationService.PaymentMethod
-        : PaymentApplicationService.InterbankPaymentMethod;
+    internal string Method => Mode switch
+    {
+        SettlementMode.Internal => PaymentApplicationService.PaymentMethod,
+        SettlementMode.Clearing => PaymentApplicationService.ClearingPaymentMethod,
+        _ => PaymentApplicationService.InterbankPaymentMethod,
+    };
 }
 
 internal static class PaymentRoutePolicy
@@ -51,13 +54,22 @@ internal static class PaymentRoutePolicy
 
         SettlementMode mode = policy.ResolveSettlementMode(amount);
 
-        if (mode == SettlementMode.Rtgs)
-        {
-            return Result<PaymentRoute>.Success(new PaymentRoute(
-                SettlementMode.Rtgs, BeneficiaryPostingPolicy.AfterFinalSettlement, policyVersionId));
-        }
+        return mode == SettlementMode.Rtgs
+            ? Result<PaymentRoute>.Success(new PaymentRoute(
+                SettlementMode.Rtgs, BeneficiaryPostingPolicy.AfterFinalSettlement, policyVersionId))
+            : Result<PaymentRoute>.Success(new PaymentRoute(
+                SettlementMode.Clearing,
+                BeneficiaryPostingPolicy.AfterFinalSettlement,
+                policyVersionId));
+    }
 
-        return Result<PaymentRoute>.Failure(
-            ErrorCategory.BankUnavailable, BankingErrorCodes.ClearingSettlementUnsupported);
+    internal static string CycleKeyOf(PaymentNetworkPolicyVersion policy, UtcTimestamp at)
+    {
+        long interval = policy.ClearingCycleIntervalSeconds
+            ?? PaymentNetworkPolicyVersion.MaximumClearingCycleIntervalSeconds;
+
+        long seconds = at.UnixMilliseconds / 1000;
+
+        return (seconds - (seconds % interval)).ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 }
