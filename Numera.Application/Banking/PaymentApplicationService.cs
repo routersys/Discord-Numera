@@ -870,10 +870,8 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         }
 
         InterbankSettlementAccounts accounts = resolved.Value;
-        LedgerBalance reserve = unitOfWork.LedgerAccounts.FindProjection(accounts.SourceReserve.Id)
-            ?? LedgerBalance.Empty;
 
-        if (!reserve.CanReserve(order.Amount))
+        if (!HasSettlementLiquidity(unitOfWork, accounts.Source, order.Amount))
         {
             if (instruction.Status == SettlementInstructionStatus.Created)
             {
@@ -892,50 +890,19 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         BusinessDate businessDate = BusinessDateOf(now);
 
-        Result<AccountingPeriodId[]> periods = OpenPeriods(
-            unitOfWork,
-            businessDate,
-            sourceBank.GeneralLedgerBookId,
-            accounts.CentralBankBookId,
-            destinationBank.GeneralLedgerBookId);
-
-        if (!periods.IsSuccess)
+        Result<SettlementLeg[]> legs = BuildSettlementLegs(unitOfWork, accounts, businessDate);
+        if (!legs.IsSuccess)
         {
-            return Result<PaymentOrderView>.Failure(periods.Error!);
+            return Result<PaymentOrderView>.Failure(legs.Error!);
         }
 
         instruction.LockForSettlement(now);
         order.BeginSettling();
 
-        PostSettlementLeg(
-            unitOfWork,
-            sourceBank.GeneralLedgerBookId,
-            periods.Value[0],
-            order,
-            businessDate,
-            now,
-            accounts.SourcePayable,
-            accounts.SourceReserve);
-
-        PostSettlementLeg(
-            unitOfWork,
-            accounts.CentralBankBookId,
-            periods.Value[1],
-            order,
-            businessDate,
-            now,
-            accounts.SourceCentralBankLiability,
-            accounts.DestinationCentralBankLiability);
-
-        PostSettlementLeg(
-            unitOfWork,
-            destinationBank.GeneralLedgerBookId,
-            periods.Value[2],
-            order,
-            businessDate,
-            now,
-            accounts.DestinationReserve,
-            accounts.DestinationSuspense);
+        foreach (SettlementLeg leg in legs.Value)
+        {
+            PostSettlementLeg(unitOfWork, leg, order, businessDate, now);
+        }
 
         instruction.Settle(now);
         unitOfWork.SettlementInstructions.Update(instruction);
@@ -1140,26 +1107,107 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         }
     }
 
+    private readonly record struct SettlementLeg(
+        AccountingBookId BookId,
+        AccountingPeriodId Period,
+        LedgerAccount Debit,
+        LedgerAccount Credit);
+
+    private static bool HasSettlementLiquidity(
+        IBankingUnitOfWork unitOfWork,
+        SettlementSide side,
+        MoneyMinor amount)
+    {
+        LedgerBalance reserve = unitOfWork.LedgerAccounts.FindProjection(side.SettlingReserve.Id)
+            ?? LedgerBalance.Empty;
+
+        if (!reserve.CanReserve(amount))
+        {
+            return false;
+        }
+
+        if (side.AgentBalance is not { } agentBalance)
+        {
+            return true;
+        }
+
+        LedgerBalance held = unitOfWork.LedgerAccounts.FindProjection(agentBalance.Id) ?? LedgerBalance.Empty;
+        return held.CanReserve(amount);
+    }
+
+    private static Result<SettlementLeg[]> BuildSettlementLegs(
+        IBankingUnitOfWork unitOfWork,
+        InterbankSettlementAccounts accounts,
+        BusinessDate businessDate)
+    {
+        List<(AccountingBookId Book, LedgerAccount Debit, LedgerAccount Credit)> drafts =
+        [
+            (accounts.Source.Bank.GeneralLedgerBookId, accounts.SourcePayable, accounts.Source.SettlementAsset),
+        ];
+
+        if (accounts.Source.IsIndirect)
+        {
+            drafts.Add((
+                accounts.Source.SettlingBank.GeneralLedgerBookId,
+                accounts.Source.AgentClientDeposit!,
+                accounts.Source.SettlingReserve));
+        }
+
+        if (accounts.RequiresCentralBankLeg)
+        {
+            drafts.Add((
+                accounts.CentralBankBookId,
+                accounts.Source.CentralBankLiability,
+                accounts.Destination.CentralBankLiability));
+        }
+
+        if (accounts.Destination.IsIndirect)
+        {
+            drafts.Add((
+                accounts.Destination.SettlingBank.GeneralLedgerBookId,
+                accounts.Destination.SettlingReserve,
+                accounts.Destination.AgentClientDeposit!));
+        }
+
+        drafts.Add((
+            accounts.Destination.Bank.GeneralLedgerBookId,
+            accounts.Destination.SettlementAsset,
+            accounts.DestinationSuspense));
+
+        SettlementLeg[] legs = new SettlementLeg[drafts.Count];
+
+        for (int index = 0; index < drafts.Count; index++)
+        {
+            if (unitOfWork.AccountingPeriods.FindOpen(drafts[index].Book, businessDate) is not { } period)
+            {
+                return Result<SettlementLeg[]>.Failure(
+                    ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+            }
+
+            legs[index] = new SettlementLeg(
+                drafts[index].Book, period, drafts[index].Debit, drafts[index].Credit);
+        }
+
+        return Result<SettlementLeg[]>.Success(legs);
+    }
+
     private void PostSettlementLeg(
         IBankingUnitOfWork unitOfWork,
-        AccountingBookId bookId,
-        AccountingPeriodId period,
+        SettlementLeg leg,
         PaymentOrder order,
         BusinessDate businessDate,
-        UtcTimestamp now,
-        LedgerAccount debit,
-        LedgerAccount credit)
+        UtcTimestamp now)
     {
         LedgerPostingBuilder posting = new();
-        posting.Add(PostingLine.Institutional(debit, EntrySide.Debit, order.Amount));
-        posting.Add(PostingLine.Institutional(credit, EntrySide.Credit, order.Amount));
+        posting.Add(PostingLine.Institutional(leg.Debit, EntrySide.Debit, order.Amount));
+        posting.Add(PostingLine.Institutional(leg.Credit, EntrySide.Credit, order.Amount));
 
         LedgerAccount[] ordered = posting.OrderedAccounts();
 
         unitOfWork.AccountingTransactions.Add(
             AccountingTransaction.Post(
                 AccountingTransactionId.FromValue(idGenerator.NextId()),
-                bookId,
+                leg.BookId,
                 order.BusinessOperationId,
                 order.CurrencyId,
                 businessDate,
@@ -1169,30 +1217,9 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 SettlementDescriptionCode,
                 posting.BuildDrafts(ordered, idGenerator),
                 LedgerAccountSet.From(ordered)),
-            period);
+            leg.Period);
 
         posting.ApplyProjections(unitOfWork, ordered, now);
-    }
-
-    private static Result<AccountingPeriodId[]> OpenPeriods(
-        IBankingUnitOfWork unitOfWork,
-        BusinessDate businessDate,
-        params AccountingBookId[] books)
-    {
-        AccountingPeriodId[] periods = new AccountingPeriodId[books.Length];
-
-        for (int index = 0; index < books.Length; index++)
-        {
-            if (unitOfWork.AccountingPeriods.FindOpen(books[index], businessDate) is not { } period)
-            {
-                return Result<AccountingPeriodId[]>.Failure(
-                    ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
-            }
-
-            periods[index] = period;
-        }
-
-        return Result<AccountingPeriodId[]>.Success(periods);
     }
 
     private static FeeType FeeTypeOf(PaymentOrder order) =>

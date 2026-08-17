@@ -51,7 +51,7 @@ public static class BankingErrorCodes
     public static string SettlementParticipationUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 9);
 
-    public static string IndirectSettlementUnsupported { get; } =
+    public static string SettlementAgentUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 10);
 
     public static string CentralBankAccountUnavailable { get; } =

@@ -239,6 +239,32 @@ public sealed class SqliteLedgerAccountRepository : ILedgerAccountRepository
         return reader.Read() ? Read(reader) : null;
     }
 
+    public LedgerAccount? FindPostingByKindAndOwner(
+        AccountingBookId bookId,
+        LedgerAccountKind kind,
+        CurrencyId currencyId,
+        EntityIdValue ownerReferenceId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM ledger_accounts
+            WHERE accounting_book_id = $book
+              AND account_kind = $kind
+              AND currency_id = $currency
+              AND owner_reference_id = $owner
+              AND posting_allowed = 1
+              AND status = 'ACTIVE'
+            ORDER BY ledger_account_id
+            LIMIT 1;
+            """);
+        command.Parameters.AddWithValue("$book", SqliteValueMapper.ToBlob(bookId.Value));
+        command.Parameters.AddWithValue("$kind", kind.ToToken());
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(currencyId.Value));
+        command.Parameters.AddWithValue("$owner", SqliteValueMapper.ToBlob(ownerReferenceId));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? Read(reader) : null;
+    }
+
     public void UpsertProjection(LedgerAccountId id, LedgerBalance balance, UtcTimestamp updatedAt)
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""

@@ -258,11 +258,58 @@ public sealed class TransferTests
                 """);
         }
 
-        public void MakeDestinationIndirect() => Execute($"""
-            UPDATE settlement_participations
-            SET mode = 'INDIRECT', settlement_agent_bank_id = {Blob(5)},
-                central_bank_settlement_account_id = NULL, version = version + 1
-            WHERE bank_id = {Blob(22)};
+        public void MakeDestinationIndirect()
+        {
+            Execute($"""
+                INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+                VALUES({Blob(120)}, 'BANK', '代理決済銀行主体', 'ACTIVE', 1, 1);
+
+                INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                    created_at, version)
+                VALUES({Blob(121)}, {Blob(120)}, 'COMMERCIAL_BANK', 'OPEN', 1, 1);
+
+                INSERT INTO banks(bank_id, economy_scope_id, party_id, institution_code, name, bank_kind,
+                    resolution_case_id, status, general_ledger_book_id, current_policy_version_id,
+                    current_fee_schedule_version_id, created_at, version)
+                VALUES({Blob(122)}, {Blob(1)}, {Blob(120)}, 'NUM0003', '代理決済銀行', 'NORMAL', NULL,
+                    'OPERATING', {Blob(121)}, NULL, NULL, 1, 1);
+
+                INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                    starts_on, ends_on, status, closed_at, version)
+                VALUES({Blob(123)}, {Blob(121)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                    account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                    owner_reference_type, owner_reference_id, status, created_at, version)
+                VALUES
+                    ({Blob(124)}, {Blob(121)}, NULL, '1100', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(125)}, {Blob(101)}, NULL, '2100-3', 'CENTRAL_BANK_SETTLEMENT_LIABILITY', 'LIABILITY',
+                        'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(128)}, {Blob(121)}, NULL, '2400', 'CLIENT_BANK_SETTLEMENT_DEPOSIT', 'LIABILITY',
+                        'CREDIT', {Blob(2)}, 1, 'Bank', {Blob(22)}, 'ACTIVE', 1, 1),
+                    ({Blob(129)}, {Blob(21)}, NULL, '1200', 'SETTLEMENT_AGENT_BALANCE_ASSET', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO central_bank_settlement_accounts(central_bank_settlement_account_id, bank_id,
+                    currency_id, central_bank_ledger_account_id, status, opened_at, closed_at, version)
+                VALUES({Blob(126)}, {Blob(122)}, {Blob(2)}, {Blob(125)}, 'ACTIVE', 1, NULL, 1);
+
+                INSERT INTO settlement_participations(settlement_participation_id, bank_id, mode,
+                    settlement_agent_bank_id, central_bank_settlement_account_id, status, effective_from,
+                    effective_to, version)
+                VALUES({Blob(127)}, {Blob(122)}, 'DIRECT', NULL, {Blob(126)}, 'ACTIVE', 1, NULL, 1);
+
+                UPDATE settlement_participations
+                SET mode = 'INDIRECT', settlement_agent_bank_id = {Blob(122)},
+                    central_bank_settlement_account_id = NULL, version = version + 1
+                WHERE bank_id = {Blob(22)};
+                """);
+        }
+
+        public void SuspendDestinationAgent() => Execute($"""
+            UPDATE settlement_participations SET status = 'SUSPENDED', version = version + 1
+            WHERE bank_id = {Blob(122)};
             """);
 
         public long LedgerBalanceOf(int seed) => long.Parse(
@@ -1011,8 +1058,13 @@ public sealed class TransferTests
         Assert.AreEqual(0L, harness.Count("holds"));
     }
 
+    private const int AgentReserveSeed = 124;
+    private const int AgentCentralBankLiabilitySeed = 125;
+    private const int AgentClientDepositSeed = 128;
+    private const int IndirectAgentBalanceSeed = 129;
+
     [TestMethod]
-    public async Task IndirectParticipantIsRejectedInsteadOfSettledAsDirect()
+    public async Task IndirectBeneficiarySettlesThroughItsSettlementAgent()
     {
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
@@ -1020,10 +1072,64 @@ public sealed class TransferTests
         DepositAccountView remote = await RemoteAccountAsync(harness);
         harness.MakeDestinationIndirect();
 
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
+        Assert.AreEqual(700L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(300L, harness.Balance(remote.Id));
+    }
+
+    [TestMethod]
+    public async Task AgentLegKeepsTheClientDepositAndAgentBalanceMirrored()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+        harness.MakeDestinationIndirect();
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(IndirectAgentBalanceSeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(AgentClientDepositSeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(AgentReserveSeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(AgentCentralBankLiabilitySeed));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(DestinationReserveSeed));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(DestinationCentralBankLiabilitySeed));
+    }
+
+    [TestMethod]
+    public async Task IndirectSettlementInsertsTheAgentLegAsAnExtraBook()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+        harness.MakeDestinationIndirect();
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual(6L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(
+            harness.ReadText("SELECT CAST(SUM(amount_minor) AS TEXT) FROM journal_entries WHERE side = 'DEBIT';"),
+            harness.ReadText("SELECT CAST(SUM(amount_minor) AS TEXT) FROM journal_entries WHERE side = 'CREDIT';"));
+    }
+
+    [TestMethod]
+    public async Task IndirectParticipantWithoutAnActiveAgentIsRejected()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+        harness.MakeDestinationIndirect();
+        harness.SuspendDestinationAgent();
+
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 100);
 
         Assert.IsFalse(result.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.IndirectSettlementUnsupported, result.Error!.Code);
+        Assert.AreEqual(BankingErrorCodes.SettlementAgentUnavailable, result.Error!.Code);
         Assert.AreEqual(0L, harness.Count("payment_orders"));
     }
 

@@ -6,23 +6,37 @@ using Numera.Domain.Common;
 
 namespace Numera.Application.Banking;
 
+internal readonly record struct SettlementSide(
+    Bank Bank,
+    Bank SettlingBank,
+    LedgerAccount SettlingReserve,
+    LedgerAccount CentralBankLiability,
+    LedgerAccount? AgentBalance,
+    LedgerAccount? AgentClientDeposit)
+{
+    internal bool IsIndirect => AgentBalance is not null;
+
+    internal LedgerAccount SettlementAsset => AgentBalance ?? SettlingReserve;
+}
+
 internal readonly record struct InterbankSettlementAccounts(
     AccountingBookId CentralBankBookId,
+    SettlementSide Source,
+    SettlementSide Destination,
     LedgerAccount SourcePayable,
-    LedgerAccount SourceReserve,
-    LedgerAccount SourceCentralBankLiability,
-    LedgerAccount DestinationReserve,
-    LedgerAccount DestinationSuspense,
-    LedgerAccount DestinationCentralBankLiability);
+    LedgerAccount DestinationSuspense)
+{
+    internal bool RequiresCentralBankLeg => Source.SettlingBank.Id != Destination.SettlingBank.Id;
+}
 
 internal static class InterbankSettlementPolicy
 {
     internal static Result EnsureEligible(IBankingUnitOfWork unitOfWork, Bank source, Bank destination)
     {
-        Result sourceEligibility = EnsureDirectParticipant(unitOfWork, source);
+        Result sourceEligibility = EnsureSettleable(unitOfWork, source);
 
         return sourceEligibility.IsSuccess
-            ? EnsureDirectParticipant(unitOfWork, destination)
+            ? EnsureSettleable(unitOfWork, destination)
             : sourceEligibility;
     }
 
@@ -32,22 +46,22 @@ internal static class InterbankSettlementPolicy
         Bank destination,
         CurrencyId currencyId)
     {
-        Result<LedgerAccount> sourceLiability = ResolveCentralBankLiability(unitOfWork, source, currencyId);
-        if (!sourceLiability.IsSuccess)
+        Result<SettlementSide> sourceSide = ResolveSide(unitOfWork, source, currencyId);
+        if (!sourceSide.IsSuccess)
         {
-            return Result<InterbankSettlementAccounts>.Failure(sourceLiability.Error!);
+            return Result<InterbankSettlementAccounts>.Failure(sourceSide.Error!);
         }
 
-        Result<LedgerAccount> destinationLiability =
-            ResolveCentralBankLiability(unitOfWork, destination, currencyId);
-        if (!destinationLiability.IsSuccess)
+        Result<SettlementSide> destinationSide = ResolveSide(unitOfWork, destination, currencyId);
+        if (!destinationSide.IsSuccess)
         {
-            return Result<InterbankSettlementAccounts>.Failure(destinationLiability.Error!);
+            return Result<InterbankSettlementAccounts>.Failure(destinationSide.Error!);
         }
 
-        if (sourceLiability.Value.BookId != destinationLiability.Value.BookId)
+        if (sourceSide.Value.CentralBankLiability.BookId != destinationSide.Value.CentralBankLiability.BookId)
         {
-            return Failure(BankingErrorCodes.CentralBankAccountUnavailable);
+            return Result<InterbankSettlementAccounts>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.CentralBankAccountUnavailable);
         }
 
         Result<LedgerAccount> payable = Required(
@@ -55,20 +69,6 @@ internal static class InterbankSettlementPolicy
         if (!payable.IsSuccess)
         {
             return Result<InterbankSettlementAccounts>.Failure(payable.Error!);
-        }
-
-        Result<LedgerAccount> sourceReserve = Required(
-            unitOfWork, source.GeneralLedgerBookId, LedgerAccountKind.CentralBankReserveAsset, currencyId);
-        if (!sourceReserve.IsSuccess)
-        {
-            return Result<InterbankSettlementAccounts>.Failure(sourceReserve.Error!);
-        }
-
-        Result<LedgerAccount> destinationReserve = Required(
-            unitOfWork, destination.GeneralLedgerBookId, LedgerAccountKind.CentralBankReserveAsset, currencyId);
-        if (!destinationReserve.IsSuccess)
-        {
-            return Result<InterbankSettlementAccounts>.Failure(destinationReserve.Error!);
         }
 
         Result<LedgerAccount> suspense = Required(
@@ -82,43 +82,135 @@ internal static class InterbankSettlementPolicy
         }
 
         return Result<InterbankSettlementAccounts>.Success(new InterbankSettlementAccounts(
-            sourceLiability.Value.BookId,
+            sourceSide.Value.CentralBankLiability.BookId,
+            sourceSide.Value,
+            destinationSide.Value,
             payable.Value,
-            sourceReserve.Value,
-            sourceLiability.Value,
-            destinationReserve.Value,
-            suspense.Value,
-            destinationLiability.Value));
+            suspense.Value));
     }
 
-    private static Result EnsureDirectParticipant(IBankingUnitOfWork unitOfWork, Bank bank)
+    private static Result EnsureSettleable(IBankingUnitOfWork unitOfWork, Bank bank)
     {
-        if (unitOfWork.SettlementParticipations.FindLive(bank.Id) is not { } participation)
+        if (unitOfWork.SettlementParticipations.FindLive(bank.Id) is not { } participation ||
+            participation.Status != SettlementParticipationStatus.Active)
         {
             return Result.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementParticipationUnavailable);
         }
 
-        if (participation.Mode == SettlementParticipationMode.Indirect)
+        if (participation.Mode == SettlementParticipationMode.Direct)
         {
-            return Result.Failure(
-                ErrorCategory.BankUnavailable, BankingErrorCodes.IndirectSettlementUnsupported);
+            return Result.Success();
         }
 
-        return participation.SettlesDirectly
-            ? Result.Success()
-            : Result.Failure(
-                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementParticipationUnavailable);
+        if (participation.SettlementAgentBankId is not { } agentBankId ||
+            unitOfWork.Banks.Find(agentBankId) is not { } agent ||
+            agent.Status != BankStatus.Operating)
+        {
+            return Result.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAgentUnavailable);
+        }
+
+        return unitOfWork.SettlementParticipations.FindLive(agent.Id) is { } agentParticipation &&
+            agentParticipation.SettlesDirectly
+                ? Result.Success()
+                : Result.Failure(
+                    ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAgentUnavailable);
     }
 
-    private static Result<LedgerAccount> ResolveCentralBankLiability(
+    private static Result<SettlementSide> ResolveSide(
         IBankingUnitOfWork unitOfWork,
         Bank bank,
         CurrencyId currencyId)
     {
         if (unitOfWork.SettlementParticipations.FindLive(bank.Id) is not { } participation ||
-            !participation.SettlesDirectly ||
-            participation.CentralBankSettlementAccountId is not { } accountId)
+            participation.Status != SettlementParticipationStatus.Active)
+        {
+            return Result<SettlementSide>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementParticipationUnavailable);
+        }
+
+        return participation.Mode == SettlementParticipationMode.Direct
+            ? ResolveDirectSide(unitOfWork, bank, participation, currencyId)
+            : ResolveIndirectSide(unitOfWork, bank, participation, currencyId);
+    }
+
+    private static Result<SettlementSide> ResolveDirectSide(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        SettlementParticipation participation,
+        CurrencyId currencyId)
+    {
+        Result<LedgerAccount> liability = ResolveCentralBankLiability(unitOfWork, participation, currencyId);
+        if (!liability.IsSuccess)
+        {
+            return Result<SettlementSide>.Failure(liability.Error!);
+        }
+
+        Result<LedgerAccount> reserve = Required(
+            unitOfWork, bank.GeneralLedgerBookId, LedgerAccountKind.CentralBankReserveAsset, currencyId);
+
+        return reserve.IsSuccess
+            ? Result<SettlementSide>.Success(new SettlementSide(
+                bank, bank, reserve.Value, liability.Value, AgentBalance: null, AgentClientDeposit: null))
+            : Result<SettlementSide>.Failure(reserve.Error!);
+    }
+
+    private static Result<SettlementSide> ResolveIndirectSide(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        SettlementParticipation participation,
+        CurrencyId currencyId)
+    {
+        if (participation.SettlementAgentBankId is not { } agentBankId ||
+            unitOfWork.Banks.Find(agentBankId) is not { } agent ||
+            unitOfWork.SettlementParticipations.FindLive(agent.Id) is not { } agentParticipation ||
+            !agentParticipation.SettlesDirectly)
+        {
+            return Result<SettlementSide>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAgentUnavailable);
+        }
+
+        Result<LedgerAccount> liability = ResolveCentralBankLiability(
+            unitOfWork, agentParticipation, currencyId);
+        if (!liability.IsSuccess)
+        {
+            return Result<SettlementSide>.Failure(liability.Error!);
+        }
+
+        Result<LedgerAccount> agentReserve = Required(
+            unitOfWork, agent.GeneralLedgerBookId, LedgerAccountKind.CentralBankReserveAsset, currencyId);
+        if (!agentReserve.IsSuccess)
+        {
+            return Result<SettlementSide>.Failure(agentReserve.Error!);
+        }
+
+        Result<LedgerAccount> agentBalance = Required(
+            unitOfWork, bank.GeneralLedgerBookId, LedgerAccountKind.SettlementAgentBalanceAsset, currencyId);
+        if (!agentBalance.IsSuccess)
+        {
+            return Result<SettlementSide>.Failure(agentBalance.Error!);
+        }
+
+        LedgerAccount? clientDeposit = unitOfWork.LedgerAccounts.FindPostingByKindAndOwner(
+            agent.GeneralLedgerBookId,
+            LedgerAccountKind.ClientBankSettlementDeposit,
+            currencyId,
+            bank.Id.Value);
+
+        return clientDeposit is not null
+            ? Result<SettlementSide>.Success(new SettlementSide(
+                bank, agent, agentReserve.Value, liability.Value, agentBalance.Value, clientDeposit))
+            : Result<SettlementSide>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+    }
+
+    private static Result<LedgerAccount> ResolveCentralBankLiability(
+        IBankingUnitOfWork unitOfWork,
+        SettlementParticipation participation,
+        CurrencyId currencyId)
+    {
+        if (participation.CentralBankSettlementAccountId is not { } accountId)
         {
             return Result<LedgerAccount>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementParticipationUnavailable);
@@ -149,7 +241,4 @@ internal static class InterbankSettlementPolicy
             ? Result<LedgerAccount>.Success(ledger)
             : Result<LedgerAccount>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
-
-    private static Result<InterbankSettlementAccounts> Failure(string code) =>
-        Result<InterbankSettlementAccounts>.Failure(ErrorCategory.BankUnavailable, code);
 }

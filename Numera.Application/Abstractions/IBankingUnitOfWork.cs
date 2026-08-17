@@ -203,6 +203,12 @@ public interface ILedgerAccountRepository
         Numera.Domain.Accounting.LedgerAccountKind kind,
         CurrencyId currencyId);
 
+    Numera.Domain.Accounting.LedgerAccount? FindPostingByKindAndOwner(
+        AccountingBookId bookId,
+        Numera.Domain.Accounting.LedgerAccountKind kind,
+        CurrencyId currencyId,
+        EntityIdValue ownerReferenceId);
+
     void UpsertProjection(LedgerAccountId id, Numera.Domain.Accounting.LedgerBalance balance, UtcTimestamp updatedAt);
 
     Numera.Domain.Accounting.LedgerBalance? FindProjection(LedgerAccountId id);
