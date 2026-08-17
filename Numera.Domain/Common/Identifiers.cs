@@ -251,3 +251,30 @@ public readonly record struct FeeScheduleVersionId(EntityIdValue Value) : IEntit
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct FeeRuleId(EntityIdValue Value) : IEntityId<FeeRuleId>
+{
+    public static string EntityName => "fee_rule";
+
+    public static FeeRuleId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FeeAssessmentId(EntityIdValue Value) : IEntityId<FeeAssessmentId>
+{
+    public static string EntityName => "fee_assessment";
+
+    public static FeeAssessmentId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct AtmNetworkId(EntityIdValue Value) : IEntityId<AtmNetworkId>
+{
+    public static string EntityName => "atm_network";
+
+    public static AtmNetworkId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

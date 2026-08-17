@@ -37,6 +37,8 @@ public static class InvariantViolationCode
     public const string EntityIdTextInvalid = "ENTITY_ID_TEXT_INVALID";
     public const string CurrencyMismatch = "CURRENCY_MISMATCH";
     public const string BusinessDateInvalid = "BUSINESS_DATE_INVALID";
+    public const string BusinessDayClassUnknown = "BUSINESS_DAY_CLASS_UNKNOWN";
+    public const string BusinessMonthInvalid = "BUSINESS_MONTH_INVALID";
     public const string TimestampOutOfRange = "TIMESTAMP_OUT_OF_RANGE";
     public const string AccountingTypeUnknown = "ACCOUNTING_TYPE_UNKNOWN";
     public const string EntrySideUnknown = "ENTRY_SIDE_UNKNOWN";
@@ -109,4 +111,14 @@ public static class InvariantViolationCode
     public const string PaymentOrderPolicySnapshotInconsistent = "PAYMENT_ORDER_POLICY_SNAPSHOT_INCONSISTENT";
     public const string PaymentOrderFinalityInconsistent = "PAYMENT_ORDER_FINALITY_INCONSISTENT";
     public const string PaymentOrderMemoInvalid = "PAYMENT_ORDER_MEMO_INVALID";
+    public const string FeeTypeUnknown = "FEE_TYPE_UNKNOWN";
+    public const string FeeChannelUnknown = "FEE_CHANNEL_UNKNOWN";
+    public const string FeeRuleDayClassUnknown = "FEE_RULE_DAY_CLASS_UNKNOWN";
+    public const string FeeRuleAmountRangeInvalid = "FEE_RULE_AMOUNT_RANGE_INVALID";
+    public const string FeeRuleFormulaInvalid = "FEE_RULE_FORMULA_INVALID";
+    public const string FeeRuleTimeWindowInvalid = "FEE_RULE_TIME_WINDOW_INVALID";
+    public const string FeeRulePriorityInvalid = "FEE_RULE_PRIORITY_INVALID";
+    public const string FeeRuleWaiverInvalid = "FEE_RULE_WAIVER_INVALID";
+    public const string FeeAssessmentAmountInvalid = "FEE_ASSESSMENT_AMOUNT_INVALID";
+    public const string FeeAssessmentEndpointsInvalid = "FEE_ASSESSMENT_ENDPOINTS_INVALID";
 }

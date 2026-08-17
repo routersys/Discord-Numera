@@ -18,6 +18,12 @@ public readonly struct BusinessDate : IEquatable<BusinessDate>, IComparable<Busi
 
     public int DayNumber => value.DayNumber;
 
+    public DayOfWeek DayOfWeek => value.DayOfWeek;
+
+    public int BusinessMonth => value.Year is >= 1900 and <= 9999
+        ? (value.Year * 100) + value.Month
+        : throw InvariantViolationException.Create(InvariantViolationCode.BusinessMonthInvalid);
+
     public static BusinessDate FromParts(int year, int month, int day)
     {
         if (year is < 1 or > 9999 || month is < 1 or > 12)
