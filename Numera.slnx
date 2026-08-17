@@ -1,3 +1,25 @@
 <Solution>
-  <Project Path="Numera/Numera.csproj" />
+  <Folder Name="/Runtime/">
+    <Project Path="Numera.Host/Numera.Host.csproj" />
+    <Project Path="Numera.Discord/Numera.Discord.csproj" />
+    <Project Path="Numera.Discord.Abstractions/Numera.Discord.Abstractions.csproj" />
+    <Project Path="Numera.Application/Numera.Application.csproj" />
+    <Project Path="Numera.Domain/Numera.Domain.csproj" />
+    <Project Path="Numera.Persistence.Sqlite/Numera.Persistence.Sqlite.csproj" />
+  </Folder>
+  <Folder Name="/Compiler/">
+    <Project Path="Numera.Discord.Generators/Numera.Discord.Generators.csproj" />
+    <Project Path="Numera.Analyzers/Numera.Analyzers.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/Numera.Domain.Tests/Numera.Domain.Tests.csproj" />
+    <Project Path="Tests/Numera.Application.Tests/Numera.Application.Tests.csproj" />
+    <Project Path="Tests/Numera.Persistence.Sqlite.Tests/Numera.Persistence.Sqlite.Tests.csproj" />
+    <Project Path="Tests/Numera.Discord.Tests/Numera.Discord.Tests.csproj" />
+    <Project Path="Tests/Numera.Generators.Tests/Numera.Generators.Tests.csproj" />
+    <Project Path="Tests/Numera.Architecture.Tests/Numera.Architecture.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Benchmarks/">
+    <Project Path="Benchmarks/Numera.Benchmarks/Numera.Benchmarks.csproj" />
+  </Folder>
 </Solution>

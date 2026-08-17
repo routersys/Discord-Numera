@@ -1,0 +1,51 @@
+<Project>
+
+  <PropertyGroup Label="ProjectKind">
+    <NumeraProjectKind Condition="'$(MSBuildProjectName)' == 'Numera.Analyzers' or '$(MSBuildProjectName)' == 'Numera.Discord.Generators'">RoslynComponent</NumeraProjectKind>
+    <NumeraProjectKind Condition="'$(NumeraProjectKind)' == '' and $(MSBuildProjectName.EndsWith('.Tests'))">Test</NumeraProjectKind>
+    <NumeraProjectKind Condition="'$(NumeraProjectKind)' == ''">Runtime</NumeraProjectKind>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Common">
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsAsErrors>$(WarningsAsErrors);SYSLIB1045</WarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NeutralLanguage>ja-JP</NeutralLanguage>
+    <Deterministic>true</Deterministic>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <Company>Numera</Company>
+    <Product>Numera</Product>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(NumeraProjectKind)' == 'Runtime'">
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(NumeraProjectKind)' == 'RoslynComponent'">
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(NumeraProjectKind)' == 'Test'">
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(NumeraProjectKind)' == 'Test'">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="MSTest.TestFramework" />
+    <PackageReference Include="MSTest.TestAdapter" />
+  </ItemGroup>
+
+</Project>

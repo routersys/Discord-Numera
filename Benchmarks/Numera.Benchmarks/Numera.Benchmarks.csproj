@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Numera.Benchmarks</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Numera.Application\Numera.Application.csproj" />
+    <ProjectReference Include="..\..\Numera.Domain\Numera.Domain.csproj" />
+    <ProjectReference Include="..\..\Numera.Persistence.Sqlite\Numera.Persistence.Sqlite.csproj" />
+  </ItemGroup>
+
+</Project>

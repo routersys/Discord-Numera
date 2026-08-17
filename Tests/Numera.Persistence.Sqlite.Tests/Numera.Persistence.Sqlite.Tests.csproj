@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Numera.Persistence.Sqlite.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Numera.Persistence.Sqlite\Numera.Persistence.Sqlite.csproj" />
+  </ItemGroup>
+
+</Project>

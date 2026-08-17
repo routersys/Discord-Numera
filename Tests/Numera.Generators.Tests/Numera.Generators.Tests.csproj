@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Numera.Generators.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Numera.Discord.Generators\Numera.Discord.Generators.csproj" />
+    <ProjectReference Include="..\..\Numera.Analyzers\Numera.Analyzers.csproj" />
+    <ProjectReference Include="..\..\Numera.Discord.Abstractions\Numera.Discord.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
