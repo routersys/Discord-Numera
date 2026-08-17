@@ -20,23 +20,17 @@ internal static class FeeResolver
 {
     internal static Result<FeeAssessmentPlan> Resolve(
         IBankingUnitOfWork unitOfWork,
-        EconomyScopeId economyScopeId,
         Bank bank,
         DepositAccount payer,
         FeeType feeType,
         FeeChannel channel,
         BankId? counterpartyBankId,
         MoneyMinor amount,
-        UtcTimestamp now)
+        BusinessTimePoint point)
     {
         if (bank.CurrentFeeScheduleVersionId is not { } scheduleVersionId)
         {
             return Failure(BankingErrorCodes.FeeScheduleUnavailable);
-        }
-
-        if (EconomyBusinessCalendar.Resolve(unitOfWork.EconomyCalendars, economyScopeId, now) is not { } point)
-        {
-            return Failure(BankingErrorCodes.EconomyCalendarUnavailable);
         }
 
         FeeMatchContext context = new(

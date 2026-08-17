@@ -239,20 +239,36 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         UtcTimestamp now = clock.Now();
 
+        BusinessTimePoint? resolved = EconomyBusinessCalendar.Resolve(
+            unitOfWork.EconomyCalendars, sourceBank.EconomyScopeId, now);
+
+        if (resolved is not { } point)
+        {
+            return Result<PaymentOrderId>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
+        Result limits = TransferLimitPolicy.Evaluate(
+            unitOfWork, sourceBank, source, request.Amount, point, nameof(command.AmountMinor));
+
+        if (!limits.IsSuccess)
+        {
+            return Result<PaymentOrderId>.Failure(limits.Error!);
+        }
+
         Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
             unitOfWork,
-            sourceBank.EconomyScopeId,
             sourceBank,
             source,
             TransferFeeType,
             TransferChannel,
             destinationBank.Id,
             request.Amount,
-            now);
+            point);
 
         if (!fee.IsSuccess)
         {
-            return Result<PaymentOrderId>.Failure(fee.Error!.Category, fee.Error.Code);
+            return Result<PaymentOrderId>.Failure(fee.Error!);
         }
 
         if (unitOfWork.AccountingPeriods.FindOpen(sourceBank.GeneralLedgerBookId, BusinessDateOf(now)) is null)
@@ -373,20 +389,25 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
         }
 
+        if (EconomyBusinessCalendar.Resolve(unitOfWork.EconomyCalendars, bank.EconomyScopeId, now) is not { } point)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
         Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
             unitOfWork,
-            bank.EconomyScopeId,
             bank,
             source,
             TransferFeeType,
             TransferChannel,
             destination.BankId,
             order.Amount,
-            now);
+            point);
 
         if (!fee.IsSuccess)
         {
-            return Result<PaymentOrderView>.Failure(fee.Error!.Category, fee.Error.Code);
+            return Result<PaymentOrderView>.Failure(fee.Error!);
         }
 
         FeeAssessmentPlan plan = fee.Value;

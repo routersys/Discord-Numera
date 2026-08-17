@@ -19,6 +19,8 @@ public sealed class TransferTests
     private const ulong PayeeUser = 710_000_000_000_000_002UL;
     private const int FreeScheduleSeed = 40;
     private const int PricedScheduleSeed = 60;
+    private const int UnlimitedPolicySeed = 80;
+    private const int CappedPolicySeed = 81;
 
     private sealed class Harness : IAsyncDisposable
     {
@@ -124,6 +126,7 @@ public sealed class TransferTests
                     {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
                 """);
 
+            PublishBankLimits(UnlimitedPolicySeed);
             PublishTransferFee(FreeScheduleSeed, fixedMinor: 0);
 
             if (withPeriod)
@@ -173,6 +176,45 @@ public sealed class TransferTests
                 VALUES({Blob(26)}, {Blob(25)}, 1, 1, NULL, 1000000000, 'ACTUAL_365_FIXED', 0, NULL, NULL, NULL,
                     'INTERNAL', 'STANDARD', 'NONE', 1);
                 """);
+        }
+
+        public void PublishBankLimits(int policySeed, long? perTransfer = null, long? dailyOutgoing = null)
+        {
+            Execute($"""
+                INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
+                    minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
+                    reopen_closed_account_allowed, public_receiving_enabled_default, cash_card_enabled,
+                    debit_card_enabled, integrated_cash_debit_default, automatic_bank_card_issue_mode,
+                    cash_atm_enabled, cash_card_validity_months, debit_card_validity_months,
+                    per_transfer_limit_minor, daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                    daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                    daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
+                    maximum_active_holds_minor, effective_from, effective_to, version)
+                VALUES({Blob(policySeed)}, {Blob(5)}, 1, 0, 0, 0, 1, 1, 1, 1, 0, 'NONE', 1, NULL, 12,
+                    {Nullable(perTransfer)}, {Nullable(dailyOutgoing)}, NULL, NULL, NULL, NULL, NULL, NULL,
+                    1, NULL, 1);
+
+                UPDATE banks SET current_policy_version_id = {Blob(policySeed)}, version = version + 1
+                WHERE bank_id = {Blob(5)};
+                """);
+        }
+
+        public void SetCustomerLimits(
+            DepositAccountId depositAccountId,
+            long? perTransfer = null,
+            long? dailyOutgoing = null)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = $"""
+                INSERT INTO account_limit_preferences(deposit_account_id, per_transfer_limit_minor,
+                    daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                    daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                    daily_debit_purchase_limit_minor, version)
+                VALUES($id, {Nullable(perTransfer)}, {Nullable(dailyOutgoing)}, NULL, NULL, NULL, NULL, 1);
+                """;
+            command.Parameters.AddWithValue("$id", depositAccountId.Value.ToByteArray());
+            command.ExecuteNonQuery();
         }
 
         public void PublishTransferFee(
@@ -855,6 +897,194 @@ public sealed class TransferTests
         Assert.AreEqual(695L, harness.Balance(parties.Source.Id));
         Assert.AreEqual("5", harness.ReadText(FeeRevenueBalanceSql));
     }
+
+    [TestMethod]
+    public async Task PerTransferCeilingRejectsALargerAmount()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, perTransfer: 200);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 201);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.Validation, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.AmountLimitExceeded, result.Error.Code);
+        Assert.AreEqual(0L, harness.Count("holds"));
+        Assert.AreEqual(0L, harness.Count("payment_orders"));
+    }
+
+    [TestMethod]
+    public async Task PerTransferCeilingAllowsExactlyTheCeiling()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, perTransfer: 200);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 200);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(800L, harness.Balance(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task CustomerPreferenceTightensTheBankCeiling()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, perTransfer: 500);
+        harness.SetCustomerLimits(parties.Source.Id, perTransfer: 100);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 101);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.AmountLimitExceeded, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task CustomerPreferenceCannotRaiseTheBankCeiling()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, perTransfer: 100);
+        harness.SetCustomerLimits(parties.Source.Id, perTransfer: 900);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 101);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.AmountLimitExceeded, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task ZeroLimitStopsTheOperationInsteadOfLookingLikeAnInputError()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, perTransfer: 500);
+        harness.SetCustomerLimits(parties.Source.Id, perTransfer: 0);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 1);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.AccountRestricted, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.TransferOperationDisabled, result.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task DailyOutgoingLimitAccumulatesAcrossTransfers()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, dailyOutgoing: 500);
+
+        Result<PaymentOrderView> first = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300, "first");
+        Result<PaymentOrderView> second = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 200, "second");
+        Result<PaymentOrderView> third = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 1, "third");
+
+        Assert.IsTrue(first.IsSuccess);
+        Assert.IsTrue(second.IsSuccess);
+        Assert.IsFalse(third.IsSuccess);
+        Assert.AreEqual(ErrorCategory.AccountRestricted, third.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.DailyOutgoingLimitExceeded, third.Error.Code);
+        Assert.AreEqual(500L, harness.Balance(parties.Destination.Id));
+    }
+
+    [TestMethod]
+    public async Task DailyOutgoingWindowFollowsTheCanonicalTimezone()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, dailyOutgoing: 300);
+
+        await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300, "first");
+
+        harness.Clock.Advance(TwoHoursInMilliseconds);
+
+        Result<PaymentOrderView> nextDay = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300, "second");
+
+        Assert.IsTrue(nextDay.IsSuccess);
+        Assert.AreEqual(600L, harness.Balance(parties.Destination.Id));
+    }
+
+    [TestMethod]
+    public async Task DailyOutgoingLimitIgnoresTheFee()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, dailyOutgoing: 300);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(5L, result.Value.FeeAmount.Value);
+        Assert.AreEqual(695L, harness.Balance(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task RejectedTransfersDoNotConsumeTheDailyAllowance()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness, funding: 400);
+        harness.PublishBankLimits(CappedPolicySeed, dailyOutgoing: 400);
+
+        Result<PaymentOrderView> overdraw = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 401, "first");
+        Result<PaymentOrderView> allowed = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 400, "second");
+
+        Assert.IsFalse(overdraw.IsSuccess);
+        Assert.IsTrue(allowed.IsSuccess);
+        Assert.AreEqual(400L, harness.Balance(parties.Destination.Id));
+    }
+
+    [TestMethod]
+    public async Task BankWithoutAPolicyVersionCannotTransfer()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.Execute("UPDATE banks SET current_policy_version_id = NULL;");
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.BankUnavailable, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.BankPolicyUnavailable, result.Error.Code);
+        Assert.AreEqual(0L, harness.Count("holds"));
+    }
+
+    [TestMethod]
+    public async Task RepeatedInteractionIsNotCountedTwiceAgainstTheDailyLimit()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishBankLimits(CappedPolicySeed, dailyOutgoing: 300);
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Result<PaymentOrderView> result = await harness.TransferAsync(
+                parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+            Assert.IsTrue(result.IsSuccess);
+        }
+
+        Assert.AreEqual(1L, harness.Count("payment_orders"));
+        Assert.AreEqual(300L, harness.Balance(parties.Destination.Id));
+    }
+
+    private const long TwoHoursInMilliseconds = 2 * 60 * 60 * 1000;
 
     private const string FeeRevenueBalanceSql = """
         SELECT CAST(p.posted_balance_minor AS TEXT)

@@ -46,12 +46,22 @@ public static class BankingErrorCodes
     public static string EconomyCalendarUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 7);
 
+    public static string BankPolicyUnavailable { get; } = ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 8);
+
     public static string CurrencyMismatch { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 5);
 
     public static string SelfTransferRejected { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 6);
 
     public static string DestinationAccountNotOperable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 3);
+
+    public static string TransferOperationDisabled { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 4);
+
+    public static string DailyOutgoingLimitExceeded { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 5);
+
+    public static string AmountLimitExceeded { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 7);
 
     public static string AvailableBalanceInsufficient { get; } = ErrorCodeFormat.Compose(ErrorCategory.InsufficientFunds, 1);
 
