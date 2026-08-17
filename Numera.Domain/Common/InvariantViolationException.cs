@@ -121,4 +121,6 @@ public static class InvariantViolationCode
     public const string FeeRuleWaiverInvalid = "FEE_RULE_WAIVER_INVALID";
     public const string FeeAssessmentAmountInvalid = "FEE_ASSESSMENT_AMOUNT_INVALID";
     public const string FeeAssessmentEndpointsInvalid = "FEE_ASSESSMENT_ENDPOINTS_INVALID";
+    public const string LimitValueNegative = "LIMIT_VALUE_NEGATIVE";
+    public const string LimitUsageInvalid = "LIMIT_USAGE_INVALID";
 }
