@@ -30,6 +30,19 @@ public static class BankingErrorCodes
 
     public static string BankNotOperating { get; } = ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 1);
 
+    public static string InterbankTransferUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 2);
+
+    public static string AccountingPeriodUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 3);
+
+    public static string CurrencyMismatch { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 5);
+
+    public static string SelfTransferRejected { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 6);
+
+    public static string DestinationAccountNotOperable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 3);
+
     public static string AvailableBalanceInsufficient { get; } = ErrorCodeFormat.Compose(ErrorCategory.InsufficientFunds, 1);
 
     public static string SystemBusy { get; } = ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 1);

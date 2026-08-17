@@ -7,6 +7,28 @@ using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Persistence.Sqlite.Repositories;
 
+public sealed class SqliteBranchRepository : IBranchRepository
+{
+    private readonly SqliteUnitOfWork unitOfWork;
+
+    internal SqliteBranchRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
+
+    public BranchId? FindIdByCode(BankId bankId, string branchCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchCode);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT branch_id FROM branches
+            WHERE bank_id = $bank AND branch_code = $code AND status <> 'CLOSED';
+            """);
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+        command.Parameters.AddWithValue("$code", branchCode);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? BranchId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)) : null;
+    }
+}
+
 public sealed class SqliteAccountingPeriodRepository : IAccountingPeriodRepository
 {
     private readonly SqliteUnitOfWork unitOfWork;
@@ -125,7 +147,7 @@ public sealed class SqliteHoldRepository : IHoldRepository
             WHERE hold_id = $id AND version = $expected;
             """);
         Bind(command, hold);
-        command.Parameters.AddWithValue("$expected", hold.Version - 1);
+        command.Parameters.AddWithValue("$expected", hold.PersistedVersion);
 
         if (command.ExecuteNonQuery() != 1)
         {
@@ -138,6 +160,20 @@ public sealed class SqliteHoldRepository : IHoldRepository
         using SqliteCommand command = unitOfWork.CreateCommand(
             $"SELECT {Columns} FROM holds WHERE hold_id = $id;");
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? Read(reader) : null;
+    }
+
+    public Hold? FindActiveByBusinessOperation(BusinessOperationId businessOperationId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM holds
+            WHERE business_operation_id = $operation AND status = 'ACTIVE'
+            ORDER BY hold_id
+            LIMIT 1;
+            """);
+        command.Parameters.AddWithValue("$operation", SqliteValueMapper.ToBlob(businessOperationId.Value));
 
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? Read(reader) : null;
@@ -221,7 +257,7 @@ public sealed class SqlitePaymentOrderRepository : IPaymentOrderRepository
             WHERE payment_order_id = $id AND version = $expected;
             """);
         Bind(command, order);
-        command.Parameters.AddWithValue("$expected", order.Version - 1);
+        command.Parameters.AddWithValue("$expected", order.PersistedVersion);
 
         if (command.ExecuteNonQuery() != 1)
         {
@@ -234,6 +270,16 @@ public sealed class SqlitePaymentOrderRepository : IPaymentOrderRepository
         using SqliteCommand command = unitOfWork.CreateCommand(
             $"SELECT {Columns} FROM payment_orders WHERE payment_order_id = $id;");
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? Read(reader) : null;
+    }
+
+    public PaymentOrder? FindByBusinessOperation(BusinessOperationId businessOperationId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand(
+            $"SELECT {Columns} FROM payment_orders WHERE business_operation_id = $operation;");
+        command.Parameters.AddWithValue("$operation", SqliteValueMapper.ToBlob(businessOperationId.Value));
 
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? Read(reader) : null;

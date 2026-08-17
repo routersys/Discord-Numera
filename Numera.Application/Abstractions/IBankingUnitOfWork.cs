@@ -85,6 +85,8 @@ public interface IBankingUnitOfWork
 
     IAccountProductRepository AccountProducts { get; }
 
+    IBranchRepository Branches { get; }
+
     IAccountingPeriodRepository AccountingPeriods { get; }
 
     IAccountingTransactionRepository AccountingTransactions { get; }
@@ -178,6 +180,11 @@ public interface IDepositAccountRepository
     long CountByBranch(BankId bankId, BranchId branchId);
 }
 
+public interface IBranchRepository
+{
+    BranchId? FindIdByCode(BankId bankId, string branchCode);
+}
+
 public interface IAccountingPeriodRepository
 {
     AccountingPeriodId? FindOpen(AccountingBookId bookId, BusinessDate businessDate);
@@ -195,6 +202,8 @@ public interface IHoldRepository
     void Update(Numera.Domain.Banking.Hold hold);
 
     Numera.Domain.Banking.Hold? Find(HoldId id);
+
+    Numera.Domain.Banking.Hold? FindActiveByBusinessOperation(BusinessOperationId businessOperationId);
 }
 
 public interface IPaymentOrderRepository
@@ -204,6 +213,8 @@ public interface IPaymentOrderRepository
     void Update(Numera.Domain.Banking.PaymentOrder order);
 
     Numera.Domain.Banking.PaymentOrder? Find(PaymentOrderId id);
+
+    Numera.Domain.Banking.PaymentOrder? FindByBusinessOperation(BusinessOperationId businessOperationId);
 }
 
 public interface IAccountProductRepository
