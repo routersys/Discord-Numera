@@ -427,11 +427,18 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         LedgerAccount sourceLedger = unitOfWork.LedgerAccounts.Find(source.LedgerAccountId)!;
         LedgerAccount destinationLedger = unitOfWork.LedgerAccounts.Find(destination.LedgerAccountId)!;
-        LedgerAccount[] ordered = plan.RequiresPosting
-            ? [sourceLedger, destinationLedger, plan.RevenueAccount]
-            : [sourceLedger, destinationLedger];
 
-        Array.Sort(ordered, static (left, right) => left.Id.Value.CompareTo(right.Id.Value));
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.DepositReleasingHold(sourceLedger, EntrySide.Debit, order.Amount, hold.Amount));
+        posting.Add(PostingLine.Deposit(destinationLedger, EntrySide.Credit, order.Amount));
+
+        if (plan.RequiresPosting)
+        {
+            posting.Add(PostingLine.Deposit(sourceLedger, EntrySide.Debit, plan.Quote.Amount));
+            posting.Add(PostingLine.Institutional(plan.RevenueAccount, EntrySide.Credit, plan.Quote.Amount));
+        }
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
 
         AccountingTransaction transaction = AccountingTransaction.Post(
             AccountingTransactionId.FromValue(idGenerator.NextId()),
@@ -443,7 +450,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             now,
             TransactionType,
             DescriptionCode,
-            BuildDrafts(ordered, order, plan, sourceLedger, destinationLedger),
+            posting.BuildDrafts(ordered, idGenerator),
             LedgerAccountSet.From(ordered));
 
         unitOfWork.AccountingTransactions.Add(transaction, period);
@@ -451,7 +458,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         hold.Capture(hold.Amount, now);
         unitOfWork.Holds.Update(hold);
 
-        ApplyProjections(unitOfWork, ordered, order, plan, sourceLedger, destinationLedger, now);
+        posting.ApplyProjections(unitOfWork, ordered, now);
         RecordFee(unitOfWork, order, plan, source, sourceLedger, now);
 
         order.CompleteInternalTransfer(now);
@@ -477,78 +484,6 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
     private static BusinessDate BusinessDateOf(UtcTimestamp at) => BusinessDate.FromDayNumber(
         DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(at.UnixMilliseconds).UtcDateTime).DayNumber);
-
-    private JournalEntryDraft[] BuildDrafts(
-        LedgerAccount[] ordered,
-        PaymentOrder order,
-        FeeAssessmentPlan plan,
-        LedgerAccount sourceLedger,
-        LedgerAccount destinationLedger)
-    {
-        List<JournalEntryDraft> drafts = new(plan.RequiresPosting ? 4 : 2);
-
-        foreach (LedgerAccount ledger in ordered)
-        {
-            if (ledger.Id == sourceLedger.Id)
-            {
-                drafts.Add(Draft(sourceLedger, EntrySide.Debit, order.Amount));
-
-                if (plan.RequiresPosting)
-                {
-                    drafts.Add(Draft(sourceLedger, EntrySide.Debit, plan.Quote.Amount));
-                }
-            }
-            else if (ledger.Id == destinationLedger.Id)
-            {
-                drafts.Add(Draft(destinationLedger, EntrySide.Credit, order.Amount));
-            }
-            else
-            {
-                drafts.Add(Draft(plan.RevenueAccount, EntrySide.Credit, plan.Quote.Amount));
-            }
-        }
-
-        return [.. drafts];
-    }
-
-    private JournalEntryDraft Draft(LedgerAccount ledger, EntrySide side, MoneyMinor amount) =>
-        new(JournalEntryId.FromValue(idGenerator.NextId()), ledger.Id, side, amount);
-
-    private static void ApplyProjections(
-        IBankingUnitOfWork unitOfWork,
-        LedgerAccount[] ordered,
-        PaymentOrder order,
-        FeeAssessmentPlan plan,
-        LedgerAccount sourceLedger,
-        LedgerAccount destinationLedger,
-        UtcTimestamp now)
-    {
-        foreach (LedgerAccount ledger in ordered)
-        {
-            LedgerBalance balance = unitOfWork.LedgerAccounts.FindProjection(ledger.Id) ?? LedgerBalance.Empty;
-
-            if (ledger.Id == sourceLedger.Id)
-            {
-                MoneyMinor debited = order.Amount.Add(plan.Quote.Amount);
-                balance = balance
-                    .ApplyPosting(EntrySide.Debit, ledger.NormalSide, debited)
-                    .DecreaseHold(debited)
-                    .EnsureDepositAccountInvariants();
-            }
-            else if (ledger.Id == destinationLedger.Id)
-            {
-                balance = balance
-                    .ApplyPosting(EntrySide.Credit, ledger.NormalSide, order.Amount)
-                    .EnsureDepositAccountInvariants();
-            }
-            else
-            {
-                balance = balance.ApplyPosting(EntrySide.Credit, ledger.NormalSide, plan.Quote.Amount);
-            }
-
-            unitOfWork.LedgerAccounts.UpsertProjection(ledger.Id, balance, now);
-        }
-    }
 
     private void RecordFee(
         IBankingUnitOfWork unitOfWork,
