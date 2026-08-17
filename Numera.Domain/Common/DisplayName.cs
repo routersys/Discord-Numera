@@ -1,7 +1,3 @@
-using System.Buffers;
-using System.Globalization;
-using System.Text;
-
 namespace Numera.Domain.Common;
 
 public readonly struct DisplayName : IEquatable<DisplayName>
@@ -17,41 +13,13 @@ public readonly struct DisplayName : IEquatable<DisplayName>
 
     public static bool TryParse(ReadOnlySpan<char> candidate, out DisplayName displayName)
     {
-        displayName = default;
-        ReadOnlySpan<char> trimmed = candidate.Trim();
-        if (trimmed.IsEmpty)
+        if (!BoundedTextValidator.TryNormalize(candidate, MinimumLength, MaximumLength, out string normalized))
         {
+            displayName = default;
             return false;
         }
 
-        int codePoints = 0;
-        for (int index = 0; index < trimmed.Length;)
-        {
-            if (Rune.DecodeFromUtf16(trimmed[index..], out Rune rune, out int consumed) != OperationStatus.Done)
-            {
-                return false;
-            }
-
-            if (Rune.GetUnicodeCategory(rune) == UnicodeCategory.Control)
-            {
-                return false;
-            }
-
-            codePoints++;
-            if (codePoints > MaximumLength)
-            {
-                return false;
-            }
-
-            index += consumed;
-        }
-
-        if (codePoints < MinimumLength)
-        {
-            return false;
-        }
-
-        displayName = new DisplayName(trimmed.ToString());
+        displayName = new DisplayName(normalized);
         return true;
     }
 
