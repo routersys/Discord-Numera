@@ -89,3 +89,16 @@ public sealed class EconomyEndpointResponse
 }
 
 public interface IEconomyEndpoint;
+
+public sealed class EconomyAutocompleteOption
+{
+    public EconomyAutocompleteOption(string name, string value)
+    {
+        Name = name;
+        Value = value;
+    }
+
+    public string Name { get; }
+
+    public string Value { get; }
+}
