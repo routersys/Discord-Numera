@@ -35,6 +35,7 @@ public sealed class InitialSchemaTests
         "outbox_events",
         "idempotency_records",
         "interaction_sessions",
+        "bank_operator_grants",
         "audit_records",
     ];
 
@@ -391,18 +392,63 @@ public sealed class InitialSchemaTests
     public void SessionTokenHashIsUnique()
     {
         using SqliteDatabaseFixture fixture = Initialized();
+        SeedGuildOnly(fixture);
         string hash = $"x'{new string('a', 64)}'";
 
         Execute(fixture, $"""
-            INSERT INTO interaction_sessions(interaction_session_id, discord_user_id, session_kind, token_hash,
-                payload_json, expected_version, status, created_at, expires_at, completed_at)
-            VALUES({Blob(110)}, '111', 'TRANSFER', {hash}, '{EmptyJson}', 1, 'ACTIVE', 1, 2, NULL);
+            INSERT INTO interaction_sessions(interaction_session_id, discord_user_id, guild_id, economy_scope_id,
+                flow_type, state, token_hash, payload_json, state_version, status, created_at, expires_at, completed_at)
+            VALUES({Blob(110)}, '111', '900', {Blob(30)}, 'BANK_TRANSFER', 'AMOUNT_INPUT', {hash},
+                '{EmptyJson}', 0, 'ACTIVE', 1, 2, NULL);
             """);
 
         Rejects(fixture, $"""
-            INSERT INTO interaction_sessions(interaction_session_id, discord_user_id, session_kind, token_hash,
-                payload_json, expected_version, status, created_at, expires_at, completed_at)
-            VALUES({Blob(111)}, '222', 'TRANSFER', {hash}, '{EmptyJson}', 1, 'ACTIVE', 1, 2, NULL);
+            INSERT INTO interaction_sessions(interaction_session_id, discord_user_id, guild_id, economy_scope_id,
+                flow_type, state, token_hash, payload_json, state_version, status, created_at, expires_at, completed_at)
+            VALUES({Blob(111)}, '222', '900', {Blob(30)}, 'BANK_TRANSFER', 'AMOUNT_INPUT', {hash},
+                '{EmptyJson}', 0, 'ACTIVE', 1, 2, NULL);
+            """);
+    }
+
+    [TestMethod]
+    public void SupersededSessionStatusIsAccepted()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+        SeedGuildOnly(fixture);
+
+        Execute(fixture, $"""
+            INSERT INTO interaction_sessions(interaction_session_id, discord_user_id, guild_id, economy_scope_id,
+                flow_type, state, token_hash, payload_json, state_version, status, created_at, expires_at, completed_at)
+            VALUES({Blob(112)}, '111', '900', {Blob(30)}, 'BANK_TRANSFER', 'AMOUNT_INPUT',
+                x'{new string('b', 64)}', '{EmptyJson}', 0, 'SUPERSEDED', 1, 2, 2);
+            """);
+    }
+
+    [TestMethod]
+    public void ActiveSessionCannotCarryCompletionTimestamp()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+        SeedGuildOnly(fixture);
+
+        Rejects(fixture, $"""
+            INSERT INTO interaction_sessions(interaction_session_id, discord_user_id, guild_id, economy_scope_id,
+                flow_type, state, token_hash, payload_json, state_version, status, created_at, expires_at, completed_at)
+            VALUES({Blob(113)}, '111', '900', {Blob(30)}, 'BANK_TRANSFER', 'AMOUNT_INPUT',
+                x'{new string('c', 64)}', '{EmptyJson}', 0, 'ACTIVE', 1, 2, 2);
+            """);
+    }
+
+    [TestMethod]
+    public void SessionExpiryMustFollowCreation()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+        SeedGuildOnly(fixture);
+
+        Rejects(fixture, $"""
+            INSERT INTO interaction_sessions(interaction_session_id, discord_user_id, guild_id, economy_scope_id,
+                flow_type, state, token_hash, payload_json, state_version, status, created_at, expires_at, completed_at)
+            VALUES({Blob(114)}, '111', '900', {Blob(30)}, 'BANK_TRANSFER', 'AMOUNT_INPUT',
+                x'{new string('d', 64)}', '{EmptyJson}', 0, 'ACTIVE', 5, 5, NULL);
             """);
     }
 
