@@ -46,6 +46,21 @@ public interface IOutboxRepository
     void Add(OutboxEvent outboxEvent);
 }
 
+public interface IInteractionSessionRepository
+{
+    void Add(InteractionSession session);
+
+    void Update(InteractionSession session);
+
+    InteractionSession? FindByTokenHash(byte[] tokenHash);
+
+    IReadOnlyList<InteractionSession> ListActiveByUser(string discordUserId);
+
+    IReadOnlyList<InteractionSession> ListExpired(UtcTimestamp now, int batchSize);
+
+    int PurgeTerminal(UtcTimestamp completedBefore, int batchSize);
+}
+
 public interface IBankingUnitOfWork
 {
     IPartyRepository Parties { get; }
@@ -57,6 +72,8 @@ public interface IBankingUnitOfWork
     IBusinessOperationRepository BusinessOperations { get; }
 
     IOutboxRepository Outbox { get; }
+
+    IInteractionSessionRepository InteractionSessions { get; }
 }
 
 public interface IBankingWriteGateway

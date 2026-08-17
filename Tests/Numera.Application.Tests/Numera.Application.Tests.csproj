@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Numera.Application\Numera.Application.csproj" />
     <ProjectReference Include="..\..\Numera.Persistence.Sqlite\Numera.Persistence.Sqlite.csproj" />
+    <ProjectReference Include="..\..\Numera.Discord\Numera.Discord.csproj" />
   </ItemGroup>
 
 </Project>

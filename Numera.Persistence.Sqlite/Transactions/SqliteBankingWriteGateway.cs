@@ -13,6 +13,7 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
         DiscordIdentityLinks = new SqliteDiscordIdentityLinkRepository(unitOfWork);
         BusinessOperations = new SqliteBusinessOperationRepository(unitOfWork);
         Outbox = new SqliteOutboxRepository(unitOfWork);
+        InteractionSessions = new SqliteInteractionSessionRepository(unitOfWork);
     }
 
     public IPartyRepository Parties { get; }
@@ -24,6 +25,8 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
     public IBusinessOperationRepository BusinessOperations { get; }
 
     public IOutboxRepository Outbox { get; }
+
+    public IInteractionSessionRepository InteractionSessions { get; }
 }
 
 public sealed class SqliteBankingWriteGateway : IBankingWriteGateway

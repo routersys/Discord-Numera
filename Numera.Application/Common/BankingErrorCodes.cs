@@ -34,5 +34,11 @@ public static class BankingErrorCodes
 
     public static string OperationCancelled { get; } = ErrorCodeFormat.Compose(ErrorCategory.OperationExpired, 1);
 
+    public static string SessionExpired { get; } = ErrorCodeFormat.Compose(ErrorCategory.OperationExpired, 2);
+
+    public static string SessionInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Forbidden, 1);
+
+    public static string SessionLimitReached { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 4);
+
     public static string ConcurrentModification { get; } = ErrorCodeFormat.Compose(ErrorCategory.ConcurrencyConflict, 1);
 }
