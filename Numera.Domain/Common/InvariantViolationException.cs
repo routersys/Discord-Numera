@@ -95,4 +95,9 @@ public static class InvariantViolationCode
     public const string OutboxStatusUnknown = "OUTBOX_STATUS_UNKNOWN";
     public const string OutboxAttemptExhausted = "OUTBOX_ATTEMPT_EXHAUSTED";
     public const string OutboxPayloadInvalid = "OUTBOX_PAYLOAD_INVALID";
+    public const string InteractionSessionTransitionInvalid = "INTERACTION_SESSION_TRANSITION_INVALID";
+    public const string InteractionSessionStatusUnknown = "INTERACTION_SESSION_STATUS_UNKNOWN";
+    public const string InteractionSessionTokenInvalid = "INTERACTION_SESSION_TOKEN_INVALID";
+    public const string InteractionSessionPayloadInvalid = "INTERACTION_SESSION_PAYLOAD_INVALID";
+    public const string InteractionSessionExpiryInvalid = "INTERACTION_SESSION_EXPIRY_INVALID";
 }
