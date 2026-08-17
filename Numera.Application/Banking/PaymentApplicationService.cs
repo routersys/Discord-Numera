@@ -167,7 +167,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         }
 
         return await writeGateway.ExecuteAsync(
-            unitOfWork => PostBeneficiaryCredit(unitOfWork, orderId, idempotencyKey),
+            unitOfWork => PostBeneficiaryCredit(unitOfWork, orderId),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -830,7 +830,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
     }
 
-    private Result<PaymentOrderView> SettleInterbank(
+    internal Result<PaymentOrderView> SettleInterbank(
         IBankingUnitOfWork unitOfWork,
         PaymentOrderId paymentOrderId)
     {
@@ -943,10 +943,9 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
     }
 
-    private Result<PaymentOrderView> PostBeneficiaryCredit(
+    internal Result<PaymentOrderView> PostBeneficiaryCredit(
         IBankingUnitOfWork unitOfWork,
-        PaymentOrderId paymentOrderId,
-        IdempotencyKey idempotencyKey)
+        PaymentOrderId paymentOrderId)
     {
         PaymentOrder order = unitOfWork.PaymentOrders.Find(paymentOrderId)!;
         DepositAccount source = unitOfWork.DepositAccounts.Find(order.SourceDepositAccountId)!;
@@ -1010,9 +1009,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         order.Complete(now);
         unitOfWork.PaymentOrders.Update(order);
 
-        BusinessOperation operation = unitOfWork.BusinessOperations.Find(idempotencyKey)!;
-        operation.Commit(now);
-        unitOfWork.BusinessOperations.Update(operation);
+        CommitOperation(unitOfWork, order.BusinessOperationId, now);
 
         unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
             OutboxEventId.FromValue(idGenerator.NextId()),
@@ -1022,6 +1019,20 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             now));
 
         return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+    }
+
+    private static void CommitOperation(
+        IBankingUnitOfWork unitOfWork,
+        BusinessOperationId businessOperationId,
+        UtcTimestamp now)
+    {
+        BusinessOperation operation = unitOfWork.BusinessOperations.FindById(businessOperationId)!;
+
+        if (operation.Status != BusinessOperationStatus.Committed)
+        {
+            operation.Commit(now);
+            unitOfWork.BusinessOperations.Update(operation);
+        }
     }
 
     private void PostSettlementLeg(

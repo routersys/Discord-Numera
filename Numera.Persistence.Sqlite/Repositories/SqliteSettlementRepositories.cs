@@ -62,6 +62,33 @@ public sealed class SqliteSettlementInstructionRepository : ISettlementInstructi
         return reader.Read() ? Read(reader) : null;
     }
 
+    public IReadOnlyList<BusinessOperationId> ListQueued(EntityIdValue? afterId, int limit)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT business_operation_id FROM settlement_instructions
+            WHERE status = 'QUEUED' AND ($after IS NULL OR settlement_instruction_id > $after)
+            ORDER BY settlement_instruction_id
+            LIMIT $limit;
+            """);
+        command.Parameters.AddWithValue("$after", SqliteValueMapper.ToParameter(afterId));
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<BusinessOperationId> operations = [];
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            operations.Add(BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)));
+        }
+
+        return operations;
+    }
+
     private static void Bind(SqliteCommand command, SettlementInstruction instruction)
     {
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(instruction.Id.Value));

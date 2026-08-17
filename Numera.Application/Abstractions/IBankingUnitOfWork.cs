@@ -39,6 +39,8 @@ public interface IBusinessOperationRepository
     void Update(BusinessOperation operation);
 
     BusinessOperation? Find(IdempotencyKey idempotencyKey);
+
+    BusinessOperation? FindById(BusinessOperationId id);
 }
 
 public interface IOutboxRepository
@@ -290,6 +292,8 @@ public interface ISettlementInstructionRepository
 
     Numera.Domain.Banking.SettlementInstruction? FindByBusinessOperation(
         BusinessOperationId businessOperationId);
+
+    IReadOnlyList<BusinessOperationId> ListQueued(EntityIdValue? afterId, int limit);
 }
 
 public interface IPaymentPreferenceRepository

@@ -315,6 +315,35 @@ public sealed class SqliteBusinessOperationRepository : IBusinessOperationReposi
             reader.GetInt64(8));
     }
 
+    public BusinessOperation? FindById(BusinessOperationId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT business_operation_id, operation_type, economy_scope_id, actor_party_id, correlation_id,
+                status, created_at, committed_at, version, idempotency_scope, idempotency_key
+            FROM business_operations
+            WHERE business_operation_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        return BusinessOperation.Rehydrate(
+            BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+            reader.GetString(1),
+            EconomyScopeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+            reader.IsDBNull(3) ? null : PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+            SqliteValueMapper.ReadEntityId(reader, 4),
+            IdempotencyKey.Create(reader.GetString(9), reader.GetString(10)),
+            BusinessOperationStatusCatalog.ParseToken(reader.GetString(5)),
+            SqliteValueMapper.ReadTimestamp(reader, 6),
+            SqliteValueMapper.ReadNullableTimestamp(reader, 7),
+            reader.GetInt64(8));
+    }
+
     private static void Bind(SqliteCommand command, BusinessOperation operation)
     {
         command.Parameters.AddWithValue("$business_operation_id", SqliteValueMapper.ToBlob(operation.Id.Value));

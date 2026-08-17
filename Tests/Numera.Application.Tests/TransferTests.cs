@@ -46,6 +46,8 @@ public sealed class TransferTests
 
         public PaymentApplicationService Payments { get; private set; } = null!;
 
+        public SettlementMaintenanceService Maintenance { get; private set; } = null!;
+
         public EconomyScopeId Scope { get; } = EconomyScopeId.FromValue(EntityIdValue.FromBits(1));
 
         public static Harness Create(
@@ -76,6 +78,7 @@ public sealed class TransferTests
             harness.Accounts = new DepositAccountApplicationService(gateway, harness.Clock, ids);
             harness.Payments = new PaymentApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
+            harness.Maintenance = new SettlementMaintenanceService(gateway, harness.Payments);
 
             return harness;
         }
@@ -802,6 +805,89 @@ public sealed class TransferTests
         Assert.AreEqual(5L, harness.Count("accounting_transactions"));
         Assert.AreEqual(700L, harness.Balance(parties.Source.Id));
         Assert.AreEqual(300L, harness.Balance(remote.Id));
+    }
+
+    [TestMethod]
+    public async Task QueuedSettlementConvergesOnceReservesArrive()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(100);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> queued = await InterbankTransferAsync(harness, parties, remote, 300);
+        Assert.AreEqual(PaymentOrderStatus.Queued, queued.Value.Status);
+
+        harness.FundReserve(5_000);
+        SettlementMaintenanceReport report = await harness.Maintenance.ProcessQueuedAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(1, report.Examined);
+        Assert.AreEqual(1, report.Settled);
+        Assert.AreEqual("COMPLETED", harness.ReadText("SELECT status FROM payment_orders;"));
+        Assert.AreEqual("SETTLED", harness.ReadText("SELECT status FROM settlement_instructions;"));
+        Assert.AreEqual(300L, harness.Balance(remote.Id));
+        Assert.AreEqual(4_700L, harness.LedgerBalanceOf(SourceReserveSeed));
+    }
+
+    [TestMethod]
+    public async Task QueuedSettlementStaysQueuedWhileReservesRemainShort()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(100);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        SettlementMaintenanceReport report = await harness.Maintenance.ProcessQueuedAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(1, report.Examined);
+        Assert.AreEqual(0, report.Settled);
+        Assert.AreEqual("QUEUED", harness.ReadText("SELECT status FROM settlement_instructions;"));
+        Assert.AreEqual(0L, harness.Balance(remote.Id));
+    }
+
+    [TestMethod]
+    public async Task MaintenanceIsANoOpWhenNothingIsQueued()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        SettlementMaintenanceReport report = await harness.Maintenance.ProcessQueuedAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(0, report.Examined);
+        Assert.AreEqual(5L, harness.Count("accounting_transactions"));
+    }
+
+    [TestMethod]
+    public async Task ResumedSettlementDoesNotDuplicateTheBeneficiaryCredit()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(100);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        harness.FundReserve(5_000);
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            await harness.Maintenance.ProcessQueuedAsync(CancellationToken.None);
+        }
+
+        Assert.AreEqual(300L, harness.Balance(remote.Id));
+        Assert.AreEqual(5L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(
+            "COMMITTED",
+            harness.ReadText($"""
+                SELECT status FROM business_operations
+                WHERE idempotency_scope = '{PaymentApplicationService.OperationType}';
+                """));
     }
 
     [TestMethod]
