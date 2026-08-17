@@ -16,6 +16,8 @@ public static class BankingErrorCodes
 
     public static string DepositAccountNotFound { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 3);
 
+    public static string SessionNotFound { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 4);
+
     public static string IdentityAlreadyLinked { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 1);
 
     public static string HandleAlreadyTaken { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 2);

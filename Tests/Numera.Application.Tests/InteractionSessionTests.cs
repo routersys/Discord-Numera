@@ -180,7 +180,7 @@ public sealed class InteractionSessionTests
             harness.Request(InteractionSessionService.CreateRawToken()), CancellationToken.None);
 
         Assert.IsFalse(consumed.IsSuccess);
-        Assert.AreEqual(ErrorCategory.Forbidden, consumed.Error!.Category);
+        Assert.AreEqual(ErrorCategory.NotFound, consumed.Error!.Category);
     }
 
     [TestMethod]
@@ -193,7 +193,8 @@ public sealed class InteractionSessionTests
             harness.Request(opened.Value.RawToken, user: Intruder), CancellationToken.None);
 
         Assert.IsFalse(consumed.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.SessionInvalid, consumed.Error!.Code);
+        Assert.AreEqual(ErrorCategory.NotFound, consumed.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.SessionNotFound, consumed.Error.Code);
     }
 
     [TestMethod]

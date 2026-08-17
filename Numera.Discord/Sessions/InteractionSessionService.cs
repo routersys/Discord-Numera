@@ -163,7 +163,8 @@ public sealed class InteractionSessionService
             ErrorCategory.OperationExpired, BankingErrorCodes.SessionExpired),
         SessionVerification.StateMismatch or SessionVerification.VersionMismatch => ApplicationError.Create(
             ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification),
-        _ => ApplicationError.Create(ErrorCategory.Forbidden, BankingErrorCodes.SessionInvalid),
+        _ => TargetAccessPolicy.ToError(
+            TargetAccess.NotOwned, BankingErrorCodes.SessionNotFound, BankingErrorCodes.SessionInvalid),
     };
 
     public Task<Result<InteractionSessionTicket>> OpenAsync(
