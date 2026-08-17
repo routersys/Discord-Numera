@@ -139,11 +139,30 @@ public interface ICurrencyReadRepository
         int limit);
 }
 
+public sealed record TransferSourceView(DepositAccountId Id, CurrencyId CurrencyId);
+
+public interface ITransferPreparationReadRepository
+{
+    TransferSourceView? FindOwnedSource(
+        CustomerAccountId payerCustomerAccountId,
+        DepositAccountId sourceDepositAccountId);
+
+    CustomerAccountId? FindCustomerByDiscordUser(EconomyScopeId economyScopeId, string discordUserId);
+
+    IReadOnlyList<Numera.Application.Banking.TransferDestinationCandidate> ListPublicReceivingAccounts(
+        CustomerAccountId beneficiaryCustomerAccountId,
+        CurrencyId currencyId,
+        DepositAccountId excludedDepositAccountId,
+        int limit);
+}
+
 public interface IBankingReadContext
 {
     IBankReadRepository Banks { get; }
 
     ICurrencyReadRepository Currencies { get; }
+
+    ITransferPreparationReadRepository TransferPreparation { get; }
 }
 
 public interface IBankingReadGateway

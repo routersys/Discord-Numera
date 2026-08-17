@@ -5,6 +5,7 @@ using Numera.Domain.Banking;
 using Numera.Domain.Common;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Migrations;
+using Numera.Persistence.Sqlite.Repositories;
 using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Application.Tests;
@@ -73,7 +74,8 @@ public sealed class TransferTests
 
             harness.Registration = new CustomerAccountApplicationService(gateway, harness.Clock, ids);
             harness.Accounts = new DepositAccountApplicationService(gateway, harness.Clock, ids);
-            harness.Payments = new PaymentApplicationService(gateway, harness.Clock, ids);
+            harness.Payments = new PaymentApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
 
             return harness;
         }

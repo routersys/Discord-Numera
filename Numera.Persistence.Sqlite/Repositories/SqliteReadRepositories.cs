@@ -126,17 +126,114 @@ public sealed class SqliteCurrencyReadRepository : ICurrencyReadRepository
     }
 }
 
+public sealed class SqliteTransferPreparationReadRepository : ITransferPreparationReadRepository
+{
+    private readonly SqliteConnection connection;
+
+    internal SqliteTransferPreparationReadRepository(SqliteConnection connection) =>
+        this.connection = connection;
+
+    public TransferSourceView? FindOwnedSource(
+        CustomerAccountId payerCustomerAccountId,
+        DepositAccountId sourceDepositAccountId)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT deposit_account_id, currency_id FROM deposit_accounts
+            WHERE deposit_account_id = $account AND customer_account_id = $customer;
+            """;
+        command.Parameters.AddWithValue("$account", sourceDepositAccountId.Value.ToByteArray());
+        command.Parameters.AddWithValue("$customer", payerCustomerAccountId.Value.ToByteArray());
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read()
+            ? new TransferSourceView(
+                DepositAccountId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),
+                CurrencyId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(1))))
+            : null;
+    }
+
+    public CustomerAccountId? FindCustomerByDiscordUser(EconomyScopeId economyScopeId, string discordUserId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(discordUserId);
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT l.customer_account_id
+            FROM discord_identity_links AS l
+            INNER JOIN customer_accounts AS c ON c.customer_account_id = l.customer_account_id
+            WHERE l.discord_user_id = $user AND l.status = 'ACTIVE' AND c.status <> 'CLOSED';
+            """;
+        command.Parameters.AddWithValue("$user", discordUserId);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read()
+            ? CustomerAccountId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0)))
+            : null;
+    }
+
+    public IReadOnlyList<TransferDestinationCandidate> ListPublicReceivingAccounts(
+        CustomerAccountId beneficiaryCustomerAccountId,
+        CurrencyId currencyId,
+        DepositAccountId excludedDepositAccountId,
+        int limit)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT d.deposit_account_id, b.institution_code, r.branch_code, d.account_number, b.name
+            FROM deposit_accounts AS d
+            INNER JOIN banks AS b ON b.bank_id = d.bank_id
+            INNER JOIN branches AS r ON r.branch_id = d.branch_id
+            WHERE d.customer_account_id = $customer
+              AND d.currency_id = $currency
+              AND d.deposit_account_id <> $excluded
+              AND d.public_receiving_enabled = 1
+              AND d.status IN ('ACTIVE', 'RESTRICTED', 'DORMANT')
+              AND b.status IN ('OPERATING', 'RESTRICTED')
+            ORDER BY b.name ASC, d.account_number ASC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$customer", beneficiaryCustomerAccountId.Value.ToByteArray());
+        command.Parameters.AddWithValue("$currency", currencyId.Value.ToByteArray());
+        command.Parameters.AddWithValue("$excluded", excludedDepositAccountId.Value.ToByteArray());
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<TransferDestinationCandidate> candidates = [];
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            candidates.Add(new TransferDestinationCandidate(
+                DepositAccountId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4)));
+        }
+
+        return candidates;
+    }
+}
+
 public sealed class SqliteBankingReadContext : IBankingReadContext
 {
     internal SqliteBankingReadContext(SqliteConnection connection)
     {
         Banks = new SqliteBankReadRepository(connection);
         Currencies = new SqliteCurrencyReadRepository(connection);
+        TransferPreparation = new SqliteTransferPreparationReadRepository(connection);
     }
 
     public IBankReadRepository Banks { get; }
 
     public ICurrencyReadRepository Currencies { get; }
+
+    public ITransferPreparationReadRepository TransferPreparation { get; }
 }
 
 public sealed class SqliteBankingReadGateway : IBankingReadGateway

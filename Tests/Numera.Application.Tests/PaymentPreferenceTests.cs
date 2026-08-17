@@ -5,6 +5,7 @@ using Numera.Domain.Banking;
 using Numera.Domain.Common;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Migrations;
+using Numera.Persistence.Sqlite.Repositories;
 using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Application.Tests;
@@ -65,7 +66,8 @@ public sealed class PaymentPreferenceApplicationTests
 
             harness.Registration = new CustomerAccountApplicationService(gateway, harness.Clock, ids);
             harness.Accounts = new DepositAccountApplicationService(gateway, harness.Clock, ids);
-            harness.Payments = new PaymentApplicationService(gateway, harness.Clock, ids);
+            harness.Payments = new PaymentApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
 
             return harness;
         }
@@ -170,6 +172,14 @@ public sealed class PaymentPreferenceApplicationTests
             return result.Value;
         }
 
+        public Task<Result<TransferPreparationView>> PrepareAsync(
+            CustomerAccountId payer,
+            DepositAccountId source,
+            ulong beneficiaryDiscordUserId) =>
+            Payments.PrepareTransferToCustomerAsync(
+                new PrepareTransferToCustomerQuery(Scope, payer, source, beneficiaryDiscordUserId),
+                CancellationToken.None);
+
         public Task<Result<PaymentPreferenceView>> SetAsync(
             CustomerAccountId customerAccountId,
             DepositAccountId depositAccountId,
@@ -195,6 +205,121 @@ public sealed class PaymentPreferenceApplicationTests
             {
             }
         }
+    }
+
+    [TestMethod]
+    public async Task PreparationListsTheBeneficiaryPublicReceivingAccounts()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
+        CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
+        DepositAccountView source = await harness.OpenAsync(payer);
+        DepositAccountView destination = await harness.OpenAsync(payee);
+
+        Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(1, result.Value.Candidates.Count);
+        Assert.AreEqual(destination.Id, result.Value.Candidates[0].DepositAccountId);
+        Assert.AreEqual(Institution, result.Value.Candidates[0].InstitutionCode);
+    }
+
+    [TestMethod]
+    public async Task PreparationExposesOnlyTheAccountNumberSuffixForDisplay()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
+        CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
+        DepositAccountView source = await harness.OpenAsync(payer);
+        DepositAccountView destination = await harness.OpenAsync(payee);
+
+        Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
+        TransferDestinationCandidate candidate = result.Value.Candidates[0];
+
+        Assert.AreEqual(AccountNumber.SuffixLength, candidate.AccountNumberSuffix.Length);
+        Assert.IsTrue(destination.AccountNumber.EndsWith(candidate.AccountNumberSuffix, StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task AccountsThatDoNotPubliclyReceiveAreNotListed()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
+        CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
+        DepositAccountView source = await harness.OpenAsync(payer);
+        DepositAccountView destination = await harness.OpenAsync(payee);
+        harness.Execute($"""
+            UPDATE deposit_accounts SET public_receiving_enabled = 0, version = version + 1
+            WHERE account_number = '{destination.AccountNumber}';
+            """);
+
+        Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.NotFound, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.DepositAccountNotFound, result.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task ClosedBeneficiaryAccountsAreNotListed()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
+        CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
+        DepositAccountView source = await harness.OpenAsync(payer);
+        DepositAccountView destination = await harness.OpenAsync(payee);
+        harness.Execute($"""
+            UPDATE deposit_accounts
+            SET status = 'CLOSED_USER', closure_reason = 'USER', closed_at = 1, version = version + 1
+            WHERE account_number = '{destination.AccountNumber}';
+            """);
+
+        Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.DepositAccountNotFound, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task UnknownDiscordUserIsNotFound()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
+        DepositAccountView source = await harness.OpenAsync(payer);
+
+        Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CustomerAccountNotFound, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task ForeignSourceAccountIsNormalizedToNotFoundDuringPreparation()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
+        CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
+        DepositAccountView source = await harness.OpenAsync(payer);
+        await harness.OpenAsync(payee);
+
+        Result<TransferPreparationView> result = await harness.PrepareAsync(payee, source.Id, OwnerUser);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.NotFound, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.DepositAccountNotFound, result.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task PreparationNeverListsTheSourceAccountItself()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
+        DepositAccountView source = await harness.OpenAsync(payer);
+
+        Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OwnerUser);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.DepositAccountNotFound, result.Error!.Code);
     }
 
     [TestMethod]

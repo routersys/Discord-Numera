@@ -1,3 +1,4 @@
+using System.Globalization;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
 using Numera.Domain.Accounting;
@@ -28,6 +29,29 @@ public sealed record PaymentOrderView(
     MoneyMinor SourcePostedBalance,
     MoneyMinor SourceAvailableBalance);
 
+public sealed record PrepareTransferToCustomerQuery(
+    EconomyScopeId EconomyScopeId,
+    CustomerAccountId PayerCustomerAccountId,
+    DepositAccountId SourceDepositAccountId,
+    ulong BeneficiaryDiscordUserId);
+
+public sealed record TransferDestinationCandidate(
+    DepositAccountId DepositAccountId,
+    string InstitutionCode,
+    string BranchCode,
+    string AccountNumber,
+    string BankName)
+{
+    public string AccountNumberSuffix =>
+        AccountNumber is { Length: >= Numera.Domain.Banking.AccountNumber.SuffixLength } number
+            ? number[^Numera.Domain.Banking.AccountNumber.SuffixLength..]
+            : AccountNumber;
+}
+
+public sealed record TransferPreparationView(
+    DepositAccountId SourceDepositAccountId,
+    IReadOnlyList<TransferDestinationCandidate> Candidates);
+
 public sealed record SetPaymentPreferenceCommand(
     CustomerAccountId CustomerAccountId,
     PaymentPreferenceKind Kind,
@@ -40,6 +64,10 @@ public sealed record PaymentPreferenceView(
 
 public interface IPaymentApplicationService
 {
+    Task<Result<TransferPreparationView>> PrepareTransferToCustomerAsync(
+        PrepareTransferToCustomerQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<PaymentOrderView>> CreatePaymentOrderAsync(
         CreatePaymentOrderCommand command,
         CancellationToken cancellationToken);
@@ -68,19 +96,23 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     private const FeeChannel TransferChannel = FeeChannel.Discord;
 
     private readonly IBankingWriteGateway writeGateway;
+    private readonly IBankingReadGateway readGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public PaymentApplicationService(
         IBankingWriteGateway writeGateway,
+        IBankingReadGateway readGateway,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(readGateway);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.readGateway = readGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
@@ -137,6 +169,55 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         return await writeGateway.ExecuteAsync(
             unitOfWork => PostBeneficiaryCredit(unitOfWork, orderId, idempotencyKey),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<Result<TransferPreparationView>> PrepareTransferToCustomerAsync(
+        PrepareTransferToCustomerQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(readGateway.Execute(context => PrepareTransfer(context, query)));
+    }
+
+    private static Result<TransferPreparationView> PrepareTransfer(
+        IBankingReadContext context,
+        PrepareTransferToCustomerQuery query)
+    {
+        ITransferPreparationReadRepository repository = context.TransferPreparation;
+
+        if (repository.FindOwnedSource(query.PayerCustomerAccountId, query.SourceDepositAccountId)
+            is not { } source)
+        {
+            ApplicationError denied = TargetAccessPolicy.ToError(
+                TargetAccess.NotOwned,
+                BankingErrorCodes.DepositAccountNotFound,
+                BankingErrorCodes.DepositAccountNotOperable);
+
+            return Result<TransferPreparationView>.Failure(denied.Category, denied.Code);
+        }
+
+        CustomerAccountId? beneficiary = repository.FindCustomerByDiscordUser(
+            query.EconomyScopeId,
+            query.BeneficiaryDiscordUserId.ToString(CultureInfo.InvariantCulture));
+
+        if (beneficiary is not { } beneficiaryCustomerAccountId)
+        {
+            return Result<TransferPreparationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        IReadOnlyList<TransferDestinationCandidate> candidates = repository.ListPublicReceivingAccounts(
+            beneficiaryCustomerAccountId,
+            source.CurrencyId,
+            source.Id,
+            PaginationBudget.SelectCandidatePageSize);
+
+        return candidates.Count == 0
+            ? Result<TransferPreparationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound)
+            : Result<TransferPreparationView>.Success(new TransferPreparationView(source.Id, candidates));
     }
 
     public Task<Result<PaymentPreferenceView>> SetPaymentPreferenceAsync(
