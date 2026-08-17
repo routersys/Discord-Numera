@@ -107,7 +107,7 @@ public sealed class SqliteCustomerAccountRepository : ICustomerAccountRepository
             WHERE customer_account_id = $customer_account_id AND version = $expected_version;
             """);
         Bind(command, account);
-        command.Parameters.AddWithValue("$expected_version", account.Version - 1);
+        command.Parameters.AddWithValue("$expected_version", account.PersistedVersion);
 
         if (command.ExecuteNonQuery() != 1)
         {
@@ -196,7 +196,7 @@ public sealed class SqliteDiscordIdentityLinkRepository : IDiscordIdentityLinkRe
             WHERE discord_identity_link_id = $discord_identity_link_id AND version = $expected_version;
             """);
         Bind(command, link);
-        command.Parameters.AddWithValue("$expected_version", link.Version - 1);
+        command.Parameters.AddWithValue("$expected_version", link.PersistedVersion);
 
         if (command.ExecuteNonQuery() != 1)
         {
@@ -277,7 +277,7 @@ public sealed class SqliteBusinessOperationRepository : IBusinessOperationReposi
             WHERE business_operation_id = $business_operation_id AND version = $expected_version;
             """);
         Bind(command, operation);
-        command.Parameters.AddWithValue("$expected_version", operation.Version - 1);
+        command.Parameters.AddWithValue("$expected_version", operation.PersistedVersion);
 
         if (command.ExecuteNonQuery() != 1)
         {

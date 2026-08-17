@@ -93,7 +93,7 @@ public sealed class SqliteBankCustomerRelationshipRepository : IBankCustomerRela
             WHERE relationship_id = $id AND version = $expected;
             """);
         Bind(command, relationship);
-        command.Parameters.AddWithValue("$expected", relationship.Version - 1);
+        command.Parameters.AddWithValue("$expected", relationship.PersistedVersion);
 
         if (command.ExecuteNonQuery() != 1)
         {
@@ -314,7 +314,7 @@ public sealed class SqliteDepositAccountRepository : IDepositAccountRepository
             WHERE deposit_account_id = $id AND version = $expected;
             """);
         Bind(command, account);
-        command.Parameters.AddWithValue("$expected", account.Version - 1);
+        command.Parameters.AddWithValue("$expected", account.PersistedVersion);
 
         if (command.ExecuteNonQuery() != 1)
         {
