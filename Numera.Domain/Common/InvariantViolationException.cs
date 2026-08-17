@@ -64,4 +64,5 @@ public static class InvariantViolationCode
     public const string HoldExpiryInvalid = "HOLD_EXPIRY_INVALID";
     public const string HoldNotExpirable = "HOLD_NOT_EXPIRABLE";
     public const string HoldStatusUnknown = "HOLD_STATUS_UNKNOWN";
+    public const string StateTransitionSelfLoop = "STATE_TRANSITION_SELF_LOOP";
 }
