@@ -33,6 +33,7 @@ public static class LedgerAccountKindCatalog
         LedgerAccountKind.CentralBankIntradayBorrowing => "CENTRAL_BANK_INTRADAY_BORROWING",
         LedgerAccountKind.CentralBankOvernightBorrowing => "CENTRAL_BANK_OVERNIGHT_BORROWING",
         LedgerAccountKind.CashOutstandingLiability => "CASH_OUTSTANDING_LIABILITY",
+        LedgerAccountKind.BaseMoneyIssuanceLiability => "BASE_MONEY_ISSUANCE_LIABILITY",
         LedgerAccountKind.AccruedInterestPayable => "ACCRUED_INTEREST_PAYABLE",
         LedgerAccountKind.FeeTaxPayable => "FEE_TAX_PAYABLE",
         LedgerAccountKind.SuspenseLiability => "SUSPENSE_LIABILITY",
@@ -85,6 +86,7 @@ public static class LedgerAccountKindCatalog
         LedgerAccountKind.CentralBankIntradayBorrowing => AccountingType.Liability,
         LedgerAccountKind.CentralBankOvernightBorrowing => AccountingType.Liability,
         LedgerAccountKind.CashOutstandingLiability => AccountingType.Liability,
+        LedgerAccountKind.BaseMoneyIssuanceLiability => AccountingType.Liability,
         LedgerAccountKind.AccruedInterestPayable => AccountingType.Liability,
         LedgerAccountKind.FeeTaxPayable => AccountingType.Liability,
         LedgerAccountKind.SuspenseLiability => AccountingType.Liability,
@@ -196,6 +198,9 @@ public static class LedgerAccountKindCatalog
                 return true;
             case "CASH_OUTSTANDING_LIABILITY":
                 kind = LedgerAccountKind.CashOutstandingLiability;
+                return true;
+            case "BASE_MONEY_ISSUANCE_LIABILITY":
+                kind = LedgerAccountKind.BaseMoneyIssuanceLiability;
                 return true;
             case "ACCRUED_INTEREST_PAYABLE":
                 kind = LedgerAccountKind.AccruedInterestPayable;

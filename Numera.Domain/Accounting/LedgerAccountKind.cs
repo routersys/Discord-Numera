@@ -49,4 +49,5 @@ public enum LedgerAccountKind
     OperatingExpense = 45,
     ResolutionLossExpense = 46,
     CentralBankSettlementLiability = 47,
+    BaseMoneyIssuanceLiability = 48,
 }
