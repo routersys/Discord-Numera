@@ -51,6 +51,9 @@ public sealed class InitialSchemaTests
         "clearing_cycles",
         "clearing_instructions",
         "clearing_positions",
+        "payment_networks",
+        "payment_network_policy_versions",
+        "payment_network_prefunds",
     ];
 
     private static SqliteDatabaseFixture Initialized()
@@ -117,6 +120,34 @@ public sealed class InitialSchemaTests
         }
 
         CollectionAssert.AreEqual(Array.Empty<string>(), lenient);
+    }
+
+    [TestMethod]
+    public void ForeignKeyCheckReportsNoViolation()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+
+        using SqliteConnection connection = fixture.ConnectionFactory.OpenRuntimeConnection();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA foreign_key_check;";
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        Assert.IsFalse(reader.Read());
+    }
+
+    [TestMethod]
+    public void PaymentOrderReferencesPaymentNetworkPolicyVersion()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+
+        using SqliteConnection connection = fixture.ConnectionFactory.OpenRuntimeConnection();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT count(*) FROM pragma_foreign_key_list('payment_orders')
+            WHERE "table" = 'payment_network_policy_versions' AND "from" = 'payment_network_policy_version_id';
+            """;
+
+        Assert.AreEqual(1L, command.ExecuteScalar());
     }
 
     [TestMethod]
@@ -473,6 +504,126 @@ public sealed class InitialSchemaTests
         SeedTwoCustomers(fixture);
 
         Rejects(fixture, $"DELETE FROM parties WHERE party_id = {Blob(1)};");
+    }
+
+    private static void SeedPaymentNetworkPrerequisites(SqliteDatabaseFixture fixture)
+    {
+        SeedEconomy(fixture);
+        Execute(fixture, $"""
+            INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+            VALUES({Blob(51)}, 'SYSTEM', '清算機関', 'ACTIVE', 1, 1);
+            """);
+        Execute(fixture, $"""
+            INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status, created_at, version)
+            VALUES({Blob(52)}, {Blob(51)}, 'SYSTEM', 'OPEN', 1, 1);
+            """);
+        Execute(fixture, $"""
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
+                account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES({Blob(53)}, {Blob(52)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT', {Blob(32)}, 1,
+                NULL, NULL, 'ACTIVE', 1, 1);
+            """);
+    }
+
+    private static void SeedPaymentNetwork(SqliteDatabaseFixture fixture, int networkSeed, int policySeed, string code)
+    {
+        Execute(fixture, $"""
+            INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
+                accounting_book_id, liquid_asset_ledger_account_id, status, current_policy_version_id, version)
+            VALUES({Blob(networkSeed)}, {Blob(30)}, '{code}', {Blob(51)}, {Blob(52)}, {Blob(53)}, 'DRAFT', NULL, 1);
+            """);
+        Execute(fixture, $"""
+            INSERT INTO payment_network_policy_versions(payment_network_policy_version_id, payment_network_id,
+                settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor, clearing_cycle_interval_seconds,
+                precredit_enabled, precredit_prefund_ratio_bps, per_bank_precredit_exposure_limit_minor,
+                created_at, version)
+            VALUES({Blob(policySeed)}, {Blob(networkSeed)}, 'CLEARING', 'AFTER_FINAL_SETTLEMENT', NULL, 3600,
+                0, 10000, 0, 1, 1);
+            """);
+        Execute(fixture, $"""
+            UPDATE payment_networks
+            SET status = 'ACTIVE', current_policy_version_id = {Blob(policySeed)}, version = 2
+            WHERE payment_network_id = {Blob(networkSeed)};
+            """);
+    }
+
+    [TestMethod]
+    public void EconomyScopeAcceptsOneActivePaymentNetwork()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+        SeedPaymentNetworkPrerequisites(fixture);
+
+        SeedPaymentNetwork(fixture, 60, 61, "ZENGIN");
+    }
+
+    [TestMethod]
+    public void EconomyScopeRejectsSecondActivePaymentNetwork()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+        SeedPaymentNetworkPrerequisites(fixture);
+        SeedPaymentNetwork(fixture, 60, 61, "ZENGIN");
+
+        Execute(fixture, $"""
+            INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
+                accounting_book_id, liquid_asset_ledger_account_id, status, current_policy_version_id, version)
+            VALUES({Blob(62)}, {Blob(30)}, 'RETAIL', {Blob(51)}, {Blob(52)}, {Blob(53)}, 'DRAFT', NULL, 1);
+            """);
+        Execute(fixture, $"""
+            INSERT INTO payment_network_policy_versions(payment_network_policy_version_id, payment_network_id,
+                settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor, clearing_cycle_interval_seconds,
+                precredit_enabled, precredit_prefund_ratio_bps, per_bank_precredit_exposure_limit_minor,
+                created_at, version)
+            VALUES({Blob(63)}, {Blob(62)}, 'CLEARING', 'AFTER_FINAL_SETTLEMENT', NULL, 3600, 0, 10000, 0, 1, 1);
+            """);
+
+        Rejects(fixture, $"""
+            UPDATE payment_networks
+            SET status = 'ACTIVE', current_policy_version_id = {Blob(63)}, version = 2
+            WHERE payment_network_id = {Blob(62)};
+            """);
+    }
+
+    [TestMethod]
+    public void GuaranteedPreCreditRequiresClearingAndPrecreditEnabled()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+        SeedPaymentNetworkPrerequisites(fixture);
+
+        Execute(fixture, $"""
+            INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
+                accounting_book_id, liquid_asset_ledger_account_id, status, current_policy_version_id, version)
+            VALUES({Blob(60)}, {Blob(30)}, 'ZENGIN', {Blob(51)}, {Blob(52)}, {Blob(53)}, 'DRAFT', NULL, 1);
+            """);
+
+        Rejects(fixture, $"""
+            INSERT INTO payment_network_policy_versions(payment_network_policy_version_id, payment_network_id,
+                settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor, clearing_cycle_interval_seconds,
+                precredit_enabled, precredit_prefund_ratio_bps, per_bank_precredit_exposure_limit_minor,
+                created_at, version)
+            VALUES({Blob(61)}, {Blob(60)}, 'RTGS', 'GUARANTEED_PRE_CREDIT', NULL, NULL, 1, 10000, 0, 1, 1);
+            """);
+    }
+
+    [TestMethod]
+    public void PrecreditPrefundRatioBelowParIsRejected()
+    {
+        using SqliteDatabaseFixture fixture = Initialized();
+        SeedPaymentNetworkPrerequisites(fixture);
+
+        Execute(fixture, $"""
+            INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
+                accounting_book_id, liquid_asset_ledger_account_id, status, current_policy_version_id, version)
+            VALUES({Blob(60)}, {Blob(30)}, 'ZENGIN', {Blob(51)}, {Blob(52)}, {Blob(53)}, 'DRAFT', NULL, 1);
+            """);
+
+        Rejects(fixture, $"""
+            INSERT INTO payment_network_policy_versions(payment_network_policy_version_id, payment_network_id,
+                settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor, clearing_cycle_interval_seconds,
+                precredit_enabled, precredit_prefund_ratio_bps, per_bank_precredit_exposure_limit_minor,
+                created_at, version)
+            VALUES({Blob(61)}, {Blob(60)}, 'CLEARING', 'GUARANTEED_PRE_CREDIT', NULL, 3600, 1, 9999, 0, 1, 1);
+            """);
     }
 
     private static void SeedGuildOnly(SqliteDatabaseFixture fixture) =>
