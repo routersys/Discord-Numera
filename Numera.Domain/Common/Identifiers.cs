@@ -279,6 +279,33 @@ public readonly record struct PaymentPreferenceId(EntityIdValue Value) : IEntity
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct ClearingCycleId(EntityIdValue Value) : IEntityId<ClearingCycleId>
+{
+    public static string EntityName => "clearing_cycle";
+
+    public static ClearingCycleId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ClearingInstructionId(EntityIdValue Value) : IEntityId<ClearingInstructionId>
+{
+    public static string EntityName => "clearing_instruction";
+
+    public static ClearingInstructionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ClearingPositionId(EntityIdValue Value) : IEntityId<ClearingPositionId>
+{
+    public static string EntityName => "clearing_position";
+
+    public static ClearingPositionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
 public readonly record struct SettlementInstructionId(EntityIdValue Value) : IEntityId<SettlementInstructionId>
 {
     public static string EntityName => "settlement_instruction";

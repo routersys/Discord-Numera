@@ -48,6 +48,9 @@ public sealed class InitialSchemaTests
         "settlement_participations",
         "settlement_instructions",
         "payment_preferences",
+        "clearing_cycles",
+        "clearing_instructions",
+        "clearing_positions",
     ];
 
     private static SqliteDatabaseFixture Initialized()

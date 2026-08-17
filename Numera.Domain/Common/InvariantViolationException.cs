@@ -125,6 +125,15 @@ public static class InvariantViolationCode
     public const string PaymentPreferenceAlreadyDisabled = "PAYMENT_PREFERENCE_ALREADY_DISABLED";
     public const string LimitValueNegative = "LIMIT_VALUE_NEGATIVE";
     public const string LimitUsageInvalid = "LIMIT_USAGE_INVALID";
+    public const string ClearingCycleTransitionInvalid = "CLEARING_CYCLE_TRANSITION_INVALID";
+    public const string ClearingCycleStatusUnknown = "CLEARING_CYCLE_STATUS_UNKNOWN";
+    public const string ClearingCycleKeyInvalid = "CLEARING_CYCLE_KEY_INVALID";
+    public const string ClearingInstructionTransitionInvalid = "CLEARING_INSTRUCTION_TRANSITION_INVALID";
+    public const string ClearingInstructionStatusUnknown = "CLEARING_INSTRUCTION_STATUS_UNKNOWN";
+    public const string ClearingInstructionAmountInvalid = "CLEARING_INSTRUCTION_AMOUNT_INVALID";
+    public const string ClearingInstructionEndpointsInvalid = "CLEARING_INSTRUCTION_ENDPOINTS_INVALID";
+    public const string ClearingInstructionCycleMissing = "CLEARING_INSTRUCTION_CYCLE_MISSING";
+    public const string ClearingPositionInconsistent = "CLEARING_POSITION_INCONSISTENT";
     public const string SettlementInstructionTransitionInvalid = "SETTLEMENT_INSTRUCTION_TRANSITION_INVALID";
     public const string SettlementInstructionStatusUnknown = "SETTLEMENT_INSTRUCTION_STATUS_UNKNOWN";
     public const string SettlementInstructionAmountInvalid = "SETTLEMENT_INSTRUCTION_AMOUNT_INVALID";
