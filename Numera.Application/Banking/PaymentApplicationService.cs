@@ -22,6 +22,8 @@ public sealed record PaymentOrderView(
     PaymentOrderId Id,
     PaymentOrderStatus Status,
     MoneyMinor Amount,
+    MoneyMinor FeeAmount,
+    MoneyMinor TotalDebitAmount,
     string DestinationAccountNumber,
     MoneyMinor SourcePostedBalance,
     MoneyMinor SourceAvailableBalance);
@@ -41,6 +43,9 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     public const string DescriptionCode = "TRANSFER";
     public const string HoldReason = "TRANSFER";
     public const string PaymentMethod = "INTERNAL_TRANSFER";
+
+    private const FeeChannel TransferChannel = FeeChannel.Discord;
+    private const FeeType TransferFeeType = FeeType.SameBankTransfer;
 
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
@@ -232,16 +237,40 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 ErrorCategory.AccountRestricted, BankingErrorCodes.DestinationAccountNotOperable);
         }
 
+        UtcTimestamp now = clock.Now();
+
+        Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
+            unitOfWork,
+            sourceBank.EconomyScopeId,
+            sourceBank,
+            source,
+            TransferFeeType,
+            TransferChannel,
+            destinationBank.Id,
+            request.Amount,
+            now);
+
+        if (!fee.IsSuccess)
+        {
+            return Result<PaymentOrderId>.Failure(fee.Error!.Category, fee.Error.Code);
+        }
+
+        if (unitOfWork.AccountingPeriods.FindOpen(sourceBank.GeneralLedgerBookId, BusinessDateOf(now)) is null)
+        {
+            return Result<PaymentOrderId>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        MoneyMinor totalDebit = request.Amount.Add(fee.Value.Quote.Amount);
+
         LedgerBalance sourceBalance = unitOfWork.LedgerAccounts.FindProjection(source.LedgerAccountId)
             ?? LedgerBalance.Empty;
 
-        if (!sourceBalance.CanReserve(request.Amount))
+        if (!sourceBalance.CanReserve(totalDebit))
         {
             return Result<PaymentOrderId>.Failure(
                 ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
         }
-
-        UtcTimestamp now = clock.Now();
 
         BusinessOperation operation = BusinessOperation.Start(
             BusinessOperationId.FromValue(idGenerator.NextId()),
@@ -275,14 +304,14 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             HoldId.FromValue(idGenerator.NextId()),
             source.Id,
             operation.Id,
-            request.Amount,
+            totalDebit,
             HoldReason,
             now,
             expiresAt: null);
 
         unitOfWork.Holds.Add(hold);
         unitOfWork.LedgerAccounts.UpsertProjection(
-            source.LedgerAccountId, sourceBalance.IncreaseHold(request.Amount), now);
+            source.LedgerAccountId, sourceBalance.IncreaseHold(totalDebit), now);
 
         order.HoldFunds();
         unitOfWork.PaymentOrders.Add(order);
@@ -305,9 +334,19 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         DepositAccount source = unitOfWork.DepositAccounts.Find(order.SourceDepositAccountId)!;
         DepositAccount destination = unitOfWork.DepositAccounts.Find(order.DestinationDepositAccountId)!;
 
+        Hold? hold = unitOfWork.Holds.FindByBusinessOperation(order.BusinessOperationId);
+        if (hold is null)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
+        }
+
+        MoneyMinor feeAmount = hold.Amount.Subtract(order.Amount);
+
         if (order.Status == PaymentOrderStatus.Completed)
         {
-            return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, source, destination));
+            return Result<PaymentOrderView>.Success(
+                ToView(unitOfWork, order, feeAmount, source, destination));
         }
 
         if (order.Status != PaymentOrderStatus.FundsHeld)
@@ -316,8 +355,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
         }
 
-        Hold? hold = unitOfWork.Holds.FindActiveByBusinessOperation(order.BusinessOperationId);
-        if (hold is null)
+        if (hold.Status != HoldStatus.Active)
         {
             return Result<PaymentOrderView>.Failure(
                 ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
@@ -325,9 +363,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         Bank bank = unitOfWork.Banks.Find(source.BankId)!;
         UtcTimestamp now = clock.Now();
-        BusinessDate businessDate = BusinessDate.FromDayNumber(
-            DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(now.UnixMilliseconds).UtcDateTime)
-                .DayNumber);
+        BusinessDate businessDate = BusinessDateOf(now);
 
         AccountingPeriodId? periodId = unitOfWork.AccountingPeriods.FindOpen(
             bank.GeneralLedgerBookId, businessDate);
@@ -337,8 +373,36 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
         }
 
+        Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
+            unitOfWork,
+            bank.EconomyScopeId,
+            bank,
+            source,
+            TransferFeeType,
+            TransferChannel,
+            destination.BankId,
+            order.Amount,
+            now);
+
+        if (!fee.IsSuccess)
+        {
+            return Result<PaymentOrderView>.Failure(fee.Error!.Category, fee.Error.Code);
+        }
+
+        FeeAssessmentPlan plan = fee.Value;
+        if (plan.Quote.Amount != hold.Amount.Subtract(order.Amount))
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.ConcurrencyConflict, BankingErrorCodes.FeeQuoteStale);
+        }
+
         LedgerAccount sourceLedger = unitOfWork.LedgerAccounts.Find(source.LedgerAccountId)!;
         LedgerAccount destinationLedger = unitOfWork.LedgerAccounts.Find(destination.LedgerAccountId)!;
+        LedgerAccount[] ordered = plan.RequiresPosting
+            ? [sourceLedger, destinationLedger, plan.RevenueAccount]
+            : [sourceLedger, destinationLedger];
+
+        Array.Sort(ordered, static (left, right) => left.Id.Value.CompareTo(right.Id.Value));
 
         AccountingTransaction transaction = AccountingTransaction.Post(
             AccountingTransactionId.FromValue(idGenerator.NextId()),
@@ -350,26 +414,16 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             now,
             TransactionType,
             DescriptionCode,
-            [
-                new JournalEntryDraft(
-                    JournalEntryId.FromValue(idGenerator.NextId()),
-                    sourceLedger.Id,
-                    EntrySide.Debit,
-                    order.Amount),
-                new JournalEntryDraft(
-                    JournalEntryId.FromValue(idGenerator.NextId()),
-                    destinationLedger.Id,
-                    EntrySide.Credit,
-                    order.Amount),
-            ],
-            LedgerAccountSet.From([sourceLedger, destinationLedger]));
+            BuildDrafts(ordered, order, plan, sourceLedger, destinationLedger),
+            LedgerAccountSet.From(ordered));
 
         unitOfWork.AccountingTransactions.Add(transaction, period);
 
-        hold.Capture(order.Amount, now);
+        hold.Capture(hold.Amount, now);
         unitOfWork.Holds.Update(hold);
 
-        ApplyProjections(unitOfWork, order, sourceLedger, destinationLedger, now);
+        ApplyProjections(unitOfWork, ordered, order, plan, sourceLedger, destinationLedger, now);
+        RecordFee(unitOfWork, order, plan, source, sourceLedger, now);
 
         order.CompleteInternalTransfer(now);
         unitOfWork.PaymentOrders.Update(order);
@@ -388,38 +442,120 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             $$"""{"payment_order_id":"{{order.Id.Value}}","amount_minor":{{order.Amount.Value}}}""",
             now));
 
-        return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, source, destination));
+        return Result<PaymentOrderView>.Success(
+            ToView(unitOfWork, order, plan.Quote.Amount, source, destination));
     }
+
+    private static BusinessDate BusinessDateOf(UtcTimestamp at) => BusinessDate.FromDayNumber(
+        DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(at.UnixMilliseconds).UtcDateTime).DayNumber);
+
+    private JournalEntryDraft[] BuildDrafts(
+        LedgerAccount[] ordered,
+        PaymentOrder order,
+        FeeAssessmentPlan plan,
+        LedgerAccount sourceLedger,
+        LedgerAccount destinationLedger)
+    {
+        List<JournalEntryDraft> drafts = new(plan.RequiresPosting ? 4 : 2);
+
+        foreach (LedgerAccount ledger in ordered)
+        {
+            if (ledger.Id == sourceLedger.Id)
+            {
+                drafts.Add(Draft(sourceLedger, EntrySide.Debit, order.Amount));
+
+                if (plan.RequiresPosting)
+                {
+                    drafts.Add(Draft(sourceLedger, EntrySide.Debit, plan.Quote.Amount));
+                }
+            }
+            else if (ledger.Id == destinationLedger.Id)
+            {
+                drafts.Add(Draft(destinationLedger, EntrySide.Credit, order.Amount));
+            }
+            else
+            {
+                drafts.Add(Draft(plan.RevenueAccount, EntrySide.Credit, plan.Quote.Amount));
+            }
+        }
+
+        return [.. drafts];
+    }
+
+    private JournalEntryDraft Draft(LedgerAccount ledger, EntrySide side, MoneyMinor amount) =>
+        new(JournalEntryId.FromValue(idGenerator.NextId()), ledger.Id, side, amount);
 
     private static void ApplyProjections(
         IBankingUnitOfWork unitOfWork,
+        LedgerAccount[] ordered,
         PaymentOrder order,
+        FeeAssessmentPlan plan,
         LedgerAccount sourceLedger,
         LedgerAccount destinationLedger,
         UtcTimestamp now)
     {
-        (LedgerAccount Ledger, EntrySide Side)[] ordered =
-            sourceLedger.Id.Value.CompareTo(destinationLedger.Id.Value) <= 0
-                ? [(sourceLedger, EntrySide.Debit), (destinationLedger, EntrySide.Credit)]
-                : [(destinationLedger, EntrySide.Credit), (sourceLedger, EntrySide.Debit)];
-
-        foreach ((LedgerAccount ledger, EntrySide side) in ordered)
+        foreach (LedgerAccount ledger in ordered)
         {
             LedgerBalance balance = unitOfWork.LedgerAccounts.FindProjection(ledger.Id) ?? LedgerBalance.Empty;
-            LedgerBalance posted = balance.ApplyPosting(side, ledger.NormalSide, order.Amount);
 
-            LedgerBalance updated = side == EntrySide.Debit
-                ? posted.DecreaseHold(order.Amount)
-                : posted;
+            if (ledger.Id == sourceLedger.Id)
+            {
+                MoneyMinor debited = order.Amount.Add(plan.Quote.Amount);
+                balance = balance
+                    .ApplyPosting(EntrySide.Debit, ledger.NormalSide, debited)
+                    .DecreaseHold(debited)
+                    .EnsureDepositAccountInvariants();
+            }
+            else if (ledger.Id == destinationLedger.Id)
+            {
+                balance = balance
+                    .ApplyPosting(EntrySide.Credit, ledger.NormalSide, order.Amount)
+                    .EnsureDepositAccountInvariants();
+            }
+            else
+            {
+                balance = balance.ApplyPosting(EntrySide.Credit, ledger.NormalSide, plan.Quote.Amount);
+            }
 
-            unitOfWork.LedgerAccounts.UpsertProjection(
-                ledger.Id, updated.EnsureDepositAccountInvariants(), now);
+            unitOfWork.LedgerAccounts.UpsertProjection(ledger.Id, balance, now);
+        }
+    }
+
+    private void RecordFee(
+        IBankingUnitOfWork unitOfWork,
+        PaymentOrder order,
+        FeeAssessmentPlan plan,
+        DepositAccount source,
+        LedgerAccount sourceLedger,
+        UtcTimestamp now)
+    {
+        if (!plan.RequiresRecord)
+        {
+            return;
+        }
+
+        unitOfWork.FeeAssessments.Add(FeeAssessment.Assess(
+            FeeAssessmentId.FromValue(idGenerator.NextId()),
+            order.BusinessOperationId,
+            plan.Quote.ScheduleVersionId,
+            plan.Quote.RuleId,
+            order.CurrencyId,
+            sourceLedger.Id,
+            plan.RevenueAccount.Id,
+            plan.Quote.Type,
+            plan.Quote.Amount,
+            now));
+
+        if (plan.Quote.WaiverApplied && plan.Quote.WaiverCounterKey is { } waiverCounterKey)
+        {
+            unitOfWork.FeeWaiverCounters.Consume(source.Id, waiverCounterKey, plan.BusinessMonth);
         }
     }
 
     private static PaymentOrderView ToView(
         IBankingUnitOfWork unitOfWork,
         PaymentOrder order,
+        MoneyMinor feeAmount,
         DepositAccount source,
         DepositAccount destination)
     {
@@ -430,6 +566,8 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             order.Id,
             order.Status,
             order.Amount,
+            feeAmount,
+            order.Amount.Add(feeAmount),
             destination.AccountNumber.Value,
             balance.PostedBalance,
             balance.AvailableBalance);

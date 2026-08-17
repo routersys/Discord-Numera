@@ -17,6 +17,8 @@ public sealed class TransferTests
     private const string Branch = "001";
     private const ulong PayerUser = 710_000_000_000_000_001UL;
     private const ulong PayeeUser = 710_000_000_000_000_002UL;
+    private const int FreeScheduleSeed = 40;
+    private const int PricedScheduleSeed = 60;
 
     private sealed class Harness : IAsyncDisposable
     {
@@ -114,7 +116,15 @@ public sealed class TransferTests
                     deposit_insurance_class_code, overdraft_policy, created_at)
                 VALUES({Blob(9)}, {Blob(8)}, 1, 1, NULL, 1000000000, 'ACTUAL_365_FIXED', 0, NULL, NULL, NULL,
                     'INTERNAL', 'STANDARD', 'NONE', 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
+                    account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                    owner_reference_type, owner_reference_id, status, created_at, version)
+                VALUES({Blob(11)}, {Blob(4)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
                 """);
+
+            PublishTransferFee(FreeScheduleSeed, fixedMinor: 0);
 
             if (withPeriod)
             {
@@ -164,6 +174,54 @@ public sealed class TransferTests
                     'INTERNAL', 'STANDARD', 'NONE', 1);
                 """);
         }
+
+        public void PublishTransferFee(
+            int scheduleSeed,
+            long fixedMinor,
+            int basisPoints = 0,
+            long minimumMinor = 0,
+            long? maximumMinor = null,
+            string? waiverCounterKey = null,
+            int freeOccurrences = 0,
+            string dayClass = "ANY",
+            int? startMinute = null,
+            int? endMinute = null,
+            int priority = 0)
+        {
+            Execute($"""
+                INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                    effective_to, version)
+                SELECT {Blob(scheduleSeed)}, {Blob(5)}, 1, NULL, 1
+                WHERE NOT EXISTS(
+                    SELECT 1 FROM fee_schedule_versions WHERE fee_schedule_version_id = {Blob(scheduleSeed)});
+
+                INSERT INTO fee_rules(fee_rule_id, fee_schedule_version_id, fee_type, priority, channel,
+                    account_product_id, atm_network_id, counterparty_bank_id, amount_min_minor,
+                    amount_max_minor, day_class, local_start_minute, local_end_minute, fixed_minor,
+                    basis_points, minimum_minor, maximum_minor, waiver_counter_key,
+                    free_occurrences_per_business_month)
+                VALUES({Blob(scheduleSeed + 1 + priority)}, {Blob(scheduleSeed)}, 'SAME_BANK_TRANSFER',
+                    {priority}, 'ANY', NULL, NULL, NULL, 0, NULL, '{dayClass}',
+                    {Nullable(startMinute)}, {Nullable(endMinute)}, {fixedMinor}, {basisPoints},
+                    {minimumMinor}, {Nullable(maximumMinor)}, {Text(waiverCounterKey)}, {freeOccurrences});
+
+                UPDATE banks SET current_fee_schedule_version_id = {Blob(scheduleSeed)}, version = version + 1
+                WHERE bank_id = {Blob(5)};
+                """);
+        }
+
+        private static string Nullable(long? value) =>
+            value is { } present ? present.ToString(System.Globalization.CultureInfo.InvariantCulture) : "NULL";
+
+        private static string Nullable(int? value) =>
+            value is { } present ? present.ToString(System.Globalization.CultureInfo.InvariantCulture) : "NULL";
+
+        private static string Text(string? value) => value is null ? "NULL" : $"'{value}'";
+
+        public void OverrideCalendarDay(string localDate, string dayClass) => Execute($"""
+            INSERT INTO economy_calendar_overrides(economy_scope_id, local_date, day_class, description, version)
+            VALUES({Blob(1)}, '{localDate}', '{dayClass}', NULL, 1);
+            """);
 
         public void Execute(string sql)
         {
@@ -501,7 +559,7 @@ public sealed class TransferTests
     }
 
     [TestMethod]
-    public async Task MissingAccountingPeriodStopsPostingAfterTheHold()
+    public async Task MissingAccountingPeriodStopsBeforeTheHold()
     {
         await using Harness harness = Harness.Create(withPeriod: false);
         Parties parties = await SetupAsync(harness);
@@ -512,8 +570,298 @@ public sealed class TransferTests
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.AccountingPeriodUnavailable, result.Error!.Code);
         Assert.AreEqual(0L, harness.Count("journal_entries"));
+        Assert.AreEqual(0L, harness.Count("holds"));
         Assert.AreEqual(1_000L, harness.Balance(parties.Source.Id));
     }
+
+    [TestMethod]
+    public async Task FeeIsDebitedFromThePayerAndCreditedToFeeRevenue()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(5L, result.Value.FeeAmount.Value);
+        Assert.AreEqual(305L, result.Value.TotalDebitAmount.Value);
+        Assert.AreEqual(695L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(300L, harness.Balance(parties.Destination.Id));
+        Assert.AreEqual("5", harness.ReadText(FeeRevenueBalanceSql));
+    }
+
+    [TestMethod]
+    public async Task FeeAndPrincipalArePostedAsOneBalancedTransaction()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        await harness.TransferAsync(parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(1L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(4L, harness.Count("journal_entries"));
+        Assert.AreEqual(
+            "305",
+            harness.ReadText("SELECT CAST(SUM(amount_minor) AS TEXT) FROM journal_entries WHERE side = 'DEBIT';"));
+        Assert.AreEqual(
+            "305",
+            harness.ReadText("SELECT CAST(SUM(amount_minor) AS TEXT) FROM journal_entries WHERE side = 'CREDIT';"));
+    }
+
+    [TestMethod]
+    public async Task JournalEntriesFollowAscendingLedgerAccountOrder()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        await harness.TransferAsync(parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(
+            "0",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM journal_entries AS earlier
+                JOIN journal_entries AS later
+                  ON later.accounting_transaction_id = earlier.accounting_transaction_id
+                 AND later.entry_sequence > earlier.entry_sequence
+                WHERE later.ledger_account_id < earlier.ledger_account_id;
+                """));
+    }
+
+    [TestMethod]
+    public async Task HoldReservesThePrincipalAndTheFee()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        await harness.TransferAsync(parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual("305", harness.ReadText("SELECT CAST(amount_minor AS TEXT) FROM holds;"));
+        Assert.AreEqual("CAPTURED", harness.ReadText("SELECT status FROM holds;"));
+        Assert.AreEqual(0L, harness.Held(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task AvailableBalanceMustCoverThePrincipalAndTheFee()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness, funding: 300);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.AvailableBalanceInsufficient, result.Error!.Code);
+        Assert.AreEqual(300L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(0L, harness.Count("holds"));
+        Assert.AreEqual(0L, harness.Count("payment_orders"));
+    }
+
+    [TestMethod]
+    public async Task ProportionalFeeUsesBasisPoints()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 10, basisPoints: 100);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(13L, result.Value.FeeAmount.Value);
+    }
+
+    [TestMethod]
+    public async Task FeeAssessmentRecordsTheSelectedRule()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        await harness.TransferAsync(parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(1L, harness.Count("fee_assessments"));
+        Assert.AreEqual("SAME_BANK_TRANSFER", harness.ReadText("SELECT fee_type FROM fee_assessments;"));
+        Assert.AreEqual("5", harness.ReadText("SELECT CAST(amount_minor AS TEXT) FROM fee_assessments;"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM fee_assessments a
+                JOIN fee_rules r ON r.fee_rule_id = a.fee_rule_id
+                JOIN fee_schedule_versions v
+                  ON v.fee_schedule_version_id = a.fee_schedule_version_id
+                 AND v.fee_schedule_version_id = r.fee_schedule_version_id;
+                """));
+    }
+
+    [TestMethod]
+    public async Task ZeroFeeLeavesNoAssessmentAndNoFeeEntries()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+
+        await harness.TransferAsync(parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(0L, harness.Count("fee_assessments"));
+        Assert.AreEqual(2L, harness.Count("journal_entries"));
+    }
+
+    [TestMethod]
+    public async Task FreeOccurrenceWaivesTheFeeExactlyOncePerBusinessMonth()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(
+            PricedScheduleSeed, fixedMinor: 5, waiverCounterKey: "same-bank-transfer", freeOccurrences: 1);
+
+        Result<PaymentOrderView> waived = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300, "first");
+        Result<PaymentOrderView> charged = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300, "second");
+
+        Assert.AreEqual(0L, waived.Value.FeeAmount.Value);
+        Assert.AreEqual(5L, charged.Value.FeeAmount.Value);
+        Assert.AreEqual("1", harness.ReadText("SELECT CAST(used_count AS TEXT) FROM fee_waiver_usage_counters;"));
+        Assert.AreEqual(395L, harness.Balance(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task WaivedFeeIsStillRecordedAsAnAssessment()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(
+            PricedScheduleSeed, fixedMinor: 5, waiverCounterKey: "same-bank-transfer", freeOccurrences: 1);
+
+        await harness.TransferAsync(parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual("0", harness.ReadText("SELECT CAST(amount_minor AS TEXT) FROM fee_assessments;"));
+        Assert.AreEqual(2L, harness.Count("journal_entries"));
+    }
+
+    [TestMethod]
+    public async Task ConditionalRuleWinsOverTheCatchAllByPriority()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(
+            PricedScheduleSeed, fixedMinor: 50, dayClass: "NON_BUSINESS_DAY", priority: 0);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5, priority: 1);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(50L, result.Value.FeeAmount.Value);
+    }
+
+    [TestMethod]
+    public async Task NonMatchingConditionalRuleFallsBackToTheCatchAll()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 50, dayClass: "BUSINESS_DAY", priority: 0);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5, priority: 1);
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(5L, result.Value.FeeAmount.Value);
+    }
+
+    [TestMethod]
+    public async Task CalendarOverrideTurnsTheDayIntoABusinessDay()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 50, dayClass: "BUSINESS_DAY", priority: 0);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5, priority: 1);
+        harness.OverrideCalendarDay("2026-04-12", "BUSINESS_DAY");
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.AreEqual(50L, result.Value.FeeAmount.Value);
+    }
+
+    [TestMethod]
+    public async Task BankWithoutAFeeScheduleCannotTransfer()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.Execute("UPDATE banks SET current_fee_schedule_version_id = NULL;");
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.BankUnavailable, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.FeeScheduleUnavailable, result.Error.Code);
+        Assert.AreEqual(0L, harness.Count("holds"));
+    }
+
+    [TestMethod]
+    public async Task MissingCatchAllRuleIsNotSilentlyTreatedAsZero()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5, dayClass: "BUSINESS_DAY");
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.FeeRuleUnavailable, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("payment_orders"));
+    }
+
+    [TestMethod]
+    public async Task MissingFeeRevenueAccountStopsTheTransfer()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+        harness.Execute("DELETE FROM ledger_accounts WHERE account_kind = 'FEE_REVENUE';");
+
+        Result<PaymentOrderView> result = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.FeeRevenueAccountUnavailable, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("holds"));
+    }
+
+    [TestMethod]
+    public async Task RepeatedInteractionChargesTheFeeOnlyOnce()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5);
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Result<PaymentOrderView> result = await harness.TransferAsync(
+                parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+            Assert.IsTrue(result.IsSuccess);
+            Assert.AreEqual(5L, result.Value.FeeAmount.Value);
+        }
+
+        Assert.AreEqual(1L, harness.Count("fee_assessments"));
+        Assert.AreEqual(4L, harness.Count("journal_entries"));
+        Assert.AreEqual(695L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual("5", harness.ReadText(FeeRevenueBalanceSql));
+    }
+
+    private const string FeeRevenueBalanceSql = """
+        SELECT CAST(p.posted_balance_minor AS TEXT)
+        FROM ledger_balance_projections p
+        JOIN ledger_accounts l ON l.ledger_account_id = p.ledger_account_id
+        WHERE l.account_kind = 'FEE_REVENUE';
+        """;
 
     [TestMethod]
     public async Task RepeatedInteractionProducesExactlyOneMonetaryEffect()

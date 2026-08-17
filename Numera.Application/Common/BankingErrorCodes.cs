@@ -36,6 +36,16 @@ public static class BankingErrorCodes
     public static string AccountingPeriodUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 3);
 
+    public static string FeeScheduleUnavailable { get; } = ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 4);
+
+    public static string FeeRuleUnavailable { get; } = ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 5);
+
+    public static string FeeRevenueAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 6);
+
+    public static string EconomyCalendarUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 7);
+
     public static string CurrencyMismatch { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 5);
 
     public static string SelfTransferRejected { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 6);
@@ -56,4 +66,6 @@ public static class BankingErrorCodes
     public static string SessionLimitReached { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 4);
 
     public static string ConcurrentModification { get; } = ErrorCodeFormat.Compose(ErrorCategory.ConcurrencyConflict, 1);
+
+    public static string FeeQuoteStale { get; } = ErrorCodeFormat.Compose(ErrorCategory.ConcurrencyConflict, 2);
 }

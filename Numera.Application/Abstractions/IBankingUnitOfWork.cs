@@ -217,6 +217,8 @@ public interface IHoldRepository
     Numera.Domain.Banking.Hold? Find(HoldId id);
 
     Numera.Domain.Banking.Hold? FindActiveByBusinessOperation(BusinessOperationId businessOperationId);
+
+    Numera.Domain.Banking.Hold? FindByBusinessOperation(BusinessOperationId businessOperationId);
 }
 
 public interface IPaymentOrderRepository

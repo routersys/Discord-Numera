@@ -179,6 +179,20 @@ public sealed class SqliteHoldRepository : IHoldRepository
         return reader.Read() ? Read(reader) : null;
     }
 
+    public Hold? FindByBusinessOperation(BusinessOperationId businessOperationId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM holds
+            WHERE business_operation_id = $operation
+            ORDER BY hold_id
+            LIMIT 1;
+            """);
+        command.Parameters.AddWithValue("$operation", SqliteValueMapper.ToBlob(businessOperationId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? Read(reader) : null;
+    }
+
     private static void Bind(SqliteCommand command, Hold hold)
     {
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(hold.Id.Value));
