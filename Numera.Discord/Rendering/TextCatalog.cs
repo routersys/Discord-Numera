@@ -139,6 +139,7 @@ public static class TextCatalogKeys
     public const string ErrorFooter = "error.footer";
     public const string ErrorFooterWithCode = "error.footer_with_code";
     public const string PresenceActivity = "presence.activity";
+    public const string OperationFooter = "embed.footer";
 }
 
 public static class CanonicalTextCatalog
@@ -172,6 +173,7 @@ public static class CanonicalTextCatalog
             [TextCatalogKeys.ErrorFooter] = "操作ID: {operationPublicId}",
             [TextCatalogKeys.ErrorFooterWithCode] = "操作ID: {operationPublicId} / エラーコード: {errorCode}",
             [TextCatalogKeys.PresenceActivity] = "銀行システム",
+            [TextCatalogKeys.OperationFooter] = "操作ID: {operationPublicId}",
         };
 
     public static TextCatalog Create() => TextCatalog.Create(Entries);
