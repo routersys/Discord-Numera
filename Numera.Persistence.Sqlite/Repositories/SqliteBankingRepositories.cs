@@ -345,6 +345,20 @@ public sealed class SqliteDepositAccountRepository : IDepositAccountRepository
         return reader.Read() ? Read(reader) : null;
     }
 
+    public DepositAccount? FindByRouting(BankId bankId, BranchId branchId, AccountNumber accountNumber)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM deposit_accounts
+            WHERE bank_id = $bank AND branch_id = $branch AND account_number = $number;
+            """);
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+        command.Parameters.AddWithValue("$branch", SqliteValueMapper.ToBlob(branchId.Value));
+        command.Parameters.AddWithValue("$number", accountNumber.Value);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? Read(reader) : null;
+    }
+
     public long CountByBranch(BankId bankId, BranchId branchId)
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""

@@ -84,6 +84,14 @@ public interface IBankingUnitOfWork
     IDepositAccountRepository DepositAccounts { get; }
 
     IAccountProductRepository AccountProducts { get; }
+
+    IAccountingPeriodRepository AccountingPeriods { get; }
+
+    IAccountingTransactionRepository AccountingTransactions { get; }
+
+    IHoldRepository Holds { get; }
+
+    IPaymentOrderRepository PaymentOrders { get; }
 }
 
 public interface IBankingWriteGateway
@@ -162,7 +170,40 @@ public interface IDepositAccountRepository
 
     Numera.Domain.Banking.DepositAccount? FindByCustomer(BankId bankId, CustomerAccountId customerAccountId);
 
+    Numera.Domain.Banking.DepositAccount? FindByRouting(
+        BankId bankId,
+        BranchId branchId,
+        Numera.Domain.Banking.AccountNumber accountNumber);
+
     long CountByBranch(BankId bankId, BranchId branchId);
+}
+
+public interface IAccountingPeriodRepository
+{
+    AccountingPeriodId? FindOpen(AccountingBookId bookId, BusinessDate businessDate);
+}
+
+public interface IAccountingTransactionRepository
+{
+    void Add(Numera.Domain.Accounting.AccountingTransaction transaction, AccountingPeriodId periodId);
+}
+
+public interface IHoldRepository
+{
+    void Add(Numera.Domain.Banking.Hold hold);
+
+    void Update(Numera.Domain.Banking.Hold hold);
+
+    Numera.Domain.Banking.Hold? Find(HoldId id);
+}
+
+public interface IPaymentOrderRepository
+{
+    void Add(Numera.Domain.Banking.PaymentOrder order);
+
+    void Update(Numera.Domain.Banking.PaymentOrder order);
+
+    Numera.Domain.Banking.PaymentOrder? Find(PaymentOrderId id);
 }
 
 public interface IAccountProductRepository

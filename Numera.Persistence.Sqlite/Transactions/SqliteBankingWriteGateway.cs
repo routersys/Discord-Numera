@@ -19,6 +19,10 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
         LedgerAccounts = new SqliteLedgerAccountRepository(unitOfWork);
         DepositAccounts = new SqliteDepositAccountRepository(unitOfWork);
         AccountProducts = new SqliteAccountProductRepository(unitOfWork);
+        AccountingPeriods = new SqliteAccountingPeriodRepository(unitOfWork);
+        AccountingTransactions = new SqliteAccountingTransactionRepository(unitOfWork);
+        Holds = new SqliteHoldRepository(unitOfWork);
+        PaymentOrders = new SqlitePaymentOrderRepository(unitOfWork);
     }
 
     public IPartyRepository Parties { get; }
@@ -42,6 +46,14 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
     public IDepositAccountRepository DepositAccounts { get; }
 
     public IAccountProductRepository AccountProducts { get; }
+
+    public IAccountingPeriodRepository AccountingPeriods { get; }
+
+    public IAccountingTransactionRepository AccountingTransactions { get; }
+
+    public IHoldRepository Holds { get; }
+
+    public IPaymentOrderRepository PaymentOrders { get; }
 }
 
 public sealed class SqliteBankingWriteGateway : IBankingWriteGateway
