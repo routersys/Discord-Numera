@@ -22,7 +22,7 @@ public sealed class BankTests
     private static Bank Operating()
     {
         Bank bank = Establish();
-        bank.Activate(Policy, Fees);
+        bank.Activate(Policy, Fees, MoneyMinor.FromMinor(1_000_000), MoneyMinor.FromMinor(1_000_000));
         return bank;
     }
 

@@ -184,8 +184,18 @@ public sealed class Bank : VersionedEntity
             version);
     }
 
-    public void Activate(BankPolicyVersionId policyVersionId, FeeScheduleVersionId feeScheduleVersionId)
+    public void Activate(
+        BankPolicyVersionId policyVersionId,
+        FeeScheduleVersionId feeScheduleVersionId,
+        MoneyMinor paidInCapital,
+        MoneyMinor minimumInitialCapital)
     {
+        if (Kind == BankKind.Normal &&
+            (!minimumInitialCapital.IsPositive || paidInCapital < minimumInitialCapital))
+        {
+            throw InvariantViolationException.Create(InvariantViolationCode.BankCapitalInsufficient);
+        }
+
         Status = Transitions.EnsureAllowed(Status, BankStatus.Operating);
         CurrentPolicyVersionId = policyVersionId;
         CurrentFeeScheduleVersionId = feeScheduleVersionId;
