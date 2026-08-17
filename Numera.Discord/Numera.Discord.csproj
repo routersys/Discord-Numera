@@ -11,6 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Numera.Discord.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Numera.Discord.Abstractions\Numera.Discord.Abstractions.csproj" />
     <ProjectReference Include="..\Numera.Application\Numera.Application.csproj" />
     <ProjectReference Include="..\Numera.Discord.Generators\Numera.Discord.Generators.csproj"

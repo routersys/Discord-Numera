@@ -138,6 +138,7 @@ public static class TextCatalogKeys
     public const string ErrorUnexpectedDescription = "error.unexpected.description";
     public const string ErrorFooter = "error.footer";
     public const string ErrorFooterWithCode = "error.footer_with_code";
+    public const string PresenceActivity = "presence.activity";
 }
 
 public static class CanonicalTextCatalog
@@ -170,6 +171,7 @@ public static class CanonicalTextCatalog
                 "処理を完了できませんでした。時間をおいて再度実行してください。改善しない場合は操作IDを管理者へ伝えてください。",
             [TextCatalogKeys.ErrorFooter] = "操作ID: {operationPublicId}",
             [TextCatalogKeys.ErrorFooterWithCode] = "操作ID: {operationPublicId} / エラーコード: {errorCode}",
+            [TextCatalogKeys.PresenceActivity] = "銀行システム",
         };
 
     public static TextCatalog Create() => TextCatalog.Create(Entries);
