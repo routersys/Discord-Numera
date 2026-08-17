@@ -43,9 +43,15 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     public const string DescriptionCode = "TRANSFER";
     public const string HoldReason = "TRANSFER";
     public const string PaymentMethod = "INTERNAL_TRANSFER";
+    public const string InterbankPaymentMethod = "RTGS_TRANSFER";
+    public const string InterbankTransactionType = "RTGS_TRANSFER";
+    public const string SettlementTransactionType = "RTGS_SETTLEMENT";
+    public const string BeneficiaryTransactionType = "RTGS_BENEFICIARY_CREDIT";
+    public const string SettlementDescriptionCode = "SETTLEMENT";
+    public const string BeneficiaryDescriptionCode = "BENEFICIARY_CREDIT";
+    public const string AcceptedEventType = "PAYMENT_ACCEPTED";
 
     private const FeeChannel TransferChannel = FeeChannel.Discord;
-    private const FeeType TransferFeeType = FeeType.SameBankTransfer;
 
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
@@ -78,7 +84,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         IdempotencyKey idempotencyKey = IdempotencyKey.Create(OperationType, command.IdempotencyToken);
 
-        Result<PaymentOrderId> held = await writeGateway.ExecuteAsync(
+        Result<ReservedTransfer> held = await writeGateway.ExecuteAsync(
             unitOfWork => ReserveFunds(unitOfWork, command, request, idempotencyKey),
             cancellationToken).ConfigureAwait(false);
 
@@ -87,10 +93,39 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             return Result<PaymentOrderView>.Failure(held.Error!.Category, held.Error.Code, held.Error.Field);
         }
 
+        PaymentOrderId orderId = held.Value.OrderId;
+
+        if (held.Value.Mode == SettlementMode.Internal)
+        {
+            return await writeGateway.ExecuteAsync(
+                unitOfWork => PostTransfer(unitOfWork, orderId, idempotencyKey),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        Result<PaymentOrderView> accepted = await writeGateway.ExecuteAsync(
+            unitOfWork => PostSourceDebit(unitOfWork, orderId),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!accepted.IsSuccess)
+        {
+            return accepted;
+        }
+
+        Result<PaymentOrderView> settled = await writeGateway.ExecuteAsync(
+            unitOfWork => SettleInterbank(unitOfWork, orderId),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!settled.IsSuccess || settled.Value.Status != PaymentOrderStatus.Settled)
+        {
+            return settled;
+        }
+
         return await writeGateway.ExecuteAsync(
-            unitOfWork => PostTransfer(unitOfWork, held.Value, idempotencyKey),
+            unitOfWork => PostBeneficiaryCredit(unitOfWork, orderId, idempotencyKey),
             cancellationToken).ConfigureAwait(false);
     }
+
+    private readonly record struct ReservedTransfer(PaymentOrderId OrderId, SettlementMode Mode);
 
     private readonly record struct TransferRequest(
         InstitutionCode InstitutionCode,
@@ -150,7 +185,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         return true;
     }
 
-    private Result<PaymentOrderId> ReserveFunds(
+    private Result<ReservedTransfer> ReserveFunds(
         IBankingUnitOfWork unitOfWork,
         CreatePaymentOrderCommand command,
         TransferRequest request,
@@ -162,15 +197,15 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             PaymentOrder? replayed = unitOfWork.PaymentOrders.FindByBusinessOperation(existing.Id);
 
             return replayed is not null
-                ? Result<PaymentOrderId>.Success(replayed.Id)
-                : Result<PaymentOrderId>.Failure(
+                ? Result<ReservedTransfer>.Success(new ReservedTransfer(replayed.Id, replayed.SettlementMode))
+                : Result<ReservedTransfer>.Failure(
                     ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
         }
 
         CustomerAccount? payer = unitOfWork.CustomerAccounts.Find(command.PayerCustomerAccountId);
         if (payer is null)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
         }
 
@@ -182,14 +217,14 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         if (source.Permits(AccountOperation.OutgoingTransfer) != StatusPermission.Allowed)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.AccountRestricted, BankingErrorCodes.DepositAccountNotOperable);
         }
 
         Bank? sourceBank = unitOfWork.Banks.Find(source.BankId);
         if (sourceBank is null || sourceBank.Status != BankStatus.Operating)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
         }
 
@@ -197,14 +232,10 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             command.EconomyScopeId, request.InstitutionCode.Value);
         if (destinationBank is null)
         {
-            return Result<PaymentOrderId>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+            return Result<ReservedTransfer>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
         }
 
-        if (destinationBank.Id != sourceBank.Id)
-        {
-            return Result<PaymentOrderId>.Failure(
-                ErrorCategory.BankUnavailable, BankingErrorCodes.InterbankTransferUnavailable);
-        }
+        bool interbank = destinationBank.Id != sourceBank.Id;
 
         BranchId? branchId = unitOfWork.Branches.FindIdByCode(destinationBank.Id, request.BranchCode.Value);
         if (branchId is not { } branch)
@@ -221,20 +252,31 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         if (destination.Id == source.Id)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.SelfTransferRejected);
         }
 
         if (destination.CurrencyId != source.CurrencyId)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.CurrencyMismatch);
         }
 
         if (destination.Permits(AccountOperation.ExternalCredit) != StatusPermission.Allowed)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.AccountRestricted, BankingErrorCodes.DestinationAccountNotOperable);
+        }
+
+        if (interbank)
+        {
+            Result eligibility = InterbankSettlementPolicy.EnsureEligible(
+                unitOfWork, sourceBank, destinationBank);
+
+            if (!eligibility.IsSuccess)
+            {
+                return Result<ReservedTransfer>.Failure(eligibility.Error!);
+            }
         }
 
         UtcTimestamp now = clock.Now();
@@ -244,7 +286,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         if (resolved is not { } point)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
         }
 
@@ -253,14 +295,14 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         if (!limits.IsSuccess)
         {
-            return Result<PaymentOrderId>.Failure(limits.Error!);
+            return Result<ReservedTransfer>.Failure(limits.Error!);
         }
 
         Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
             unitOfWork,
             sourceBank,
             source,
-            TransferFeeType,
+            interbank ? FeeType.InterbankTransfer : FeeType.SameBankTransfer,
             TransferChannel,
             destinationBank.Id,
             request.Amount,
@@ -268,12 +310,12 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         if (!fee.IsSuccess)
         {
-            return Result<PaymentOrderId>.Failure(fee.Error!);
+            return Result<ReservedTransfer>.Failure(fee.Error!);
         }
 
         if (unitOfWork.AccountingPeriods.FindOpen(sourceBank.GeneralLedgerBookId, BusinessDateOf(now)) is null)
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
         }
 
@@ -287,12 +329,12 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         if (!holdLimit.IsSuccess)
         {
-            return Result<PaymentOrderId>.Failure(holdLimit.Error!);
+            return Result<ReservedTransfer>.Failure(holdLimit.Error!);
         }
 
         if (!sourceBalance.CanReserve(totalDebit))
         {
-            return Result<PaymentOrderId>.Failure(
+            return Result<ReservedTransfer>.Failure(
                 ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
         }
 
@@ -315,9 +357,11 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             destination.Id,
             source.CurrencyId,
             request.Amount,
-            PaymentMethod,
-            SettlementMode.Internal,
-            BeneficiaryPostingPolicy.ImmediateAfterAcceptance,
+            interbank ? InterbankPaymentMethod : PaymentMethod,
+            interbank ? SettlementMode.Rtgs : SettlementMode.Internal,
+            interbank
+                ? BeneficiaryPostingPolicy.AfterFinalSettlement
+                : BeneficiaryPostingPolicy.ImmediateAfterAcceptance,
             paymentNetworkPolicyVersionId: null,
             command.Memo,
             now);
@@ -340,7 +384,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         order.HoldFunds();
         unitOfWork.PaymentOrders.Add(order);
 
-        return Result<PaymentOrderId>.Success(order.Id);
+        return Result<ReservedTransfer>.Success(new ReservedTransfer(order.Id, order.SettlementMode));
     }
 
     private Result<PaymentOrderView> PostTransfer(
@@ -407,7 +451,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             unitOfWork,
             bank,
             source,
-            TransferFeeType,
+            FeeTypeOf(order),
             TransferChannel,
             destination.BankId,
             order.Amount,
@@ -475,12 +519,407 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             OutboxEventId.FromValue(idGenerator.NextId()),
             order.BusinessOperationId,
             CompletedEventType,
-            $$"""{"payment_order_id":"{{order.Id.Value}}","amount_minor":{{order.Amount.Value}}}""",
+            Payload(order),
             now));
 
         return Result<PaymentOrderView>.Success(
             ToView(unitOfWork, order, plan.Quote.Amount, source, destination));
     }
+
+    private Result<PaymentOrderView> PostSourceDebit(
+        IBankingUnitOfWork unitOfWork,
+        PaymentOrderId paymentOrderId)
+    {
+        PaymentOrder order = unitOfWork.PaymentOrders.Find(paymentOrderId)!;
+        DepositAccount source = unitOfWork.DepositAccounts.Find(order.SourceDepositAccountId)!;
+        DepositAccount destination = unitOfWork.DepositAccounts.Find(order.DestinationDepositAccountId)!;
+
+        Hold? hold = unitOfWork.Holds.FindByBusinessOperation(order.BusinessOperationId);
+        if (hold is null)
+        {
+            return Conflict();
+        }
+
+        MoneyMinor feeAmount = hold.Amount.Subtract(order.Amount);
+
+        if (order.Status != PaymentOrderStatus.FundsHeld)
+        {
+            return order.Status is PaymentOrderStatus.Created or PaymentOrderStatus.Authorized
+                ? Conflict()
+                : Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+        }
+
+        if (hold.Status != HoldStatus.Active)
+        {
+            return Conflict();
+        }
+
+        Bank bank = unitOfWork.Banks.Find(source.BankId)!;
+        UtcTimestamp now = clock.Now();
+        BusinessDate businessDate = BusinessDateOf(now);
+
+        if (unitOfWork.AccountingPeriods.FindOpen(bank.GeneralLedgerBookId, businessDate) is not { } period)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        if (EconomyBusinessCalendar.Resolve(unitOfWork.EconomyCalendars, bank.EconomyScopeId, now)
+            is not { } point)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
+        Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
+            unitOfWork,
+            bank,
+            source,
+            FeeTypeOf(order),
+            TransferChannel,
+            destination.BankId,
+            order.Amount,
+            point);
+
+        if (!fee.IsSuccess)
+        {
+            return Result<PaymentOrderView>.Failure(fee.Error!);
+        }
+
+        FeeAssessmentPlan plan = fee.Value;
+        if (plan.Quote.Amount != feeAmount)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.ConcurrencyConflict, BankingErrorCodes.FeeQuoteStale);
+        }
+
+        LedgerAccount sourceLedger = unitOfWork.LedgerAccounts.Find(source.LedgerAccountId)!;
+        LedgerAccount? payable = unitOfWork.LedgerAccounts.FindPostingByKind(
+            bank.GeneralLedgerBookId, LedgerAccountKind.SettlementPayable, order.CurrencyId);
+
+        if (payable is null)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+        }
+
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.DepositReleasingHold(sourceLedger, EntrySide.Debit, order.Amount, hold.Amount));
+        posting.Add(PostingLine.Institutional(payable, EntrySide.Credit, order.Amount));
+
+        if (plan.RequiresPosting)
+        {
+            posting.Add(PostingLine.Deposit(sourceLedger, EntrySide.Debit, plan.Quote.Amount));
+            posting.Add(PostingLine.Institutional(plan.RevenueAccount, EntrySide.Credit, plan.Quote.Amount));
+        }
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                bank.GeneralLedgerBookId,
+                order.BusinessOperationId,
+                order.CurrencyId,
+                businessDate,
+                now,
+                now,
+                InterbankTransactionType,
+                DescriptionCode,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            period);
+
+        hold.Capture(hold.Amount, now);
+        unitOfWork.Holds.Update(hold);
+
+        posting.ApplyProjections(unitOfWork, ordered, now);
+        RecordFee(unitOfWork, order, plan, source, sourceLedger, now);
+
+        unitOfWork.SettlementInstructions.Add(SettlementInstruction.Create(
+            SettlementInstructionId.FromValue(idGenerator.NextId()),
+            order.BusinessOperationId,
+            order.CurrencyId,
+            source.BankId,
+            destination.BankId,
+            order.Amount,
+            now));
+
+        order.Accept();
+        unitOfWork.PaymentOrders.Update(order);
+
+        source.RecordCustomerActivity(now);
+        unitOfWork.DepositAccounts.Update(source);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            order.BusinessOperationId,
+            AcceptedEventType,
+            Payload(order),
+            now));
+
+        return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+    }
+
+    private Result<PaymentOrderView> SettleInterbank(
+        IBankingUnitOfWork unitOfWork,
+        PaymentOrderId paymentOrderId)
+    {
+        PaymentOrder order = unitOfWork.PaymentOrders.Find(paymentOrderId)!;
+        DepositAccount source = unitOfWork.DepositAccounts.Find(order.SourceDepositAccountId)!;
+        DepositAccount destination = unitOfWork.DepositAccounts.Find(order.DestinationDepositAccountId)!;
+        Hold hold = unitOfWork.Holds.FindByBusinessOperation(order.BusinessOperationId)!;
+        MoneyMinor feeAmount = hold.Amount.Subtract(order.Amount);
+
+        if (order.Status is not (PaymentOrderStatus.Accepted or PaymentOrderStatus.Queued))
+        {
+            return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+        }
+
+        SettlementInstruction? instruction =
+            unitOfWork.SettlementInstructions.FindByBusinessOperation(order.BusinessOperationId);
+
+        if (instruction is null)
+        {
+            return Conflict();
+        }
+
+        Bank sourceBank = unitOfWork.Banks.Find(source.BankId)!;
+        Bank destinationBank = unitOfWork.Banks.Find(destination.BankId)!;
+        UtcTimestamp now = clock.Now();
+
+        Result<InterbankSettlementAccounts> resolved = InterbankSettlementPolicy.ResolveAccounts(
+            unitOfWork, sourceBank, destinationBank, order.CurrencyId);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<PaymentOrderView>.Failure(resolved.Error!);
+        }
+
+        InterbankSettlementAccounts accounts = resolved.Value;
+        LedgerBalance reserve = unitOfWork.LedgerAccounts.FindProjection(accounts.SourceReserve.Id)
+            ?? LedgerBalance.Empty;
+
+        if (!reserve.CanReserve(order.Amount))
+        {
+            if (instruction.Status == SettlementInstructionStatus.Created)
+            {
+                instruction.Queue();
+                unitOfWork.SettlementInstructions.Update(instruction);
+            }
+
+            if (order.Status == PaymentOrderStatus.Accepted)
+            {
+                order.Queue();
+                unitOfWork.PaymentOrders.Update(order);
+            }
+
+            return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+        }
+
+        BusinessDate businessDate = BusinessDateOf(now);
+
+        Result<AccountingPeriodId[]> periods = OpenPeriods(
+            unitOfWork,
+            businessDate,
+            sourceBank.GeneralLedgerBookId,
+            accounts.CentralBankBookId,
+            destinationBank.GeneralLedgerBookId);
+
+        if (!periods.IsSuccess)
+        {
+            return Result<PaymentOrderView>.Failure(periods.Error!);
+        }
+
+        instruction.LockForSettlement(now);
+        order.BeginSettling();
+
+        PostSettlementLeg(
+            unitOfWork,
+            sourceBank.GeneralLedgerBookId,
+            periods.Value[0],
+            order,
+            businessDate,
+            now,
+            accounts.SourcePayable,
+            accounts.SourceReserve);
+
+        PostSettlementLeg(
+            unitOfWork,
+            accounts.CentralBankBookId,
+            periods.Value[1],
+            order,
+            businessDate,
+            now,
+            accounts.SourceCentralBankLiability,
+            accounts.DestinationCentralBankLiability);
+
+        PostSettlementLeg(
+            unitOfWork,
+            destinationBank.GeneralLedgerBookId,
+            periods.Value[2],
+            order,
+            businessDate,
+            now,
+            accounts.DestinationReserve,
+            accounts.DestinationSuspense);
+
+        instruction.Settle(now);
+        unitOfWork.SettlementInstructions.Update(instruction);
+
+        order.RecordSettlementFinality(now);
+        order.Settle();
+        unitOfWork.PaymentOrders.Update(order);
+
+        return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+    }
+
+    private Result<PaymentOrderView> PostBeneficiaryCredit(
+        IBankingUnitOfWork unitOfWork,
+        PaymentOrderId paymentOrderId,
+        IdempotencyKey idempotencyKey)
+    {
+        PaymentOrder order = unitOfWork.PaymentOrders.Find(paymentOrderId)!;
+        DepositAccount source = unitOfWork.DepositAccounts.Find(order.SourceDepositAccountId)!;
+        DepositAccount destination = unitOfWork.DepositAccounts.Find(order.DestinationDepositAccountId)!;
+        Hold hold = unitOfWork.Holds.FindByBusinessOperation(order.BusinessOperationId)!;
+        MoneyMinor feeAmount = hold.Amount.Subtract(order.Amount);
+
+        if (order.Status != PaymentOrderStatus.Settled)
+        {
+            return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+        }
+
+        Bank destinationBank = unitOfWork.Banks.Find(destination.BankId)!;
+        UtcTimestamp now = clock.Now();
+        BusinessDate businessDate = BusinessDateOf(now);
+
+        if (unitOfWork.AccountingPeriods.FindOpen(destinationBank.GeneralLedgerBookId, businessDate)
+            is not { } period)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        LedgerAccount? suspense = unitOfWork.LedgerAccounts.FindPostingByKind(
+            destinationBank.GeneralLedgerBookId,
+            LedgerAccountKind.IncomingSettlementSuspense,
+            order.CurrencyId);
+
+        if (suspense is null)
+        {
+            return Result<PaymentOrderView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+        }
+
+        LedgerAccount destinationLedger = unitOfWork.LedgerAccounts.Find(destination.LedgerAccountId)!;
+
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.Institutional(suspense, EntrySide.Debit, order.Amount));
+        posting.Add(PostingLine.Deposit(destinationLedger, EntrySide.Credit, order.Amount));
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                destinationBank.GeneralLedgerBookId,
+                order.BusinessOperationId,
+                order.CurrencyId,
+                businessDate,
+                now,
+                now,
+                BeneficiaryTransactionType,
+                BeneficiaryDescriptionCode,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            period);
+
+        posting.ApplyProjections(unitOfWork, ordered, now);
+
+        order.RecordBeneficiaryPosting(now);
+        order.Complete(now);
+        unitOfWork.PaymentOrders.Update(order);
+
+        BusinessOperation operation = unitOfWork.BusinessOperations.Find(idempotencyKey)!;
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            order.BusinessOperationId,
+            CompletedEventType,
+            Payload(order),
+            now));
+
+        return Result<PaymentOrderView>.Success(ToView(unitOfWork, order, feeAmount, source, destination));
+    }
+
+    private void PostSettlementLeg(
+        IBankingUnitOfWork unitOfWork,
+        AccountingBookId bookId,
+        AccountingPeriodId period,
+        PaymentOrder order,
+        BusinessDate businessDate,
+        UtcTimestamp now,
+        LedgerAccount debit,
+        LedgerAccount credit)
+    {
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.Institutional(debit, EntrySide.Debit, order.Amount));
+        posting.Add(PostingLine.Institutional(credit, EntrySide.Credit, order.Amount));
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                bookId,
+                order.BusinessOperationId,
+                order.CurrencyId,
+                businessDate,
+                now,
+                now,
+                SettlementTransactionType,
+                SettlementDescriptionCode,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            period);
+
+        posting.ApplyProjections(unitOfWork, ordered, now);
+    }
+
+    private static Result<AccountingPeriodId[]> OpenPeriods(
+        IBankingUnitOfWork unitOfWork,
+        BusinessDate businessDate,
+        params AccountingBookId[] books)
+    {
+        AccountingPeriodId[] periods = new AccountingPeriodId[books.Length];
+
+        for (int index = 0; index < books.Length; index++)
+        {
+            if (unitOfWork.AccountingPeriods.FindOpen(books[index], businessDate) is not { } period)
+            {
+                return Result<AccountingPeriodId[]>.Failure(
+                    ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+            }
+
+            periods[index] = period;
+        }
+
+        return Result<AccountingPeriodId[]>.Success(periods);
+    }
+
+    private static FeeType FeeTypeOf(PaymentOrder order) =>
+        order.SettlementMode == SettlementMode.Internal
+            ? FeeType.SameBankTransfer
+            : FeeType.InterbankTransfer;
+
+    private static Result<PaymentOrderView> Conflict() => Result<PaymentOrderView>.Failure(
+        ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
+
+    private static string Payload(PaymentOrder order) =>
+        $$"""{"payment_order_id":"{{order.Id.Value}}","amount_minor":{{order.Amount.Value}}}""";
 
     private static BusinessDate BusinessDateOf(UtcTimestamp at) => BusinessDate.FromDayNumber(
         DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(at.UnixMilliseconds).UtcDateTime).DayNumber);
@@ -537,11 +976,11 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             balance.AvailableBalance);
     }
 
-    private static Result<PaymentOrderId> Denied(TargetAccess access)
+    private static Result<ReservedTransfer> Denied(TargetAccess access)
     {
         ApplicationError error = TargetAccessPolicy.ToError(
             access, BankingErrorCodes.DepositAccountNotFound, BankingErrorCodes.DepositAccountNotOperable);
 
-        return Result<PaymentOrderId>.Failure(error.Category, error.Code);
+        return Result<ReservedTransfer>.Failure(error.Category, error.Code);
     }
 }

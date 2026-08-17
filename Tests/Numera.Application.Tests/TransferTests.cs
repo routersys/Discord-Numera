@@ -47,7 +47,10 @@ public sealed class TransferTests
 
         public EconomyScopeId Scope { get; } = EconomyScopeId.FromValue(EntityIdValue.FromBits(1));
 
-        public static Harness Create(bool withPeriod = true, bool withSecondBank = false)
+        public static Harness Create(
+            bool withPeriod = true,
+            bool withSecondBank = false,
+            bool withSettlement = false)
         {
             string root = Path.Combine(Path.GetTempPath(), "numera-transfer", Guid.NewGuid().ToString("n"));
             Directory.CreateDirectory(root);
@@ -59,7 +62,7 @@ public sealed class TransferTests
             new SqliteDatabaseInitializer(
                 options, harness.ConnectionFactory, new MigrationRunner([.. EmbeddedMigrationCatalog.Load()]))
                 .Initialize(1_776_000_000_000);
-            harness.Seed(withPeriod, withSecondBank);
+            harness.Seed(withPeriod, withSecondBank || withSettlement, withSettlement);
 
             harness.Coordinator = new SqliteWriteCoordinator(
                 harness.ConnectionFactory, new SqliteRetryPolicy(3, 1, static () => 0));
@@ -77,7 +80,7 @@ public sealed class TransferTests
 
         private static string Blob(int seed) => $"x'{new string('0', 30)}{seed:x2}'";
 
-        private void Seed(bool withPeriod, bool withSecondBank)
+        private void Seed(bool withPeriod, bool withSecondBank, bool withSettlement)
         {
             Execute($"""
                 INSERT INTO guild_economies(economy_scope_id, guild_id, canonical_timezone, status, version)
@@ -128,6 +131,7 @@ public sealed class TransferTests
 
             PublishBankLimits(UnlimitedPolicySeed);
             PublishTransferFee(FreeScheduleSeed, fixedMinor: 0);
+            PublishTransferFee(FreeScheduleSeed, fixedMinor: 0, priority: 1, feeType: "INTERBANK_TRANSFER");
 
             if (withPeriod)
             {
@@ -176,7 +180,92 @@ public sealed class TransferTests
                 VALUES({Blob(26)}, {Blob(25)}, 1, 1, NULL, 1000000000, 'ACTUAL_365_FIXED', 0, NULL, NULL, NULL,
                     'INTERNAL', 'STANDARD', 'NONE', 1);
                 """);
+
+            if (withSettlement)
+            {
+                SeedSettlement();
+            }
         }
+
+        private void SeedSettlement()
+        {
+            Execute($"""
+                INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                    starts_on, ends_on, status, closed_at, version)
+                VALUES({Blob(113)}, {Blob(21)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+                INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+                VALUES({Blob(100)}, 'SYSTEM', '中央銀行', 'ACTIVE', 1, 1);
+
+                INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status, created_at, version)
+                VALUES({Blob(101)}, {Blob(100)}, 'CENTRAL_BANK', 'OPEN', 1, 1);
+
+                INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                    starts_on, ends_on, status, closed_at, version)
+                VALUES({Blob(102)}, {Blob(101)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
+                    account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                    owner_reference_type, owner_reference_id, status, created_at, version)
+                VALUES
+                    ({Blob(103)}, {Blob(101)}, NULL, '2100-1', 'CENTRAL_BANK_SETTLEMENT_LIABILITY', 'LIABILITY',
+                        'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(104)}, {Blob(101)}, NULL, '2100-2', 'CENTRAL_BANK_SETTLEMENT_LIABILITY', 'LIABILITY',
+                        'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(105)}, {Blob(4)}, NULL, '2200', 'SETTLEMENT_PAYABLE', 'LIABILITY', 'CREDIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(106)}, {Blob(4)}, NULL, '1100', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(107)}, {Blob(21)}, NULL, '1100', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(108)}, {Blob(21)}, NULL, '2300', 'INCOMING_SETTLEMENT_SUSPENSE', 'LIABILITY', 'CREDIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO central_bank_settlement_accounts(central_bank_settlement_account_id, bank_id,
+                    currency_id, central_bank_ledger_account_id, status, opened_at, closed_at, version)
+                VALUES
+                    ({Blob(109)}, {Blob(5)}, {Blob(2)}, {Blob(103)}, 'ACTIVE', 1, NULL, 1),
+                    ({Blob(110)}, {Blob(22)}, {Blob(2)}, {Blob(104)}, 'ACTIVE', 1, NULL, 1);
+
+                INSERT INTO settlement_participations(settlement_participation_id, bank_id, mode,
+                    settlement_agent_bank_id, central_bank_settlement_account_id, status, effective_from,
+                    effective_to, version)
+                VALUES
+                    ({Blob(111)}, {Blob(5)}, 'DIRECT', NULL, {Blob(109)}, 'ACTIVE', 1, NULL, 1),
+                    ({Blob(112)}, {Blob(22)}, 'DIRECT', NULL, {Blob(110)}, 'ACTIVE', 1, NULL, 1);
+                """);
+        }
+
+        public void FundReserve(long amount)
+        {
+            Execute($"""
+                INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                    version, updated_at)
+                VALUES({Blob(106)}, {amount}, 0, 1, 1)
+                ON CONFLICT(ledger_account_id) DO UPDATE SET
+                    posted_balance_minor = {amount}, version = version + 1;
+
+                INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                    version, updated_at)
+                VALUES({Blob(103)}, {amount}, 0, 1, 1)
+                ON CONFLICT(ledger_account_id) DO UPDATE SET
+                    posted_balance_minor = {amount}, version = version + 1;
+                """);
+        }
+
+        public void MakeDestinationIndirect() => Execute($"""
+            UPDATE settlement_participations
+            SET mode = 'INDIRECT', settlement_agent_bank_id = {Blob(5)},
+                central_bank_settlement_account_id = NULL, version = version + 1
+            WHERE bank_id = {Blob(22)};
+            """);
+
+        public long LedgerBalanceOf(int seed) => long.Parse(
+            ReadText($"""
+                SELECT CAST(COALESCE(posted_balance_minor, 0) AS TEXT)
+                FROM ledger_balance_projections WHERE ledger_account_id = {Blob(seed)};
+                """) is { Length: > 0 } text ? text : "0",
+            System.Globalization.CultureInfo.InvariantCulture);
 
         public void PublishBankLimits(
             int policySeed,
@@ -232,7 +321,8 @@ public sealed class TransferTests
             string dayClass = "ANY",
             int? startMinute = null,
             int? endMinute = null,
-            int priority = 0)
+            int priority = 0,
+            string feeType = "SAME_BANK_TRANSFER")
         {
             Execute($"""
                 INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
@@ -246,7 +336,7 @@ public sealed class TransferTests
                     amount_max_minor, day_class, local_start_minute, local_end_minute, fixed_minor,
                     basis_points, minimum_minor, maximum_minor, waiver_counter_key,
                     free_occurrences_per_business_month)
-                VALUES({Blob(scheduleSeed + 1 + priority)}, {Blob(scheduleSeed)}, 'SAME_BANK_TRANSFER',
+                VALUES({Blob(scheduleSeed + 1 + priority)}, {Blob(scheduleSeed)}, '{feeType}',
                     {priority}, 'ANY', NULL, NULL, NULL, 0, NULL, '{dayClass}',
                     {Nullable(startMinute)}, {Nullable(endMinute)}, {fixedMinor}, {basisPoints},
                     {minimumMinor}, {Nullable(maximumMinor)}, {Text(waiverCounterKey)}, {freeOccurrences});
@@ -554,24 +644,193 @@ public sealed class TransferTests
         Assert.AreEqual(BankingErrorCodes.SelfTransferRejected, result.Error!.Code);
     }
 
+    private const int SourceReserveSeed = 106;
+    private const int DestinationReserveSeed = 107;
+    private const int SourceCentralBankLiabilitySeed = 103;
+    private const int DestinationCentralBankLiabilitySeed = 104;
+    private const int SettlementPayableSeed = 105;
+    private const int IncomingSuspenseSeed = 108;
+
+    private static async Task<DepositAccountView> RemoteAccountAsync(Harness harness)
+    {
+        CustomerAccountId remote = await harness.RegisterAsync(710_000_000_000_000_003UL, "jiro");
+        return await harness.OpenAsync(remote, OtherInstitution);
+    }
+
+    private static Task<Result<PaymentOrderView>> InterbankTransferAsync(
+        Harness harness,
+        Parties parties,
+        DepositAccountView remote,
+        long amount,
+        string token = "interaction-1") =>
+        harness.TransferAsync(
+            parties.Payer, parties.Source.Id, remote.AccountNumber, amount, token, OtherInstitution);
+
     [TestMethod]
-    public async Task InterbankTransferIsRefusedUntilImplemented()
+    public async Task InterbankTransferSettlesThroughTheCentralBank()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
+        Assert.AreEqual(700L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(300L, harness.Balance(remote.Id));
+        Assert.AreEqual(0L, harness.Held(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task InterbankSettlementMovesReservesAndMirrorsTheCentralBankLiabilities()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual(4_700L, harness.LedgerBalanceOf(SourceReserveSeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(DestinationReserveSeed));
+        Assert.AreEqual(4_700L, harness.LedgerBalanceOf(SourceCentralBankLiabilitySeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(DestinationCentralBankLiabilitySeed));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(SettlementPayableSeed));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(IncomingSuspenseSeed));
+    }
+
+    [TestMethod]
+    public async Task InterbankTransferPostsSourceSettlementAndBeneficiaryBooks()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual(5L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(10L, harness.Count("journal_entries"));
+        Assert.AreEqual(
+            harness.ReadText("SELECT CAST(SUM(amount_minor) AS TEXT) FROM journal_entries WHERE side = 'DEBIT';"),
+            harness.ReadText("SELECT CAST(SUM(amount_minor) AS TEXT) FROM journal_entries WHERE side = 'CREDIT';"));
+    }
+
+    [TestMethod]
+    public async Task InterbankTransferRecordsBothFinalityFacts()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.AreEqual("RTGS", harness.ReadText("SELECT settlement_mode FROM payment_orders;"));
+        Assert.AreEqual(
+            "AFTER_FINAL_SETTLEMENT",
+            harness.ReadText("SELECT beneficiary_posting_policy FROM payment_orders;"));
+        Assert.AreNotEqual(
+            string.Empty,
+            harness.ReadText("SELECT CAST(settlement_finalized_at AS TEXT) FROM payment_orders;"));
+        Assert.AreNotEqual(
+            string.Empty,
+            harness.ReadText("SELECT CAST(beneficiary_posted_at AS TEXT) FROM payment_orders;"));
+        Assert.AreEqual("SETTLED", harness.ReadText("SELECT status FROM settlement_instructions;"));
+    }
+
+    [TestMethod]
+    public async Task InsufficientReserveKeepsThePaymentQueuedAfterTheCustomerDebit()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(100);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(PaymentOrderStatus.Queued, result.Value.Status);
+        Assert.AreEqual(700L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(0L, harness.Balance(remote.Id));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(SettlementPayableSeed));
+        Assert.AreEqual("QUEUED", harness.ReadText("SELECT status FROM settlement_instructions;"));
+        Assert.AreEqual(
+            string.Empty,
+            harness.ReadText("SELECT CAST(settlement_finalized_at AS TEXT) FROM payment_orders;"));
+    }
+
+    [TestMethod]
+    public async Task InterbankFeeIsChargedByTheSourceBankOnly()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5, feeType: "INTERBANK_TRANSFER");
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(5L, result.Value.FeeAmount.Value);
+        Assert.AreEqual(695L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(300L, harness.Balance(remote.Id));
+        Assert.AreEqual("INTERBANK_TRANSFER", harness.ReadText("SELECT fee_type FROM fee_assessments;"));
+    }
+
+    [TestMethod]
+    public async Task InterbankTransferIsIdempotentAcrossRetries()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
+
+            Assert.IsTrue(result.IsSuccess);
+        }
+
+        Assert.AreEqual(1L, harness.Count("payment_orders"));
+        Assert.AreEqual(1L, harness.Count("settlement_instructions"));
+        Assert.AreEqual(5L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(700L, harness.Balance(parties.Source.Id));
+        Assert.AreEqual(300L, harness.Balance(remote.Id));
+    }
+
+    [TestMethod]
+    public async Task BankWithoutSettlementParticipationCannotSendInterbank()
     {
         await using Harness harness = Harness.Create(withSecondBank: true);
         Parties parties = await SetupAsync(harness);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
 
-        CustomerAccountId remote = await harness.RegisterAsync(710_000_000_000_000_003UL, "jiro");
-        DepositAccountView remoteAccount = await harness.OpenAsync(remote, OtherInstitution);
-
-        Result<PaymentOrderView> result = await harness.TransferAsync(
-            parties.Payer,
-            parties.Source.Id,
-            remoteAccount.AccountNumber,
-            100,
-            institution: OtherInstitution);
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 100);
 
         Assert.IsFalse(result.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.InterbankTransferUnavailable, result.Error!.Code);
+        Assert.AreEqual(ErrorCategory.BankUnavailable, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.SettlementParticipationUnavailable, result.Error.Code);
+        Assert.AreEqual(0L, harness.Count("payment_orders"));
+        Assert.AreEqual(0L, harness.Count("holds"));
+    }
+
+    [TestMethod]
+    public async Task IndirectParticipantIsRejectedInsteadOfSettledAsDirect()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+        harness.MakeDestinationIndirect();
+
+        Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 100);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.IndirectSettlementUnsupported, result.Error!.Code);
         Assert.AreEqual(0L, harness.Count("payment_orders"));
     }
 

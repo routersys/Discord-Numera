@@ -48,6 +48,18 @@ public static class BankingErrorCodes
 
     public static string BankPolicyUnavailable { get; } = ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 8);
 
+    public static string SettlementParticipationUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 9);
+
+    public static string IndirectSettlementUnsupported { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 10);
+
+    public static string CentralBankAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 11);
+
+    public static string SettlementAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 12);
+
     public static string CurrencyMismatch { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 5);
 
     public static string SelfTransferRejected { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 6);
