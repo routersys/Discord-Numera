@@ -35,15 +35,6 @@ public enum EconomyModalFieldStyle
     Paragraph = 2,
 }
 
-public enum EconomyResponseKind
-{
-    Message = 1,
-    UpdateMessage = 2,
-    Modal = 3,
-    Autocomplete = 4,
-    NoContent = 5,
-}
-
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
 public sealed class EconomySlashCommandAttribute : Attribute
 {

@@ -1,36 +1,130 @@
 namespace Numera.Discord.Abstractions;
 
-public sealed class EconomyInvocation
+public enum DiscordResponseKind
 {
-    public EconomyInvocation(
-        ulong discordUserId,
+    Message = 1,
+    UpdateMessage = 2,
+    Modal = 3,
+    Autocomplete = 4,
+    NoContent = 5,
+}
+
+public sealed class DiscordEndpointContext
+{
+    public DiscordEndpointContext(
+        ulong interactionId,
+        ulong userId,
         ulong guildId,
         ulong channelId,
-        string interactionId,
-        string locale)
+        string locale,
+        string commandPath)
     {
-        DiscordUserId = discordUserId;
+        ArgumentNullException.ThrowIfNull(locale);
+        ArgumentNullException.ThrowIfNull(commandPath);
+
+        InteractionId = interactionId;
+        UserId = userId;
         GuildId = guildId;
         ChannelId = channelId;
-        InteractionId = interactionId;
         Locale = locale;
+        CommandPath = commandPath;
     }
 
-    public ulong DiscordUserId { get; }
+    public ulong InteractionId { get; }
+
+    public ulong UserId { get; }
 
     public ulong GuildId { get; }
 
     public ulong ChannelId { get; }
 
-    public string InteractionId { get; }
-
     public string Locale { get; }
+
+    public string CommandPath { get; }
 }
 
-public sealed class EconomyEndpointResponse
+public sealed class DiscordUserInput
 {
-    private EconomyEndpointResponse(
-        EconomyResponseKind kind,
+    public DiscordUserInput(ulong userId) => UserId = userId;
+
+    public ulong UserId { get; }
+}
+
+public sealed class DiscordMessageInput
+{
+    public DiscordMessageInput(ulong messageId, ulong channelId, ulong authorUserId)
+    {
+        MessageId = messageId;
+        ChannelId = channelId;
+        AuthorUserId = authorUserId;
+    }
+
+    public ulong MessageId { get; }
+
+    public ulong ChannelId { get; }
+
+    public ulong AuthorUserId { get; }
+}
+
+public sealed class DiscordComponentInput
+{
+    private static readonly IReadOnlyList<string> EmptyValues = [];
+
+    public DiscordComponentInput(string action, string sessionToken, IReadOnlyList<string>? values = null)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(sessionToken);
+
+        Action = action;
+        SessionToken = sessionToken;
+        Values = values ?? EmptyValues;
+    }
+
+    public string Action { get; }
+
+    public string SessionToken { get; }
+
+    public IReadOnlyList<string> Values { get; }
+}
+
+public sealed class DiscordAutocompleteRequest
+{
+    public DiscordAutocompleteRequest(
+        ulong userId,
+        ulong guildId,
+        string commandPath,
+        string optionName,
+        string value)
+    {
+        ArgumentNullException.ThrowIfNull(commandPath);
+        ArgumentNullException.ThrowIfNull(optionName);
+        ArgumentNullException.ThrowIfNull(value);
+
+        UserId = userId;
+        GuildId = guildId;
+        CommandPath = commandPath;
+        OptionName = optionName;
+        Value = value;
+    }
+
+    public ulong UserId { get; }
+
+    public ulong GuildId { get; }
+
+    public string CommandPath { get; }
+
+    public string OptionName { get; }
+
+    public string Value { get; }
+}
+
+public sealed class DiscordEndpointResponse
+{
+    private static readonly IReadOnlyDictionary<string, string> EmptyViewData =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    private DiscordEndpointResponse(
+        DiscordResponseKind kind,
         string viewKey,
         IReadOnlyDictionary<string, string> viewData,
         bool ephemeral)
@@ -41,7 +135,7 @@ public sealed class EconomyEndpointResponse
         Ephemeral = ephemeral;
     }
 
-    public EconomyResponseKind Kind { get; }
+    public DiscordResponseKind Kind { get; }
 
     public string ViewKey { get; }
 
@@ -49,54 +143,51 @@ public sealed class EconomyEndpointResponse
 
     public bool Ephemeral { get; }
 
-    public static EconomyEndpointResponse Message(
+    public static DiscordEndpointResponse Message(
         string viewKey,
         IReadOnlyDictionary<string, string> viewData,
         bool ephemeral = true) =>
-        Create(EconomyResponseKind.Message, viewKey, viewData, ephemeral);
+        Create(DiscordResponseKind.Message, viewKey, viewData, ephemeral);
 
-    public static EconomyEndpointResponse UpdateMessage(
+    public static DiscordEndpointResponse UpdateMessage(
         string viewKey,
         IReadOnlyDictionary<string, string> viewData) =>
-        Create(EconomyResponseKind.UpdateMessage, viewKey, viewData, ephemeral: true);
+        Create(DiscordResponseKind.UpdateMessage, viewKey, viewData, ephemeral: true);
 
-    public static EconomyEndpointResponse Modal(
+    public static DiscordEndpointResponse Modal(
         string viewKey,
         IReadOnlyDictionary<string, string> viewData) =>
-        Create(EconomyResponseKind.Modal, viewKey, viewData, ephemeral: true);
+        Create(DiscordResponseKind.Modal, viewKey, viewData, ephemeral: true);
 
-    public static EconomyEndpointResponse Autocomplete(
+    public static DiscordEndpointResponse Autocomplete(
         string viewKey,
         IReadOnlyDictionary<string, string> viewData) =>
-        Create(EconomyResponseKind.Autocomplete, viewKey, viewData, ephemeral: true);
+        Create(DiscordResponseKind.Autocomplete, viewKey, viewData, ephemeral: true);
 
-    public static EconomyEndpointResponse NoContent() =>
-        Create(EconomyResponseKind.NoContent, string.Empty, EmptyViewData, ephemeral: true);
+    public static DiscordEndpointResponse NoContent() =>
+        Create(DiscordResponseKind.NoContent, string.Empty, EmptyViewData, ephemeral: true);
 
-    private static readonly IReadOnlyDictionary<string, string> EmptyViewData =
-        new Dictionary<string, string>(StringComparer.Ordinal);
-
-    private static EconomyEndpointResponse Create(
-        EconomyResponseKind kind,
+    private static DiscordEndpointResponse Create(
+        DiscordResponseKind kind,
         string viewKey,
         IReadOnlyDictionary<string, string> viewData,
         bool ephemeral)
     {
         ArgumentNullException.ThrowIfNull(viewKey);
         ArgumentNullException.ThrowIfNull(viewData);
-        return new EconomyEndpointResponse(kind, viewKey, viewData, ephemeral);
+        return new DiscordEndpointResponse(kind, viewKey, viewData, ephemeral);
     }
 }
 
 public interface IEconomyEndpoint;
 
-public sealed class EconomyAutocompleteOption
+public sealed class DiscordAutocompleteOption
 {
     public const int MinimumNameLength = 1;
     public const int MaximumNameLength = 100;
     public const int MaximumValueLength = 100;
 
-    private EconomyAutocompleteOption(string name, string value)
+    private DiscordAutocompleteOption(string name, string value)
     {
         Name = name;
         Value = value;
@@ -113,7 +204,7 @@ public sealed class EconomyAutocompleteOption
         && name.Length <= MaximumNameLength
         && value.Length <= MaximumValueLength;
 
-    public static bool TryCreate(string? name, string? value, out EconomyAutocompleteOption? option)
+    public static bool TryCreate(string? name, string? value, out DiscordAutocompleteOption? option)
     {
         if (!IsAcceptable(name, value))
         {
@@ -121,12 +212,12 @@ public sealed class EconomyAutocompleteOption
             return false;
         }
 
-        option = new EconomyAutocompleteOption(name!, value!);
+        option = new DiscordAutocompleteOption(name!, value!);
         return true;
     }
 
-    public static EconomyAutocompleteOption Create(string name, string value) =>
-        TryCreate(name, value, out EconomyAutocompleteOption? option)
+    public static DiscordAutocompleteOption Create(string name, string value) =>
+        TryCreate(name, value, out DiscordAutocompleteOption? option)
             ? option!
             : throw new ArgumentException(AutocompleteFailure.OptionOutOfRange, nameof(name));
 }

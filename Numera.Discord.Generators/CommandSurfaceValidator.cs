@@ -7,8 +7,8 @@ namespace Numera.Discord.Generators;
 
 internal static class CommandSurfaceValidator
 {
-    internal const string EndpointReturnType = "System.Threading.Tasks.Task<Numera.Discord.Abstractions.EconomyEndpointResponse>";
-    internal const string AutocompleteReturnType = "System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Numera.Discord.Abstractions.EconomyAutocompleteOption>>";
+    internal const string EndpointReturnType = "System.Threading.Tasks.Task<Numera.Discord.Abstractions.DiscordEndpointResponse>";
+    internal const string AutocompleteReturnType = "System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Numera.Discord.Abstractions.DiscordAutocompleteOption>>";
 
     internal static void Validate(SourceProductionContext context, CommandSurface surface)
     {

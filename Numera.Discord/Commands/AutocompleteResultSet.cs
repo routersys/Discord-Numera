@@ -12,7 +12,7 @@ public enum AutocompleteMatchKind
 public sealed record AutocompleteCandidate(string DisplayName, string Value);
 
 public sealed record AutocompleteDelivery(
-    IReadOnlyList<EconomyAutocompleteOption> Options,
+    IReadOnlyList<DiscordAutocompleteOption> Options,
     bool Truncated,
     int RejectedCount);
 
@@ -50,7 +50,7 @@ public static class AutocompleteResultSet
 
         foreach (AutocompleteCandidate candidate in candidates)
         {
-            if (!EconomyAutocompleteOption.IsAcceptable(candidate.DisplayName, candidate.Value))
+            if (!DiscordAutocompleteOption.IsAcceptable(candidate.DisplayName, candidate.Value))
             {
                 rejected++;
                 continue;
@@ -74,10 +74,10 @@ public static class AutocompleteResultSet
         bool truncated = matched.Count > MaximumResults;
         int take = truncated ? MaximumResults : matched.Count;
 
-        List<EconomyAutocompleteOption> options = new(take);
+        List<DiscordAutocompleteOption> options = new(take);
         for (int index = 0; index < take; index++)
         {
-            options.Add(EconomyAutocompleteOption.Create(
+            options.Add(DiscordAutocompleteOption.Create(
                 matched[index].Candidate.DisplayName,
                 matched[index].Candidate.Value));
         }
@@ -85,14 +85,14 @@ public static class AutocompleteResultSet
         return new AutocompleteDelivery(options, truncated, rejected);
     }
 
-    public static AutocompleteDelivery Enforce(IReadOnlyList<EconomyAutocompleteOption> provided)
+    public static AutocompleteDelivery Enforce(IReadOnlyList<DiscordAutocompleteOption> provided)
     {
         ArgumentNullException.ThrowIfNull(provided);
 
         bool truncated = provided.Count > MaximumResults;
         int take = truncated ? MaximumResults : provided.Count;
 
-        List<EconomyAutocompleteOption> options = new(take);
+        List<DiscordAutocompleteOption> options = new(take);
         for (int index = 0; index < take; index++)
         {
             options.Add(provided[index]);

@@ -24,7 +24,7 @@ public sealed class DiscordResponseStateMachineTests
     [DataRow(DiscordInteractionKind.ModalSubmit)]
     public void CommandsRespondWithMessage(DiscordInteractionKind kind)
     {
-        ResponsePlan plan = For(kind).PlanResponse(EconomyResponseKind.Message);
+        ResponsePlan plan = For(kind).PlanResponse(DiscordResponseKind.Message);
 
         Assert.IsTrue(plan.IsPermitted);
         Assert.AreEqual(DiscordResponseOperation.Respond, plan.Operation);
@@ -35,7 +35,7 @@ public sealed class DiscordResponseStateMachineTests
     [DataRow(DiscordInteractionKind.SelectMenu)]
     public void ComponentsUpdateTheOriginalMessage(DiscordInteractionKind kind)
     {
-        ResponsePlan plan = For(kind).PlanResponse(EconomyResponseKind.UpdateMessage);
+        ResponsePlan plan = For(kind).PlanResponse(DiscordResponseKind.UpdateMessage);
 
         Assert.IsTrue(plan.IsPermitted);
         Assert.AreEqual(DiscordResponseOperation.UpdateMessage, plan.Operation);
@@ -48,7 +48,7 @@ public sealed class DiscordResponseStateMachineTests
     [DataRow(DiscordInteractionKind.SelectMenu)]
     public void ModalIsAllowedOnlyFromCanonicalOrigins(DiscordInteractionKind kind)
     {
-        ResponsePlan plan = For(kind).PlanResponse(EconomyResponseKind.Modal);
+        ResponsePlan plan = For(kind).PlanResponse(DiscordResponseKind.Modal);
 
         Assert.IsTrue(plan.IsPermitted);
         Assert.AreEqual(DiscordResponseOperation.RespondWithModal, plan.Operation);
@@ -60,7 +60,7 @@ public sealed class DiscordResponseStateMachineTests
     [DataRow(DiscordInteractionKind.Autocomplete)]
     public void ModalFromOtherOriginsIsRejected(DiscordInteractionKind kind)
     {
-        ResponsePlan plan = For(kind).PlanResponse(EconomyResponseKind.Modal);
+        ResponsePlan plan = For(kind).PlanResponse(DiscordResponseKind.Modal);
 
         Assert.IsFalse(plan.IsPermitted);
         Assert.AreEqual(ResponsePlanFailure.ResponseKindNotPermitted, plan.Failure);
@@ -70,10 +70,10 @@ public sealed class DiscordResponseStateMachineTests
     public void AutocompleteRespondsOnlyToAutocompleteInteractions()
     {
         Assert.IsTrue(For(DiscordInteractionKind.Autocomplete)
-            .PlanResponse(EconomyResponseKind.Autocomplete).IsPermitted);
+            .PlanResponse(DiscordResponseKind.Autocomplete).IsPermitted);
 
         Assert.IsFalse(For(DiscordInteractionKind.SlashCommand)
-            .PlanResponse(EconomyResponseKind.Autocomplete).IsPermitted);
+            .PlanResponse(DiscordResponseKind.Autocomplete).IsPermitted);
     }
 
     [TestMethod]
@@ -81,7 +81,7 @@ public sealed class DiscordResponseStateMachineTests
     [DataRow(DiscordInteractionKind.SelectMenu)]
     public void NoContentDefersOnComponents(DiscordInteractionKind kind)
     {
-        ResponsePlan plan = For(kind).PlanResponse(EconomyResponseKind.NoContent);
+        ResponsePlan plan = For(kind).PlanResponse(DiscordResponseKind.NoContent);
 
         Assert.IsTrue(plan.IsPermitted);
         Assert.AreEqual(DiscordResponseOperation.Defer, plan.Operation);
@@ -95,7 +95,7 @@ public sealed class DiscordResponseStateMachineTests
     [DataRow(DiscordInteractionKind.Autocomplete)]
     public void NoContentFromOtherOriginsIsProgrammerError(DiscordInteractionKind kind)
     {
-        ResponsePlan plan = For(kind).PlanResponse(EconomyResponseKind.NoContent);
+        ResponsePlan plan = For(kind).PlanResponse(DiscordResponseKind.NoContent);
 
         Assert.IsFalse(plan.IsPermitted);
         Assert.AreEqual(ResponsePlanFailure.NoContentNotPermitted, plan.Failure);
@@ -117,7 +117,7 @@ public sealed class DiscordResponseStateMachineTests
     [DataRow(DiscordInteractionKind.ModalSubmit)]
     public void DeferredCommandFinalisesThroughOriginalResponse(DiscordInteractionKind kind)
     {
-        ResponsePlan plan = Deferred(kind).PlanResponse(EconomyResponseKind.Message);
+        ResponsePlan plan = Deferred(kind).PlanResponse(DiscordResponseKind.Message);
 
         Assert.IsTrue(plan.IsPermitted);
         Assert.AreEqual(DiscordResponseOperation.ModifyOriginalResponse, plan.Operation);
@@ -126,7 +126,7 @@ public sealed class DiscordResponseStateMachineTests
     [TestMethod]
     public void DeferredComponentUpdatesOriginalMessage()
     {
-        ResponsePlan plan = Deferred(DiscordInteractionKind.Button).PlanResponse(EconomyResponseKind.UpdateMessage);
+        ResponsePlan plan = Deferred(DiscordInteractionKind.Button).PlanResponse(DiscordResponseKind.UpdateMessage);
 
         Assert.IsTrue(plan.IsPermitted);
         Assert.AreEqual(DiscordResponseOperation.ModifyOriginalResponse, plan.Operation);
@@ -135,7 +135,7 @@ public sealed class DiscordResponseStateMachineTests
     [TestMethod]
     public void ModalAfterDeferralIsRejected()
     {
-        ResponsePlan plan = Deferred(DiscordInteractionKind.Button).PlanResponse(EconomyResponseKind.Modal);
+        ResponsePlan plan = Deferred(DiscordInteractionKind.Button).PlanResponse(DiscordResponseKind.Modal);
 
         Assert.IsFalse(plan.IsPermitted);
         Assert.AreEqual(ResponsePlanFailure.ModalAfterDeferral, plan.Failure);
@@ -147,7 +147,7 @@ public sealed class DiscordResponseStateMachineTests
         DiscordResponseStateMachine machine = For(DiscordInteractionKind.SlashCommand);
         machine.RecordDeferral();
 
-        ResponsePlan plan = machine.PlanResponse(EconomyResponseKind.Autocomplete);
+        ResponsePlan plan = machine.PlanResponse(DiscordResponseKind.Autocomplete);
 
         Assert.IsFalse(plan.IsPermitted);
         Assert.AreEqual(ResponsePlanFailure.AutocompleteAfterDeferral, plan.Failure);
@@ -161,7 +161,7 @@ public sealed class DiscordResponseStateMachineTests
 
         Assert.AreEqual(
             ResponsePlanFailure.AlreadyResponded,
-            machine.PlanResponse(EconomyResponseKind.Message).Failure);
+            machine.PlanResponse(DiscordResponseKind.Message).Failure);
         Assert.AreEqual(
             ResponsePlanFailure.AlreadyResponded,
             machine.PlanDeferral().Failure);
@@ -182,7 +182,7 @@ public sealed class DiscordResponseStateMachineTests
     {
         foreach (DiscordInteractionKind kind in Enum.GetValues<DiscordInteractionKind>())
         {
-            foreach (EconomyResponseKind responseKind in Enum.GetValues<EconomyResponseKind>())
+            foreach (DiscordResponseKind responseKind in Enum.GetValues<DiscordResponseKind>())
             {
                 ResponsePlan initial = For(kind).PlanResponse(responseKind);
                 Assert.IsTrue(initial.IsPermitted || initial.Failure != ResponsePlanFailure.None);

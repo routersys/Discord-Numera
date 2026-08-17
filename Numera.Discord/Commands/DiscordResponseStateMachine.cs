@@ -90,7 +90,7 @@ public sealed class DiscordResponseStateMachine
             : ResponsePlan.Reject(ResponsePlanFailure.DeferralNotPermitted);
     }
 
-    public ResponsePlan PlanResponse(EconomyResponseKind responseKind)
+    public ResponsePlan PlanResponse(DiscordResponseKind responseKind)
     {
         if (HasResponded)
         {
@@ -104,44 +104,44 @@ public sealed class DiscordResponseStateMachine
 
     public void RecordResponse() => HasResponded = true;
 
-    private ResponsePlan PlanInitial(EconomyResponseKind responseKind) => responseKind switch
+    private ResponsePlan PlanInitial(DiscordResponseKind responseKind) => responseKind switch
     {
-        EconomyResponseKind.Message => IsCommandOrModalSubmit(kind)
+        DiscordResponseKind.Message => IsCommandOrModalSubmit(kind)
             ? ResponsePlan.Allow(DiscordResponseOperation.Respond)
             : ResponsePlan.Reject(ResponsePlanFailure.ResponseKindNotPermitted),
 
-        EconomyResponseKind.UpdateMessage => IsComponent(kind)
+        DiscordResponseKind.UpdateMessage => IsComponent(kind)
             ? ResponsePlan.Allow(DiscordResponseOperation.UpdateMessage)
             : ResponsePlan.Reject(ResponsePlanFailure.ResponseKindNotPermitted),
 
-        EconomyResponseKind.Modal => kind is DiscordInteractionKind.SlashCommand
+        DiscordResponseKind.Modal => kind is DiscordInteractionKind.SlashCommand
             or DiscordInteractionKind.UserCommand
             or DiscordInteractionKind.Button
             or DiscordInteractionKind.SelectMenu
             ? ResponsePlan.Allow(DiscordResponseOperation.RespondWithModal)
             : ResponsePlan.Reject(ResponsePlanFailure.ResponseKindNotPermitted),
 
-        EconomyResponseKind.Autocomplete => kind == DiscordInteractionKind.Autocomplete
+        DiscordResponseKind.Autocomplete => kind == DiscordInteractionKind.Autocomplete
             ? ResponsePlan.Allow(DiscordResponseOperation.RespondWithAutocomplete)
             : ResponsePlan.Reject(ResponsePlanFailure.ResponseKindNotPermitted),
 
-        EconomyResponseKind.NoContent => IsComponent(kind)
+        DiscordResponseKind.NoContent => IsComponent(kind)
             ? ResponsePlan.Allow(DiscordResponseOperation.Defer)
             : ResponsePlan.Reject(ResponsePlanFailure.NoContentNotPermitted),
 
         _ => ResponsePlan.Reject(ResponsePlanFailure.ResponseKindNotPermitted),
     };
 
-    private ResponsePlan PlanAfterDeferral(EconomyResponseKind responseKind) => responseKind switch
+    private ResponsePlan PlanAfterDeferral(DiscordResponseKind responseKind) => responseKind switch
     {
-        EconomyResponseKind.Message or EconomyResponseKind.UpdateMessage =>
+        DiscordResponseKind.Message or DiscordResponseKind.UpdateMessage =>
             ResponsePlan.Allow(DiscordResponseOperation.ModifyOriginalResponse),
 
-        EconomyResponseKind.Modal => ResponsePlan.Reject(ResponsePlanFailure.ModalAfterDeferral),
+        DiscordResponseKind.Modal => ResponsePlan.Reject(ResponsePlanFailure.ModalAfterDeferral),
 
-        EconomyResponseKind.Autocomplete => ResponsePlan.Reject(ResponsePlanFailure.AutocompleteAfterDeferral),
+        DiscordResponseKind.Autocomplete => ResponsePlan.Reject(ResponsePlanFailure.AutocompleteAfterDeferral),
 
-        EconomyResponseKind.NoContent => IsComponent(kind)
+        DiscordResponseKind.NoContent => IsComponent(kind)
             ? ResponsePlan.Allow(DiscordResponseOperation.ModifyOriginalResponse)
             : ResponsePlan.Reject(ResponsePlanFailure.NoContentNotPermitted),
 

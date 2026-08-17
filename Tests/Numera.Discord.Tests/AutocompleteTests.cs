@@ -10,15 +10,15 @@ public sealed class DiscordLimitConformanceTests
     [TestMethod]
     public void AutocompleteOptionLimitsMatchDiscordNet()
     {
-        _ = new AutocompleteResult(new string('a', EconomyAutocompleteOption.MaximumNameLength), "v");
-        _ = new AutocompleteResult("n", new string('a', EconomyAutocompleteOption.MaximumValueLength));
+        _ = new AutocompleteResult(new string('a', DiscordAutocompleteOption.MaximumNameLength), "v");
+        _ = new AutocompleteResult("n", new string('a', DiscordAutocompleteOption.MaximumValueLength));
 
         Assert.ThrowsExactly<ArgumentException>(
-            () => new AutocompleteResult(new string('a', EconomyAutocompleteOption.MaximumNameLength + 1), "v"));
+            () => new AutocompleteResult(new string('a', DiscordAutocompleteOption.MaximumNameLength + 1), "v"));
         Assert.ThrowsExactly<ArgumentException>(
-            () => new AutocompleteResult(new string('a', EconomyAutocompleteOption.MinimumNameLength - 1), "v"));
+            () => new AutocompleteResult(new string('a', DiscordAutocompleteOption.MinimumNameLength - 1), "v"));
         Assert.ThrowsExactly<ArgumentException>(
-            () => new AutocompleteResult("n", new string('a', EconomyAutocompleteOption.MaximumValueLength + 1)));
+            () => new AutocompleteResult("n", new string('a', DiscordAutocompleteOption.MaximumValueLength + 1)));
     }
 
     [TestMethod]
@@ -45,12 +45,12 @@ public sealed class DiscordLimitConformanceTests
 }
 
 [TestClass]
-public sealed class EconomyAutocompleteOptionTests
+public sealed class DiscordAutocompleteOptionTests
 {
     [TestMethod]
     public void CanonicalOptionIsAccepted()
     {
-        EconomyAutocompleteOption option = EconomyAutocompleteOption.Create("第一銀行", "NUM0001");
+        DiscordAutocompleteOption option = DiscordAutocompleteOption.Create("第一銀行", "NUM0001");
 
         Assert.AreEqual("第一銀行", option.Name);
         Assert.AreEqual("NUM0001", option.Value);
@@ -58,23 +58,23 @@ public sealed class EconomyAutocompleteOptionTests
 
     [TestMethod]
     public void EmptyNameIsRejected() =>
-        Assert.IsFalse(EconomyAutocompleteOption.TryCreate(string.Empty, "v", out _));
+        Assert.IsFalse(DiscordAutocompleteOption.TryCreate(string.Empty, "v", out _));
 
     [TestMethod]
     public void OverlongNameIsRejected() =>
-        Assert.IsFalse(EconomyAutocompleteOption.TryCreate(new string('a', 101), "v", out _));
+        Assert.IsFalse(DiscordAutocompleteOption.TryCreate(new string('a', 101), "v", out _));
 
     [TestMethod]
     public void OverlongValueIsRejected() =>
-        Assert.IsFalse(EconomyAutocompleteOption.TryCreate("n", new string('a', 101), out _));
+        Assert.IsFalse(DiscordAutocompleteOption.TryCreate("n", new string('a', 101), out _));
 
     [TestMethod]
     public void EmptyValueIsAccepted() =>
-        Assert.IsTrue(EconomyAutocompleteOption.TryCreate("n", string.Empty, out _));
+        Assert.IsTrue(DiscordAutocompleteOption.TryCreate("n", string.Empty, out _));
 
     [TestMethod]
     public void CreateRaisesForOutOfRangeInput() =>
-        Assert.ThrowsExactly<ArgumentException>(() => EconomyAutocompleteOption.Create(string.Empty, "v"));
+        Assert.ThrowsExactly<ArgumentException>(() => DiscordAutocompleteOption.Create(string.Empty, "v"));
 }
 
 [TestClass]
@@ -180,10 +180,10 @@ public sealed class AutocompleteResultSetTests
     [TestMethod]
     public void ProviderOverflowIsTruncatedDefensively()
     {
-        List<EconomyAutocompleteOption> provided = [];
+        List<DiscordAutocompleteOption> provided = [];
         for (int index = 0; index < 30; index++)
         {
-            provided.Add(EconomyAutocompleteOption.Create($"項目{index:D2}", $"V{index:D4}"));
+            provided.Add(DiscordAutocompleteOption.Create($"項目{index:D2}", $"V{index:D4}"));
         }
 
         AutocompleteDelivery delivery = AutocompleteResultSet.Enforce(provided);
@@ -195,10 +195,10 @@ public sealed class AutocompleteResultSetTests
     [TestMethod]
     public void ProviderWithinLimitIsPassedThrough()
     {
-        List<EconomyAutocompleteOption> provided =
+        List<DiscordAutocompleteOption> provided =
         [
-            EconomyAutocompleteOption.Create("一つ目", "V1"),
-            EconomyAutocompleteOption.Create("二つ目", "V2"),
+            DiscordAutocompleteOption.Create("一つ目", "V1"),
+            DiscordAutocompleteOption.Create("二つ目", "V2"),
         ];
 
         AutocompleteDelivery delivery = AutocompleteResultSet.Enforce(provided);
