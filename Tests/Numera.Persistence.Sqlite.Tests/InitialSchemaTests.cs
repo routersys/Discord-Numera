@@ -404,14 +404,14 @@ public sealed class InitialSchemaTests
 
         Execute(fixture, $"""
             INSERT INTO idempotency_records(idempotency_record_id, idempotency_scope, idempotency_key,
-                business_operation_id, operation_result_id, created_at, completed_at)
-            VALUES({Blob(100)}, 'TRANSFER', 'key-1', NULL, NULL, 1, NULL);
+                business_operation_id, operation_result_id, status, created_at, completed_at)
+            VALUES({Blob(100)}, 'TRANSFER', 'key-1', NULL, NULL, 'IN_PROGRESS', 1, NULL);
             """);
 
         Rejects(fixture, $"""
             INSERT INTO idempotency_records(idempotency_record_id, idempotency_scope, idempotency_key,
-                business_operation_id, operation_result_id, created_at, completed_at)
-            VALUES({Blob(101)}, 'TRANSFER', 'key-1', NULL, NULL, 1, NULL);
+                business_operation_id, operation_result_id, status, created_at, completed_at)
+            VALUES({Blob(101)}, 'TRANSFER', 'key-1', NULL, NULL, 'IN_PROGRESS', 1, NULL);
             """);
     }
 
@@ -422,14 +422,14 @@ public sealed class InitialSchemaTests
 
         Execute(fixture, $"""
             INSERT INTO idempotency_records(idempotency_record_id, idempotency_scope, idempotency_key,
-                business_operation_id, operation_result_id, created_at, completed_at)
-            VALUES({Blob(100)}, 'TRANSFER', 'key-1', NULL, NULL, 1, NULL);
+                business_operation_id, operation_result_id, status, created_at, completed_at)
+            VALUES({Blob(100)}, 'TRANSFER', 'key-1', NULL, NULL, 'IN_PROGRESS', 1, NULL);
             """);
 
         Execute(fixture, $"""
             INSERT INTO idempotency_records(idempotency_record_id, idempotency_scope, idempotency_key,
-                business_operation_id, operation_result_id, created_at, completed_at)
-            VALUES({Blob(101)}, 'ACCOUNT_OPEN', 'key-1', NULL, NULL, 1, NULL);
+                business_operation_id, operation_result_id, status, created_at, completed_at)
+            VALUES({Blob(101)}, 'ACCOUNT_OPEN', 'key-1', NULL, NULL, 'IN_PROGRESS', 1, NULL);
             """);
     }
 

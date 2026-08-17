@@ -42,6 +42,7 @@ public sealed class StateMachineClosureTests
         "branches",
         "currencies",
         "guild_economies",
+        "idempotency_records",
     ];
 
     private static string[] Tokens<TStatus>(Func<TStatus, string> toToken)
