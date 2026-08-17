@@ -7,7 +7,9 @@ namespace Numera.Application.Common;
 public readonly record struct BusinessTimePoint(
     BusinessDate LocalDate,
     int LocalMinuteOfDay,
-    BusinessDayClass DayClass)
+    BusinessDayClass DayClass,
+    UtcTimestamp DayStart,
+    UtcTimestamp DayEnd)
 {
     public int BusinessMonth => LocalDate.BusinessMonth;
 }
@@ -38,6 +40,11 @@ public static class EconomyBusinessCalendar
             localDate,
             (local.Hour * 60) + local.Minute,
             repository.FindDayClassOverride(economyScopeId, localDate)
-                ?? BusinessDayClassCatalog.FromWeekday(localDate));
+                ?? BusinessDayClassCatalog.FromWeekday(localDate),
+            StartOfDay(zone, local.Date),
+            StartOfDay(zone, local.Date.PlusDays(1)));
     }
+
+    private static UtcTimestamp StartOfDay(DateTimeZone zone, LocalDate date) =>
+        UtcTimestamp.FromUnixMilliseconds(date.AtStartOfDayInZone(zone).ToInstant().ToUnixTimeMilliseconds());
 }

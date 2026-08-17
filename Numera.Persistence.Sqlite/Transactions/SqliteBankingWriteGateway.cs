@@ -28,6 +28,8 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
         FeeSchedules = new SqliteFeeScheduleRepository(unitOfWork);
         FeeWaiverCounters = new SqliteFeeWaiverCounterRepository(unitOfWork);
         FeeAssessments = new SqliteFeeAssessmentRepository(unitOfWork);
+        BankPolicies = new SqliteBankPolicyRepository(unitOfWork);
+        AccountLimitPreferences = new SqliteAccountLimitPreferenceRepository(unitOfWork);
     }
 
     public IPartyRepository Parties { get; }
@@ -69,6 +71,10 @@ public sealed class SqliteBankingUnitOfWork : IBankingUnitOfWork
     public IFeeWaiverCounterRepository FeeWaiverCounters { get; }
 
     public IFeeAssessmentRepository FeeAssessments { get; }
+
+    public IBankPolicyRepository BankPolicies { get; }
+
+    public IAccountLimitPreferenceRepository AccountLimitPreferences { get; }
 }
 
 public sealed class SqliteBankingWriteGateway : IBankingWriteGateway

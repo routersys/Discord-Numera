@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Numera.Application.Abstractions;
 using Numera.Domain.Accounting;
@@ -297,6 +298,25 @@ public sealed class SqlitePaymentOrderRepository : IPaymentOrderRepository
 
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? Read(reader) : null;
+    }
+
+    public MoneyMinor SumOutgoingAmount(
+        DepositAccountId sourceDepositAccountId,
+        UtcTimestamp fromInclusive,
+        UtcTimestamp toExclusive)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(amount_minor), 0) FROM payment_orders
+            WHERE source_deposit_account_id = $source
+              AND created_at >= $from
+              AND created_at < $to
+              AND status NOT IN ('FAILED','CANCELLED');
+            """);
+        command.Parameters.AddWithValue("$source", SqliteValueMapper.ToBlob(sourceDepositAccountId.Value));
+        command.Parameters.AddWithValue("$from", fromInclusive.UnixMilliseconds);
+        command.Parameters.AddWithValue("$to", toExclusive.UnixMilliseconds);
+
+        return MoneyMinor.FromMinor(Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture));
     }
 
     private static void Bind(SqliteCommand command, PaymentOrder order)

@@ -102,6 +102,10 @@ public interface IBankingUnitOfWork
     IFeeWaiverCounterRepository FeeWaiverCounters { get; }
 
     IFeeAssessmentRepository FeeAssessments { get; }
+
+    IBankPolicyRepository BankPolicies { get; }
+
+    IAccountLimitPreferenceRepository AccountLimitPreferences { get; }
 }
 
 public interface IBankingWriteGateway
@@ -230,6 +234,23 @@ public interface IPaymentOrderRepository
     Numera.Domain.Banking.PaymentOrder? Find(PaymentOrderId id);
 
     Numera.Domain.Banking.PaymentOrder? FindByBusinessOperation(BusinessOperationId businessOperationId);
+
+    MoneyMinor SumOutgoingAmount(
+        DepositAccountId sourceDepositAccountId,
+        UtcTimestamp fromInclusive,
+        UtcTimestamp toExclusive);
+}
+
+public sealed record TransferLimitSet(MoneyMinor? PerTransfer, MoneyMinor? DailyOutgoing);
+
+public interface IBankPolicyRepository
+{
+    TransferLimitSet? FindTransferLimits(BankPolicyVersionId bankPolicyVersionId);
+}
+
+public interface IAccountLimitPreferenceRepository
+{
+    TransferLimitSet? FindTransferLimits(DepositAccountId depositAccountId);
 }
 
 public interface IAccountProductRepository

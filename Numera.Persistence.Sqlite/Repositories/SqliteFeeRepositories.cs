@@ -38,6 +38,51 @@ public sealed class SqliteEconomyCalendarRepository : IEconomyCalendarRepository
     }
 }
 
+public sealed class SqliteBankPolicyRepository : IBankPolicyRepository
+{
+    private readonly SqliteUnitOfWork unitOfWork;
+
+    internal SqliteBankPolicyRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
+
+    public TransferLimitSet? FindTransferLimits(BankPolicyVersionId bankPolicyVersionId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT per_transfer_limit_minor, daily_outgoing_limit_minor FROM bank_policy_versions
+            WHERE bank_policy_version_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(bankPolicyVersionId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? TransferLimitReader.Read(reader) : null;
+    }
+}
+
+public sealed class SqliteAccountLimitPreferenceRepository : IAccountLimitPreferenceRepository
+{
+    private readonly SqliteUnitOfWork unitOfWork;
+
+    internal SqliteAccountLimitPreferenceRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
+
+    public TransferLimitSet? FindTransferLimits(DepositAccountId depositAccountId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT per_transfer_limit_minor, daily_outgoing_limit_minor FROM account_limit_preferences
+            WHERE deposit_account_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(depositAccountId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? TransferLimitReader.Read(reader) : null;
+    }
+}
+
+internal static class TransferLimitReader
+{
+    internal static TransferLimitSet Read(SqliteDataReader reader) => new(
+        reader.IsDBNull(0) ? null : MoneyMinor.FromMinor(reader.GetInt64(0)),
+        reader.IsDBNull(1) ? null : MoneyMinor.FromMinor(reader.GetInt64(1)));
+}
+
 public sealed class SqliteFeeScheduleRepository : IFeeScheduleRepository
 {
     private const string Columns = """
