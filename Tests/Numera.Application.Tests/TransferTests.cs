@@ -78,7 +78,8 @@ public sealed class TransferTests
             harness.Accounts = new DepositAccountApplicationService(gateway, harness.Clock, ids);
             harness.Payments = new PaymentApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
-            harness.Maintenance = new SettlementMaintenanceService(gateway, harness.Payments);
+            harness.Maintenance = new SettlementMaintenanceService(
+                gateway, harness.Payments, harness.Clock, ids);
 
             return harness;
         }
@@ -425,6 +426,10 @@ public sealed class TransferTests
                     ({Blob(145)}, {Blob(4)}, NULL, '2400', 'CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
                         {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
                     ({Blob(146)}, {Blob(21)}, NULL, '1400', 'CLEARING_RECEIVABLE', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(147)}, {Blob(4)}, NULL, '1400', 'CLEARING_RECEIVABLE', 'ASSET', 'DEBIT',
+                        {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(148)}, {Blob(21)}, NULL, '2400', 'CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
                         {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
 
                 INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code, operator_party_id,
@@ -443,6 +448,24 @@ public sealed class TransferTests
                 SET status = 'ACTIVE', current_policy_version_id = {Blob(144)}, version = 2
                 WHERE payment_network_id = {Blob(143)};
                 """);
+        }
+
+        public void LockClearingCycles() => Execute("""
+            UPDATE clearing_cycles
+            SET status = 'LOCKED', locked_at = 1, version = version + 1
+            WHERE status = 'OPEN';
+            """);
+
+        public DepositAccountId RemoteDepositAccountId()
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = $"""
+                SELECT deposit_account_id FROM deposit_accounts WHERE bank_id = {Blob(22)} LIMIT 1;
+                """;
+
+            return DepositAccountId.FromValue(
+                EntityIdValue.FromBytes((byte[])command.ExecuteScalar()!));
         }
 
         public void SuspendPaymentNetwork() => Execute($"""
@@ -1996,5 +2019,137 @@ public sealed class TransferTests
         Assert.IsTrue(result.IsSuccess);
         Assert.AreEqual(PaymentOrderStatus.Completed, result.Value.Status);
         Assert.IsNull(harness.PolicyVersionOf(result.Value.Id));
+    }
+
+    private const long ClearingIntervalMilliseconds = 3_600_000;
+
+    private static async Task<Harness> AcceptedClearingAsync(long amount = 300, long reserve = 5_000)
+    {
+        Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(reserve);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, amount);
+
+        return harness;
+    }
+
+    [TestMethod]
+    public async Task ClearingCycleIsNotSettledBeforeTheIntervalElapses()
+    {
+        await using Harness harness = await AcceptedClearingAsync();
+
+        SettlementMaintenanceReport report = await harness.Maintenance.ProcessClearingCyclesAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(0, report.Examined);
+        Assert.AreEqual("OPEN", harness.ReadText("SELECT status FROM clearing_cycles;"));
+    }
+
+    [TestMethod]
+    public async Task ElapsedClearingCycleSettlesAndCloses()
+    {
+        await using Harness harness = await AcceptedClearingAsync();
+        harness.Clock.Advance(ClearingIntervalMilliseconds);
+
+        SettlementMaintenanceReport report = await harness.Maintenance.ProcessClearingCyclesAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(1, report.Examined);
+        Assert.AreEqual(1, report.Settled);
+        Assert.AreEqual("CLOSED", harness.ReadText("SELECT status FROM clearing_cycles;"));
+        Assert.AreEqual("SETTLED", harness.ReadText("SELECT status FROM clearing_instructions;"));
+    }
+
+    [TestMethod]
+    public async Task ClearingNetSettlementUnwindsBothPositions()
+    {
+        await using Harness harness = await AcceptedClearingAsync();
+        harness.Clock.Advance(ClearingIntervalMilliseconds);
+
+        await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(ClearingPayableSeed));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(ClearingReceivableSeed));
+    }
+
+    [TestMethod]
+    public async Task ClearingNetSettlementMovesReservesAndMirrorsCentralBankLiabilities()
+    {
+        await using Harness harness = await AcceptedClearingAsync();
+        harness.Clock.Advance(ClearingIntervalMilliseconds);
+
+        await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+
+        Assert.AreEqual(4_700L, harness.LedgerBalanceOf(SourceReserveSeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(DestinationReserveSeed));
+        Assert.AreEqual(4_700L, harness.LedgerBalanceOf(SourceCentralBankLiabilitySeed));
+        Assert.AreEqual(300L, harness.LedgerBalanceOf(DestinationCentralBankLiabilitySeed));
+    }
+
+    [TestMethod]
+    public async Task ClearingBeneficiaryIsCreditedOnlyAfterFinalSettlement()
+    {
+        await using Harness harness = await AcceptedClearingAsync();
+        DepositAccountId beneficiary = harness.RemoteDepositAccountId();
+
+        Assert.AreEqual(0L, harness.Balance(beneficiary));
+
+        harness.Clock.Advance(ClearingIntervalMilliseconds);
+        await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+
+        Assert.AreEqual(300L, harness.Balance(beneficiary));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(IncomingSuspenseSeed));
+    }
+
+    [TestMethod]
+    public async Task ClearingPaymentCompletesWithBothFinalityFacts()
+    {
+        await using Harness harness = await AcceptedClearingAsync();
+        harness.Clock.Advance(ClearingIntervalMilliseconds);
+
+        await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+
+        Assert.AreEqual("COMPLETED", harness.ReadText("SELECT status FROM payment_orders;"));
+        Assert.AreEqual("1", harness.ReadText("""
+            SELECT CAST(count(*) AS TEXT) FROM payment_orders
+            WHERE beneficiary_posted_at IS NOT NULL AND settlement_finalized_at IS NOT NULL;
+            """));
+    }
+
+    [TestMethod]
+    public async Task SettlingTheSameCycleTwiceIsIdempotent()
+    {
+        await using Harness harness = await AcceptedClearingAsync();
+        harness.Clock.Advance(ClearingIntervalMilliseconds);
+
+        await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+        SettlementMaintenanceReport second = await harness.Maintenance.ProcessClearingCyclesAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(0, second.Examined);
+        Assert.AreEqual(300L, harness.Balance(harness.RemoteDepositAccountId()));
+        Assert.AreEqual(0L, harness.LedgerBalanceOf(ClearingPayableSeed));
+    }
+
+    [TestMethod]
+    public async Task LockedClearingCycleRejectsNewInstructions()
+    {
+        await using Harness harness = Harness.Create(withSettlement: true);
+        Parties parties = await SetupAsync(harness);
+        harness.FundReserve(5_000);
+        harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
+        DepositAccountView remote = await RemoteAccountAsync(harness);
+
+        await InterbankTransferAsync(harness, parties, remote, 300);
+        harness.LockClearingCycles();
+
+        Result<PaymentOrderView> blocked = await InterbankTransferAsync(
+            harness, parties, remote, 100, "interaction-2");
+
+        Assert.IsFalse(blocked.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.ConcurrentModification, blocked.Error!.Code);
     }
 }

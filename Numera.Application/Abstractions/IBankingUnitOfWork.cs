@@ -324,6 +324,10 @@ public interface IClearingRepository
         CurrencyId currencyId,
         string cycleKey);
 
+    Numera.Domain.Banking.ClearingCycle? FindCycleById(ClearingCycleId clearingCycleId);
+
+    IReadOnlyList<Numera.Domain.Banking.ClearingCycle> ListUnclosedCycles(int limit);
+
     void AddCycle(Numera.Domain.Banking.ClearingCycle cycle);
 
     void UpdateCycle(Numera.Domain.Banking.ClearingCycle cycle);

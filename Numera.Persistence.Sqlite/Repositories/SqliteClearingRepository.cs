@@ -37,6 +37,43 @@ public sealed class SqliteClearingRepository : IClearingRepository
         return reader.Read() ? ReadCycle(reader) : null;
     }
 
+    public ClearingCycle? FindCycleById(ClearingCycleId clearingCycleId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {CycleColumns} FROM clearing_cycles WHERE clearing_cycle_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(clearingCycleId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? ReadCycle(reader) : null;
+    }
+
+    public IReadOnlyList<ClearingCycle> ListUnclosedCycles(int limit)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {CycleColumns} FROM clearing_cycles
+            WHERE status <> 'CLOSED'
+            ORDER BY opened_at, clearing_cycle_id
+            LIMIT $limit;
+            """);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<ClearingCycle> cycles = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            cycles.Add(ReadCycle(reader));
+        }
+
+        return cycles;
+    }
+
     public void AddCycle(ClearingCycle cycle)
     {
         ArgumentNullException.ThrowIfNull(cycle);

@@ -118,6 +118,12 @@ internal static class InterbankSettlementPolicy
                     ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAgentUnavailable);
     }
 
+    internal static Result<SettlementSide> ResolveSettlementSide(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        CurrencyId currencyId) =>
+        ResolveSide(unitOfWork, bank, currencyId);
+
     private static Result<SettlementSide> ResolveSide(
         IBankingUnitOfWork unitOfWork,
         Bank bank,

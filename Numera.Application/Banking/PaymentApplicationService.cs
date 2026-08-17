@@ -940,7 +940,12 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         LedgerAccount? suspense = unitOfWork.LedgerAccounts.FindPostingByKind(
             destinationBank.GeneralLedgerBookId, LedgerAccountKind.IncomingSettlementSuspense, order.CurrencyId);
 
-        if (payable is null || receivable is null || suspense is null)
+        bool netSettleable = unitOfWork.LedgerAccounts.FindPostingByKind(
+                sourceBank.GeneralLedgerBookId, LedgerAccountKind.ClearingReceivable, order.CurrencyId) is not null &&
+            unitOfWork.LedgerAccounts.FindPostingByKind(
+                destinationBank.GeneralLedgerBookId, LedgerAccountKind.ClearingPayable, order.CurrencyId) is not null;
+
+        if (payable is null || receivable is null || suspense is null || !netSettleable)
         {
             return Result<PaymentOrderView>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
