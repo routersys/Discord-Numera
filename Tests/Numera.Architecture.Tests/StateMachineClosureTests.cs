@@ -1,0 +1,285 @@
+using Microsoft.Data.Sqlite;
+using Numera.Domain.Accounting;
+using Numera.Domain.Banking;
+using Numera.Domain.Common;
+using Numera.Domain.Identity;
+
+namespace Numera.Architecture.Tests;
+
+[TestClass]
+public sealed class StateMachineClosureTests
+{
+    private static readonly Dictionary<string, string[]> DomainStatusTokens = new(StringComparer.Ordinal)
+    {
+        ["parties"] = Tokens<PartyStatus>(static value => value.ToToken()),
+        ["customer_accounts"] = Tokens<CustomerAccountStatus>(static value => value.ToToken()),
+        ["discord_identity_links"] = Tokens<DiscordIdentityLinkStatus>(static value => value.ToToken()),
+        ["banks"] = Tokens<BankStatus>(static value => value.ToToken()),
+        ["ledger_accounts"] = Tokens<LedgerAccountStatus>(static value => value.ToToken()),
+        ["bank_customer_relationships"] = Tokens<RelationshipStatus>(static value => value.ToToken()),
+        ["deposit_accounts"] = Tokens<DepositAccountStatus>(static value => value.ToToken()),
+        ["business_operations"] = Tokens<BusinessOperationStatus>(static value => value.ToToken()),
+        ["holds"] = Tokens<HoldStatus>(static value => value.ToToken()),
+        ["payment_orders"] = Tokens<PaymentOrderStatus>(static value => value.ToToken()),
+        ["outbox_events"] = Tokens<OutboxEventStatus>(static value => value.ToToken()),
+        ["interaction_sessions"] = Tokens<InteractionSessionStatus>(static value => value.ToToken()),
+        ["settlement_participations"] = Tokens<SettlementParticipationStatus>(static value => value.ToToken()),
+        ["settlement_instructions"] = Tokens<SettlementInstructionStatus>(static value => value.ToToken()),
+        ["central_bank_settlement_accounts"] =
+            Tokens<CentralBankSettlementAccountStatus>(static value => value.ToToken()),
+        ["clearing_cycles"] = Tokens<ClearingCycleStatus>(static value => value.ToToken()),
+        ["clearing_instructions"] = Tokens<ClearingInstructionStatus>(static value => value.ToToken()),
+        ["payment_networks"] = Tokens<PaymentNetworkStatus>(static value => value.ToToken()),
+    };
+
+    private static readonly string[] TablesAwaitingDomainStateMachine =
+    [
+        "account_products",
+        "accounting_books",
+        "accounting_periods",
+        "accounting_transactions",
+        "bank_operator_grants",
+        "branches",
+        "currencies",
+        "guild_economies",
+    ];
+
+    private static string[] Tokens<TStatus>(Func<TStatus, string> toToken)
+        where TStatus : struct, Enum =>
+        [.. Enum.GetValues<TStatus>().Select(toToken).Order(StringComparer.Ordinal)];
+
+    [TestMethod]
+    public void EverySchemaStatusColumnHasAKnownOwner()
+    {
+        using SchemaFixture schema = SchemaFixture.Create();
+        List<string> unowned = [];
+
+        foreach (string table in schema.TablesWithStatus())
+        {
+            if (!DomainStatusTokens.ContainsKey(table) &&
+                !TablesAwaitingDomainStateMachine.Contains(table, StringComparer.Ordinal))
+            {
+                unowned.Add(table);
+            }
+        }
+
+        Assert.AreEqual(
+            string.Empty,
+            string.Join(',', unowned),
+            "状態遷移表にも保留一覧にも無い status 列があります。");
+    }
+
+    [TestMethod]
+    public void SchemaStatusTokensMatchTheStateTransitionTables()
+    {
+        using SchemaFixture schema = SchemaFixture.Create();
+
+        foreach ((string table, string[] expected) in DomainStatusTokens)
+        {
+            string[] actual = schema.StatusTokensOf(table);
+
+            CollectionAssert.AreEqual(
+                expected,
+                actual,
+                $"{table} の Status Token が状態遷移表と一致しません。" +
+                $"Schema=[{string.Join(',', actual)}] Domain=[{string.Join(',', expected)}]");
+        }
+    }
+
+    [TestMethod]
+    public void NoPersistedStatusIsStoredAsAnIntegerOrdinal()
+    {
+        using SchemaFixture schema = SchemaFixture.Create();
+        List<string> offenders = [];
+
+        foreach (string table in schema.TablesWithStatus())
+        {
+            if (!string.Equals(schema.StatusColumnTypeOf(table), "TEXT", StringComparison.Ordinal))
+            {
+                offenders.Add(table);
+            }
+        }
+
+        CollectionAssert.AreEqual(Array.Empty<string>(), offenders);
+    }
+
+    [TestMethod]
+    public void CardPaymentTableIsAbsent()
+    {
+        using SchemaFixture schema = SchemaFixture.Create();
+
+        Assert.IsFalse(schema.TableNames().Contains("card_payments", StringComparer.Ordinal));
+    }
+
+    [TestMethod]
+    public void NoSchemaTokenSurvivesIntoTheGeneratedDdl()
+    {
+        using SchemaFixture schema = SchemaFixture.Create();
+        List<string> offenders = [];
+
+        foreach ((string table, string sql) in schema.TableDefinitions())
+        {
+            if (sql.Contains("BLOB16", StringComparison.Ordinal) ||
+                sql.Contains(" PK,", StringComparison.Ordinal) ||
+                sql.Contains(" FK,", StringComparison.Ordinal) ||
+                sql.Contains(" PK\n", StringComparison.Ordinal) ||
+                sql.Contains(" FK\n", StringComparison.Ordinal))
+            {
+                offenders.Add(table);
+            }
+        }
+
+        CollectionAssert.AreEqual(Array.Empty<string>(), offenders);
+    }
+
+    [TestMethod]
+    public void EveryStatusOwningTableIsCoveredByExactlyOneList()
+    {
+        using SchemaFixture schema = SchemaFixture.Create();
+        string[] tables = [.. schema.TablesWithStatus()];
+
+        Assert.IsGreaterThan(0, tables.Length);
+
+        foreach (string table in DomainStatusTokens.Keys)
+        {
+            Assert.IsTrue(tables.Contains(table, StringComparer.Ordinal), table);
+        }
+
+        string[] stale =
+        [
+            .. TablesAwaitingDomainStateMachine.Where(table => !tables.Contains(table, StringComparer.Ordinal)),
+        ];
+
+        Assert.AreEqual(
+            string.Empty,
+            string.Join(',', stale),
+            $"保留一覧に status 列を持たない表があります。schema=[{string.Join(',', tables)}]");
+
+        foreach (string table in TablesAwaitingDomainStateMachine)
+        {
+            Assert.IsFalse(DomainStatusTokens.ContainsKey(table), table);
+        }
+    }
+}
+
+internal sealed class SchemaFixture : IDisposable
+{
+    private readonly string root;
+    private readonly Dictionary<string, string> definitions;
+
+    private SchemaFixture(string root, Dictionary<string, string> definitions)
+    {
+        this.root = root;
+        this.definitions = definitions;
+    }
+
+    internal static SchemaFixture Create()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "numera-closure", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(root);
+
+        Numera.Persistence.Sqlite.SqliteDatabaseOptions options =
+            Numera.Persistence.Sqlite.SqliteDatabaseOptions.Create(
+                Path.Combine(root, "data", "economy.db"),
+                Numera.Persistence.Sqlite.SqliteDatabaseOptions.DefaultBusyTimeoutSeconds);
+
+        Numera.Persistence.Sqlite.SqliteConnectionFactory factory = new(options);
+
+        new Numera.Persistence.Sqlite.SqliteDatabaseInitializer(
+            options,
+            factory,
+            new Numera.Persistence.Sqlite.Migrations.MigrationRunner(
+                [.. Numera.Persistence.Sqlite.Migrations.EmbeddedMigrationCatalog.Load()]))
+            .Initialize(1_776_000_000_000);
+
+        Dictionary<string, string> definitions = new(StringComparer.Ordinal);
+
+        using (SqliteConnection connection = factory.OpenRuntimeConnection())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT name, sql FROM sqlite_master
+                WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL;
+                """;
+
+            using SqliteDataReader reader = command.ExecuteReader();
+
+            while (reader.Read())
+            {
+                definitions[reader.GetString(0)] = reader.GetString(1);
+            }
+        }
+
+        return new SchemaFixture(root, definitions);
+    }
+
+    internal IEnumerable<string> TableNames() => definitions.Keys;
+
+    internal IEnumerable<KeyValuePair<string, string>> TableDefinitions() => definitions;
+
+    internal IEnumerable<string> TablesWithStatus() =>
+        definitions.Where(static entry => StatusColumn(entry.Value) is not null)
+            .Select(static entry => entry.Key)
+            .Order(StringComparer.Ordinal);
+
+    internal string StatusColumnTypeOf(string table)
+    {
+        string? column = StatusColumn(definitions[table]);
+
+        if (column is null)
+        {
+            return string.Empty;
+        }
+
+        string[] parts = column.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? parts[1] : string.Empty;
+    }
+
+    internal string[] StatusTokensOf(string table)
+    {
+        string sql = definitions[table];
+        int check = sql.IndexOf("CHECK(status IN (", StringComparison.Ordinal);
+
+        if (check < 0)
+        {
+            return [];
+        }
+
+        int open = check + "CHECK(status IN (".Length;
+        int close = sql.IndexOf(')', open);
+
+        return
+        [
+            .. sql[open..close]
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(static token => token.Trim().Trim('\''))
+                .Order(StringComparer.Ordinal),
+        ];
+    }
+
+    private static string? StatusColumn(string sql)
+    {
+        foreach (string line in sql.Split('\n'))
+        {
+            string trimmed = line.Trim();
+
+            if (trimmed.StartsWith("status ", StringComparison.Ordinal))
+            {
+                return trimmed;
+            }
+        }
+
+        return null;
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(root, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+}
