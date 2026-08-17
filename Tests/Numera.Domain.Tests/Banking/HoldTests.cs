@@ -195,7 +195,7 @@ public sealed class HoldTests
             () => Hold.Rehydrate(
                 Identifier, HoldScopeKind.CustomerDeposit, Deposit, Ledger, Operation,
                 MoneyMinor.FromMinor(100), MoneyMinor.FromMinor(100), "TRANSFER",
-                HoldStatus.Active, CreatedAt, null, null));
+                HoldStatus.Active, CreatedAt, null, null, 1));
 
         Assert.AreEqual(InvariantViolationCode.HoldScopeInconsistent, exception.Code);
     }
@@ -207,7 +207,7 @@ public sealed class HoldTests
             () => Hold.Rehydrate(
                 Identifier, HoldScopeKind.CustomerDeposit, Deposit, null, Operation,
                 MoneyMinor.FromMinor(100), MoneyMinor.FromMinor(101), "TRANSFER",
-                HoldStatus.Active, CreatedAt, null, null));
+                HoldStatus.Active, CreatedAt, null, null, 1));
 
         Assert.AreEqual(InvariantViolationCode.HoldAmountInvalid, exception.Code);
     }
@@ -219,7 +219,7 @@ public sealed class HoldTests
             () => Hold.Rehydrate(
                 Identifier, HoldScopeKind.CustomerDeposit, Deposit, null, Operation,
                 MoneyMinor.FromMinor(100), MoneyMinor.Zero, "TRANSFER",
-                HoldStatus.Active, CreatedAt, null, null));
+                HoldStatus.Active, CreatedAt, null, null, 1));
 
         Assert.AreEqual(InvariantViolationCode.HoldRemainingInconsistent, exception.Code);
     }
@@ -231,7 +231,7 @@ public sealed class HoldTests
             () => Hold.Rehydrate(
                 Identifier, HoldScopeKind.CustomerDeposit, Deposit, null, Operation,
                 MoneyMinor.FromMinor(100), MoneyMinor.FromMinor(100), "TRANSFER",
-                HoldStatus.Captured, CreatedAt, null, ExpiresAt));
+                HoldStatus.Captured, CreatedAt, null, ExpiresAt, 1));
 
         Assert.AreEqual(InvariantViolationCode.HoldRemainingInconsistent, exception.Code);
     }
@@ -243,7 +243,7 @@ public sealed class HoldTests
             () => Hold.Rehydrate(
                 Identifier, HoldScopeKind.CustomerDeposit, Deposit, null, Operation,
                 MoneyMinor.FromMinor(100), MoneyMinor.Zero, "TRANSFER",
-                HoldStatus.Captured, CreatedAt, null, null));
+                HoldStatus.Captured, CreatedAt, null, null, 1));
 
         Assert.AreEqual(InvariantViolationCode.HoldRemainingInconsistent, exception.Code);
     }

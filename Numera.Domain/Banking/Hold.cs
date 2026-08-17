@@ -14,7 +14,7 @@ public enum HoldScopeKind
     LedgerAsset = 2,
 }
 
-public sealed class Hold
+public sealed class Hold : VersionedEntity
 {
     private Hold(
         HoldId id,
@@ -28,7 +28,9 @@ public sealed class Hold
         HoldStatus status,
         UtcTimestamp createdAt,
         UtcTimestamp? expiresAt,
-        UtcTimestamp? terminalAt)
+        UtcTimestamp? terminalAt,
+        long version)
+        : base(version)
     {
         Id = id;
         ScopeKind = scopeKind;
@@ -122,7 +124,8 @@ public sealed class Hold
         HoldStatus status,
         UtcTimestamp createdAt,
         UtcTimestamp? expiresAt,
-        UtcTimestamp? terminalAt)
+        UtcTimestamp? terminalAt,
+        long version)
     {
         EnsureScopeConsistency(scopeKind, depositAccountId, ledgerAccountId);
 
@@ -154,7 +157,8 @@ public sealed class Hold
             status,
             createdAt,
             expiresAt,
-            terminalAt);
+            terminalAt,
+            version);
     }
 
     public void Capture(MoneyMinor amount, UtcTimestamp at)
@@ -173,6 +177,8 @@ public sealed class Hold
             Status = HoldStatus.Captured;
             TerminalAt = at;
         }
+
+        AdvanceVersion();
     }
 
     public void Release(UtcTimestamp at) => Terminate(HoldStatus.Released, at);
@@ -193,6 +199,7 @@ public sealed class Hold
         Remaining = MoneyMinor.Zero;
         Status = status;
         TerminalAt = at;
+        AdvanceVersion();
     }
 
     private void EnsureActive()
@@ -239,7 +246,8 @@ public sealed class Hold
             HoldStatus.Active,
             createdAt,
             expiresAt,
-            terminalAt: null);
+            terminalAt: null,
+            InitialVersion);
     }
 
     private static void EnsureScopeConsistency(
