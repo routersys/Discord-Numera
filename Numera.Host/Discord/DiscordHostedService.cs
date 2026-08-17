@@ -7,7 +7,7 @@ internal sealed class DiscordHostedService : IHostedService
 {
     private readonly IDiscordGateway gateway;
 
-    internal DiscordHostedService(IDiscordGateway gateway)
+    public DiscordHostedService(IDiscordGateway gateway)
     {
         ArgumentNullException.ThrowIfNull(gateway);
         this.gateway = gateway;
@@ -19,5 +19,10 @@ internal sealed class DiscordHostedService : IHostedService
         await gateway.StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => gateway.StopAsync(cancellationToken);
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        gateway.StopAcceptingInteractions();
+
+        return Task.CompletedTask;
+    }
 }

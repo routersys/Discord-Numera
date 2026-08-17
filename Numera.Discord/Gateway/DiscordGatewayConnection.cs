@@ -19,7 +19,7 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
     private bool subscribed;
     private int synchronizationStarted;
 
-    internal DiscordGatewayConnection(
+    public DiscordGatewayConnection(
         DiscordSocketClient client,
         InteractionService interactionService,
         DiscordInteractionRouter router,
@@ -59,6 +59,8 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
 
         return client.StartAsync();
     }
+
+    public void StopAcceptingInteractions() => Unsubscribe();
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {

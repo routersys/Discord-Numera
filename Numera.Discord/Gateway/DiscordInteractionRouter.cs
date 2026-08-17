@@ -16,7 +16,7 @@ internal sealed class DiscordInteractionRouter
     private readonly ErrorRenderer errorRenderer;
     private readonly IDiscordDiagnostics diagnostics;
 
-    internal DiscordInteractionRouter(
+    public DiscordInteractionRouter(
         InteractionService interactionService,
         IServiceProvider services,
         IDiscordEndpointExecutor executor,

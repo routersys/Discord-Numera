@@ -2,10 +2,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Numera.Discord.Abstractions;
 using Numera.Discord.Gateway;
+using Numera.Host.Composition;
 using Numera.Host.Configuration;
 using Numera.Host.Discord;
 using Numera.Host.Logging;
 using Numera.Host.Startup;
+using Numera.Host.Workers;
 using Numera.Persistence.Sqlite;
 
 namespace Numera.Host;
@@ -110,9 +112,16 @@ internal static class NumeraHost
         builder.Services.Configure<HostOptions>(host => host.ShutdownTimeout = ShutdownTimeout);
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(RegistrationOptions(options));
+        builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<IDiscordDiagnostics, DiscordDiagnostics>();
+        builder.Services.AddSingleton<IMaintenanceDiagnostics, MaintenanceDiagnostics>();
         builder.Services.AddSingleton<IDiscordCredentialProvider, EnvironmentDiscordCredentialProvider>();
         builder.Services.AddNumeraDiscord();
+        builder.Services.AddNumeraBanking(options);
+
+        builder.Services.AddHostedService<DiscordGatewayShutdownService>();
+        builder.Services.AddHostedService<SqliteWriteAdmissionService>();
+        builder.Services.AddHostedService<SettlementMaintenanceWorker>();
         builder.Services.AddHostedService<DiscordHostedService>();
     }
 

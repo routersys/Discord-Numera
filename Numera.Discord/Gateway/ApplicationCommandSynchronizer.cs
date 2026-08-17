@@ -41,7 +41,7 @@ internal sealed class ApplicationCommandSynchronizer : IApplicationCommandSynchr
     private readonly IApplicationCommandGateway gateway;
     private readonly DiscordCommandRegistrationOptions options;
 
-    internal ApplicationCommandSynchronizer(
+    public ApplicationCommandSynchronizer(
         ICommandManifestProvider manifests,
         IApplicationCommandGateway gateway,
         DiscordCommandRegistrationOptions options)

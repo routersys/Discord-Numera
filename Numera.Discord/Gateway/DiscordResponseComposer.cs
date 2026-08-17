@@ -39,7 +39,7 @@ internal sealed class CatalogResponseComposer : IDiscordResponseComposer
 {
     private readonly ITextCatalog catalog;
 
-    internal CatalogResponseComposer(ITextCatalog catalog)
+    public CatalogResponseComposer(ITextCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         this.catalog = catalog;

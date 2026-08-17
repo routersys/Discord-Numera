@@ -32,7 +32,7 @@ internal sealed partial class DiscordDiagnostics : IDiscordDiagnostics
 {
     private readonly ILogger<DiscordDiagnostics> logger;
 
-    internal DiscordDiagnostics(ILogger<DiscordDiagnostics> logger)
+    public DiscordDiagnostics(ILogger<DiscordDiagnostics> logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
         this.logger = logger;

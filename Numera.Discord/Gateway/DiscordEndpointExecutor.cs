@@ -66,7 +66,7 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
 {
     private readonly IDiscordResponseComposer composer;
 
-    internal DiscordEndpointExecutor(IDiscordResponseComposer composer)
+    public DiscordEndpointExecutor(IDiscordResponseComposer composer)
     {
         ArgumentNullException.ThrowIfNull(composer);
         this.composer = composer;

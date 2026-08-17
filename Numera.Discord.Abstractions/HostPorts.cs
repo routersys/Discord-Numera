@@ -50,6 +50,8 @@ public interface IDiscordGateway
 
     Task StartAsync(CancellationToken cancellationToken);
 
+    void StopAcceptingInteractions();
+
     Task StopAsync(CancellationToken cancellationToken);
 }
 
