@@ -53,4 +53,15 @@ public static class InvariantViolationCode
     public const string LedgerAccountNotEmpty = "LEDGER_ACCOUNT_NOT_EMPTY";
     public const string LedgerAccountUnknown = "LEDGER_ACCOUNT_UNKNOWN";
     public const string LedgerAccountCurrencyMismatch = "LEDGER_ACCOUNT_CURRENCY_MISMATCH";
+    public const string PostedBalanceNegative = "POSTED_BALANCE_NEGATIVE";
+    public const string AvailableBalanceNegative = "AVAILABLE_BALANCE_NEGATIVE";
+    public const string HeldAmountNegative = "HELD_AMOUNT_NEGATIVE";
+    public const string HoldAmountInvalid = "HOLD_AMOUNT_INVALID";
+    public const string HoldCaptureAmountInvalid = "HOLD_CAPTURE_AMOUNT_INVALID";
+    public const string HoldTransitionInvalid = "HOLD_TRANSITION_INVALID";
+    public const string HoldScopeInconsistent = "HOLD_SCOPE_INCONSISTENT";
+    public const string HoldRemainingInconsistent = "HOLD_REMAINING_INCONSISTENT";
+    public const string HoldExpiryInvalid = "HOLD_EXPIRY_INVALID";
+    public const string HoldNotExpirable = "HOLD_NOT_EXPIRABLE";
+    public const string HoldStatusUnknown = "HOLD_STATUS_UNKNOWN";
 }
