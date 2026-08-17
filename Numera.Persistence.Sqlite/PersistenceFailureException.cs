@@ -43,4 +43,9 @@ public static class PersistenceFailureCode
     public const string MigrationNameMismatch = "MIGRATION_NAME_MISMATCH";
     public const string MigrationScriptEmpty = "MIGRATION_SCRIPT_EMPTY";
     public const string MigrationResourceNameInvalid = "MIGRATION_RESOURCE_NAME_INVALID";
+    public const string WriteOutcomeNotCommitted = "WRITE_OUTCOME_NOT_COMMITTED";
+    public const string WriteCoordinatorAlreadyStarted = "WRITE_COORDINATOR_ALREADY_STARTED";
+    public const string RetryPolicyInvalid = "RETRY_POLICY_INVALID";
+    public const string LedgerUnbalanced = "LEDGER_UNBALANCED";
+    public const string LedgerProjectionInvalid = "LEDGER_PROJECTION_INVALID";
 }
