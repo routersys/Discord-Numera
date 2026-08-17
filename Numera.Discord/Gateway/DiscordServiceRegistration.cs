@@ -3,6 +3,7 @@ using Discord.WebSocket;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Numera.Discord.Abstractions;
+using Numera.Discord.Commands;
 using Numera.Discord.Rendering;
 
 namespace Numera.Discord.Gateway;
@@ -25,7 +26,7 @@ public static class DiscordServiceRegistration
         services.AddSingleton<IDiscordResponseComposer, CatalogResponseComposer>();
         services.AddSingleton<IDiscordEndpointExecutor, DiscordEndpointExecutor>();
         services.AddSingleton<DiscordInteractionRouter>();
-        services.TryAddSingleton<ICommandManifestProvider, EmptyCommandManifestProvider>();
+        services.TryAddSingleton<ICommandManifestProvider, GeneratedCommandManifestProvider>();
         services.AddSingleton<IApplicationCommandGateway>(static provider =>
             new RestApplicationCommandGateway(provider.GetRequiredService<DiscordSocketClient>()));
         services.AddSingleton<IApplicationCommandSynchronizer, ApplicationCommandSynchronizer>();

@@ -28,13 +28,6 @@ internal interface IApplicationCommandSynchronizer
     Task<DiscordCommandSyncOutcome> SynchronizeAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class EmptyCommandManifestProvider : ICommandManifestProvider
-{
-    public IReadOnlyList<CommandManifestEntry> PrimaryCommands() => [];
-
-    public IReadOnlyList<CommandManifestEntry> ControlCommands() => [];
-}
-
 internal sealed class ApplicationCommandSynchronizer : IApplicationCommandSynchronizer
 {
     private readonly ICommandManifestProvider manifests;
