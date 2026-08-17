@@ -65,24 +65,46 @@ internal readonly struct TextSpanInfo
     public override int GetHashCode() => (Start * 397) ^ Length;
 }
 
+internal enum OptionValueKind
+{
+    Unsupported = 0,
+    String = 1,
+    Boolean = 2,
+    Integer = 3,
+    Enum = 4,
+}
+
+internal sealed class ChoiceDescriptor
+{
+    internal ChoiceDescriptor(string name, string value)
+    {
+        Name = name;
+        Value = value;
+    }
+
+    internal string Name { get; }
+
+    internal string Value { get; }
+}
+
 internal sealed class OptionDescriptor
 {
     internal OptionDescriptor(
         string name,
         string description,
         bool required,
-        int choiceCount,
+        ImmutableArray<ChoiceDescriptor> choices,
         string? autocompleteProviderKey,
         string typeDisplayName,
-        bool typeSupported)
+        OptionValueKind valueKind)
     {
         Name = name;
         Description = description;
         Required = required;
-        ChoiceCount = choiceCount;
+        Choices = choices;
         AutocompleteProviderKey = autocompleteProviderKey;
         TypeDisplayName = typeDisplayName;
-        TypeSupported = typeSupported;
+        ValueKind = valueKind;
     }
 
     internal string Name { get; }
@@ -91,13 +113,30 @@ internal sealed class OptionDescriptor
 
     internal bool Required { get; }
 
-    internal int ChoiceCount { get; }
+    internal ImmutableArray<ChoiceDescriptor> Choices { get; }
+
+    internal int ChoiceCount => Choices.IsDefaultOrEmpty ? 0 : Choices.Length;
 
     internal string? AutocompleteProviderKey { get; }
 
     internal string TypeDisplayName { get; }
 
-    internal bool TypeSupported { get; }
+    internal OptionValueKind ValueKind { get; }
+
+    internal bool TypeSupported => ValueKind != OptionValueKind.Unsupported;
+}
+
+internal sealed class CommandGroupDescriptor
+{
+    internal CommandGroupDescriptor(string name, string description)
+    {
+        Name = name;
+        Description = description;
+    }
+
+    internal string Name { get; }
+
+    internal string Description { get; }
 }
 
 internal sealed class CommandDescriptor
@@ -106,7 +145,7 @@ internal sealed class CommandDescriptor
         CommandKind kind,
         string name,
         string? description,
-        ImmutableArray<string> groupPath,
+        ImmutableArray<CommandGroupDescriptor> groupPath,
         ImmutableArray<OptionDescriptor> options,
         string endpointDisplayName,
         string returnTypeDisplayName,
@@ -132,7 +171,7 @@ internal sealed class CommandDescriptor
 
     internal string? Description { get; }
 
-    internal ImmutableArray<string> GroupPath { get; }
+    internal ImmutableArray<CommandGroupDescriptor> GroupPath { get; }
 
     internal ImmutableArray<OptionDescriptor> Options { get; }
 
@@ -146,8 +185,12 @@ internal sealed class CommandDescriptor
 
     internal LocationInfo? Location { get; }
 
+    internal string RootName => GroupPath.IsDefaultOrEmpty ? Name : GroupPath[0].Name;
+
     internal string CanonicalPath =>
-        GroupPath.IsDefaultOrEmpty ? Name : string.Join(" ", GroupPath.Concat(new[] { Name }));
+        GroupPath.IsDefaultOrEmpty
+            ? Name
+            : string.Join(" ", GroupPath.Select(static group => group.Name).Concat(new[] { Name }));
 
     internal string DuplicateKey => $"{Kind}:{CanonicalPath}";
 }

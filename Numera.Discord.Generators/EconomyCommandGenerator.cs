@@ -169,9 +169,9 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
             LocationInfo.From(type.Locations.FirstOrDefault() ?? Location.None));
     }
 
-    private static ImmutableArray<string> ReadGroupPath(INamedTypeSymbol? containingType)
+    private static ImmutableArray<CommandGroupDescriptor> ReadGroupPath(INamedTypeSymbol? containingType)
     {
-        List<string> path = [];
+        List<CommandGroupDescriptor> path = [];
 
         for (INamedTypeSymbol? current = containingType; current is not null; current = current.ContainingType)
         {
@@ -180,7 +180,9 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
 
             if (group is not null)
             {
-                path.Insert(0, ReadString(group, 0) ?? string.Empty);
+                path.Insert(0, new CommandGroupDescriptor(
+                    ReadString(group, 0) ?? string.Empty,
+                    ReadString(group, 1) ?? string.Empty));
             }
         }
 
@@ -206,28 +208,44 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
             AttributeData? autocomplete = attributes.FirstOrDefault(
                 static data => data.AttributeClass?.ToDisplayString() == AutocompleteAttribute);
 
-            int choiceCount = attributes.Count(
-                static data => data.AttributeClass?.ToDisplayString() == ChoiceAttribute);
+            ImmutableArray<ChoiceDescriptor>.Builder choices = ImmutableArray.CreateBuilder<ChoiceDescriptor>();
+
+            foreach (AttributeData choice in attributes.Where(
+                static data => data.AttributeClass?.ToDisplayString() == ChoiceAttribute))
+            {
+                choices.Add(new ChoiceDescriptor(
+                    ReadString(choice, 0) ?? string.Empty,
+                    ReadString(choice, 1) ?? string.Empty));
+            }
 
             options.Add(new OptionDescriptor(
                 ReadString(option, 0) ?? string.Empty,
                 ReadString(option, 1) ?? string.Empty,
                 ReadBoolean(option, 2),
-                choiceCount,
+                choices.ToImmutable(),
                 autocomplete is null ? null : ReadString(autocomplete, 0),
                 parameter.Type.ToDisplayString(),
-                IsSupportedOptionType(parameter.Type)));
+                ResolveOptionValueKind(parameter.Type)));
         }
 
         return options.ToImmutable();
     }
 
-    private static bool IsSupportedOptionType(ITypeSymbol type) =>
-        type.TypeKind == TypeKind.Enum
-        || type.SpecialType is SpecialType.System_String
-            or SpecialType.System_Boolean
-            or SpecialType.System_Int32
-            or SpecialType.System_Int64;
+    private static OptionValueKind ResolveOptionValueKind(ITypeSymbol type)
+    {
+        if (type.TypeKind == TypeKind.Enum)
+        {
+            return OptionValueKind.Enum;
+        }
+
+        return type.SpecialType switch
+        {
+            SpecialType.System_String => OptionValueKind.String,
+            SpecialType.System_Boolean => OptionValueKind.Boolean,
+            SpecialType.System_Int32 or SpecialType.System_Int64 => OptionValueKind.Integer,
+            _ => OptionValueKind.Unsupported,
+        };
+    }
 
     private static ImmutableArray<string> ReadParameterTypes(IMethodSymbol method)
     {
@@ -272,6 +290,7 @@ internal static class ManifestWriter
         builder.AppendLine();
         builder.AppendLine("namespace Numera.Discord.Routing;");
         builder.AppendLine();
+        WriteTypes(builder);
         builder.AppendLine("internal static class EconomyCommandManifest");
         builder.AppendLine("{");
         builder.AppendLine("    internal static readonly string[] SlashCommandPaths =");
@@ -323,9 +342,125 @@ internal static class ManifestWriter
         }
 
         builder.AppendLine("    ];");
+        builder.AppendLine();
+        builder.AppendLine("    internal static readonly GeneratedCommandDeclaration[] Declarations =");
+        builder.AppendLine("    [");
+
+        foreach (CommandDescriptor command in surface.Commands)
+        {
+            WriteDeclaration(builder, command);
+        }
+
+        builder.AppendLine("    ];");
         builder.AppendLine("}");
 
         return SourceText.From(builder.ToString(), Encoding.UTF8);
+    }
+
+    private static void WriteTypes(StringBuilder builder)
+    {
+        builder.AppendLine("internal enum GeneratedCommandKind");
+        builder.AppendLine("{");
+        builder.AppendLine("    Slash = 1,");
+        builder.AppendLine("    User = 2,");
+        builder.AppendLine("    Message = 3,");
+        builder.AppendLine("}");
+        builder.AppendLine();
+        builder.AppendLine("internal enum GeneratedOptionValueKind");
+        builder.AppendLine("{");
+        builder.AppendLine("    Unsupported = 0,");
+        builder.AppendLine("    String = 1,");
+        builder.AppendLine("    Boolean = 2,");
+        builder.AppendLine("    Integer = 3,");
+        builder.AppendLine("    Enum = 4,");
+        builder.AppendLine("}");
+        builder.AppendLine();
+        builder.AppendLine("internal sealed record GeneratedCommandChoice(string Name, string Value);");
+        builder.AppendLine();
+        builder.AppendLine("internal sealed record GeneratedCommandGroup(string Name, string Description);");
+        builder.AppendLine();
+        builder.AppendLine("internal sealed record GeneratedCommandOption(");
+        builder.AppendLine("    string Name,");
+        builder.AppendLine("    string Description,");
+        builder.AppendLine("    GeneratedOptionValueKind ValueKind,");
+        builder.AppendLine("    bool Required,");
+        builder.AppendLine("    bool Autocomplete,");
+        builder.AppendLine("    GeneratedCommandChoice[] Choices);");
+        builder.AppendLine();
+        builder.AppendLine("internal sealed record GeneratedCommandDeclaration(");
+        builder.AppendLine("    GeneratedCommandKind Kind,");
+        builder.AppendLine("    string Name,");
+        builder.AppendLine("    string Description,");
+        builder.AppendLine("    GeneratedCommandGroup[] GroupPath,");
+        builder.AppendLine("    GeneratedCommandOption[] Options);");
+        builder.AppendLine();
+    }
+
+    private static void WriteDeclaration(StringBuilder builder, CommandDescriptor command)
+    {
+        builder.AppendLine("        new GeneratedCommandDeclaration(");
+        builder.Append("            GeneratedCommandKind.").Append(command.Kind).AppendLine(",");
+        builder.Append("            \"").Append(Escape(command.Name)).AppendLine("\",");
+        builder.Append("            \"").Append(Escape(command.Description ?? string.Empty)).AppendLine("\",");
+
+        if (command.GroupPath.IsDefaultOrEmpty)
+        {
+            builder.AppendLine("            [],");
+        }
+        else
+        {
+            builder.AppendLine("            [");
+
+            foreach (CommandGroupDescriptor group in command.GroupPath)
+            {
+                builder.Append("                new GeneratedCommandGroup(\"").Append(Escape(group.Name))
+                    .Append("\", \"").Append(Escape(group.Description)).AppendLine("\"),");
+            }
+
+            builder.AppendLine("            ],");
+        }
+
+        if (command.Options.IsDefaultOrEmpty)
+        {
+            builder.AppendLine("            []),");
+            return;
+        }
+
+        builder.AppendLine("            [");
+
+        foreach (OptionDescriptor option in command.Options)
+        {
+            WriteOption(builder, option);
+        }
+
+        builder.AppendLine("            ]),");
+    }
+
+    private static void WriteOption(StringBuilder builder, OptionDescriptor option)
+    {
+        builder.AppendLine("                new GeneratedCommandOption(");
+        builder.Append("                    \"").Append(Escape(option.Name)).AppendLine("\",");
+        builder.Append("                    \"").Append(Escape(option.Description)).AppendLine("\",");
+        builder.Append("                    GeneratedOptionValueKind.").Append(option.ValueKind).AppendLine(",");
+        builder.Append("                    ").Append(option.Required ? "true" : "false").AppendLine(",");
+        builder.Append("                    ")
+            .Append(string.IsNullOrEmpty(option.AutocompleteProviderKey) ? "false" : "true").AppendLine(",");
+
+        if (option.Choices.IsDefaultOrEmpty)
+        {
+            builder.AppendLine("                    []),");
+            return;
+        }
+
+        builder.AppendLine("                    [");
+
+        foreach (ChoiceDescriptor choice in option.Choices)
+        {
+            builder.Append("                        new GeneratedCommandChoice(\"").Append(Escape(choice.Name))
+                .Append("\", \"").Append(Escape(choice.Value)).AppendLine("\"),");
+        }
+
+        builder.AppendLine("                    ]),");
     }
 
     private static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");

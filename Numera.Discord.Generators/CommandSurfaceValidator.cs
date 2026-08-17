@@ -290,7 +290,7 @@ internal static class CommandSurfaceValidator
             surface.Commands.Where(command => command.Kind == kind).ToImmutableArray();
 
         int rootCount = matching
-            .Select(static command => command.GroupPath.IsDefaultOrEmpty ? command.Name : command.GroupPath[0])
+            .Select(static command => command.RootName)
             .Distinct(System.StringComparer.Ordinal)
             .Count();
 
