@@ -57,6 +57,9 @@ internal static class ViewKeys
     public const string ManageBankDraft = "view.manage.bank_draft";
     public const string ManageBankUpdated = "view.manage.bank_updated";
     public const string ManageBankRetired = "view.manage.bank_retired";
+    public const string ManageFxMarketCreated = "view.manage.fx_market_created";
+    public const string ManageFxMarketState = "view.manage.fx_market_state";
+    public const string ManageFxMarketPolicyPublished = "view.manage.fx_market_policy_published";
 
     public const string FxMarket = "view.fx.market";
     public const string FxRate = "view.fx.rate";
@@ -262,6 +265,15 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageBankUpdated + ".title"] = "銀行の方針を更新しました",
             [ViewKeys.ManageBankUpdated + ".description"] =
                 "{institutionCode} {name} の方針を更新しました。状態は{status}です。",
+            [ViewKeys.ManageFxMarketCreated + ".title"] = "為替市場を設置しました",
+            [ViewKeys.ManageFxMarketCreated + ".description"] =
+                "市場 {market} を設置しました。状態は{status}です。価格桁数 {priceScale}、呼値 {tickSize}、売買単位 {lotSize} です。",
+            [ViewKeys.ManageFxMarketState + ".title"] = "為替市場の状態を変更しました",
+            [ViewKeys.ManageFxMarketState + ".description"] =
+                "市場 {market} の状態は{status}です。価格桁数 {priceScale}、呼値 {tickSize}、売買単位 {lotSize} です。",
+            [ViewKeys.ManageFxMarketPolicyPublished + ".title"] = "為替市場の方針を公開しました",
+            [ViewKeys.ManageFxMarketPolicyPublished + ".description"] =
+                "メイカー {makerFeeBps}bps、テイカー {takerFeeBps}bps、許容スリッページ {maximumSlippageBps}bps です。版数は {version} です。",
             [ViewKeys.ManageBankRetired + ".title"] = "銀行の廃止手続を開始しました",
             [ViewKeys.ManageBankRetired + ".description"] =
                 "{institutionCode} の廃止手続を開始しました。",

@@ -47,6 +47,7 @@ public sealed class EndpointSurfaceTests
                 "manage currency-burn",
                 "manage currency-create",
                 "manage currency-issue",
+                "manage fx-market",
                 "manage panel",
                 "shop browse",
                 "shop orders",
