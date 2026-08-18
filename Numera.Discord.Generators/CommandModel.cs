@@ -96,6 +96,7 @@ internal sealed class OptionDescriptor
         ImmutableArray<ChoiceDescriptor> choices,
         string? autocompleteProviderKey,
         string typeDisplayName,
+        string typeFullyQualifiedName,
         OptionValueKind valueKind)
     {
         Name = name;
@@ -104,6 +105,7 @@ internal sealed class OptionDescriptor
         Choices = choices;
         AutocompleteProviderKey = autocompleteProviderKey;
         TypeDisplayName = typeDisplayName;
+        TypeFullyQualifiedName = typeFullyQualifiedName;
         ValueKind = valueKind;
     }
 
@@ -120,6 +122,8 @@ internal sealed class OptionDescriptor
     internal string? AutocompleteProviderKey { get; }
 
     internal string TypeDisplayName { get; }
+
+    internal string TypeFullyQualifiedName { get; }
 
     internal OptionValueKind ValueKind { get; }
 
@@ -148,6 +152,9 @@ internal sealed class CommandDescriptor
         ImmutableArray<CommandGroupDescriptor> groupPath,
         ImmutableArray<OptionDescriptor> options,
         string endpointDisplayName,
+        string endpointTypeDisplayName,
+        string endpointTypeFullyQualifiedName,
+        string endpointMethodName,
         string returnTypeDisplayName,
         bool endsWithCancellationToken,
         ImmutableArray<string> parameterTypeDisplayNames,
@@ -159,6 +166,9 @@ internal sealed class CommandDescriptor
         GroupPath = groupPath;
         Options = options;
         EndpointDisplayName = endpointDisplayName;
+        EndpointTypeDisplayName = endpointTypeDisplayName;
+        EndpointTypeFullyQualifiedName = endpointTypeFullyQualifiedName;
+        EndpointMethodName = endpointMethodName;
         ReturnTypeDisplayName = returnTypeDisplayName;
         EndsWithCancellationToken = endsWithCancellationToken;
         ParameterTypeDisplayNames = parameterTypeDisplayNames;
@@ -176,6 +186,12 @@ internal sealed class CommandDescriptor
     internal ImmutableArray<OptionDescriptor> Options { get; }
 
     internal string EndpointDisplayName { get; }
+
+    internal string EndpointTypeDisplayName { get; }
+
+    internal string EndpointTypeFullyQualifiedName { get; }
+
+    internal string EndpointMethodName { get; }
 
     internal string ReturnTypeDisplayName { get; }
 

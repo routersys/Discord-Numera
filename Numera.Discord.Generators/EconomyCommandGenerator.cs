@@ -68,6 +68,7 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
         {
             CommandSurfaceValidator.Validate(production, value);
             production.AddSource("EconomyCommandManifest.g.cs", ManifestWriter.Write(value));
+            production.AddSource("EconomyGeneratedModules.g.cs", AdapterWriter.Write(value));
         });
     }
 
@@ -115,6 +116,9 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
             ReadGroupPath(method.ContainingType),
             ReadOptions(method),
             method.ToDisplayString(),
+            method.ContainingType.ToDisplayString(),
+            method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            method.Name,
             method.ReturnType.ToDisplayString(),
             EndsWithCancellationToken(method),
             ReadParameterTypes(method),
@@ -225,6 +229,7 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
                 choices.ToImmutable(),
                 autocomplete is null ? null : ReadString(autocomplete, 0),
                 parameter.Type.ToDisplayString(),
+                parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 ResolveOptionValueKind(parameter.Type)));
         }
 

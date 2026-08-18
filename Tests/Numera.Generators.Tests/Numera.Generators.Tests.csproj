@@ -11,6 +11,7 @@
     <ProjectReference Include="..\..\Numera.Discord.Generators\Numera.Discord.Generators.csproj" />
     <ProjectReference Include="..\..\Numera.Analyzers\Numera.Analyzers.csproj" />
     <ProjectReference Include="..\..\Numera.Discord.Abstractions\Numera.Discord.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Numera.Discord\Numera.Discord.csproj" />
   </ItemGroup>
 
 </Project>
