@@ -48,7 +48,7 @@ public sealed class DatabaseIntegrityProbeTests
         SqliteDatabaseIntegrityProbe probe = new(fixture.ConnectionFactory);
         DatabaseProbeResult result = probe.ForeignKeyCheck();
 
-        Assert.AreEqual(DatabaseProbeStatus.Failed, result.Status);
+        Assert.IsFalse(result.IsOk);
         Assert.AreEqual("1", result.Detail);
         Assert.IsTrue(probe.QuickCheck().IsOk);
     }

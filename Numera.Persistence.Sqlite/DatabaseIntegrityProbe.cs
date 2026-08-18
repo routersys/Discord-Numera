@@ -2,19 +2,11 @@ using Microsoft.Data.Sqlite;
 
 namespace Numera.Persistence.Sqlite;
 
-public enum DatabaseProbeStatus
+public sealed record DatabaseProbeResult(bool IsOk, string Detail)
 {
-    Ok = 1,
-    Failed = 2,
-}
+    public static DatabaseProbeResult Ok { get; } = new(true, SqlitePragmaGuard.IntegrityOk);
 
-public sealed record DatabaseProbeResult(DatabaseProbeStatus Status, string Detail)
-{
-    public static DatabaseProbeResult Ok { get; } = new(DatabaseProbeStatus.Ok, SqlitePragmaGuard.IntegrityOk);
-
-    public bool IsOk => Status == DatabaseProbeStatus.Ok;
-
-    public static DatabaseProbeResult Failed(string detail) => new(DatabaseProbeStatus.Failed, detail);
+    public static DatabaseProbeResult Failed(string detail) => new(false, detail);
 }
 
 public interface IDatabaseIntegrityProbe

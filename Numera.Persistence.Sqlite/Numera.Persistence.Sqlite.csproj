@@ -20,4 +20,8 @@
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Numera.Persistence.Sqlite.Tests" />
+  </ItemGroup>
+
 </Project>

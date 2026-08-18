@@ -102,6 +102,7 @@ internal sealed class StartupComposer
         new StartupStepBinding(StartupStep.SingleInstanceLock, AcquireLock),
         new StartupStepBinding(StartupStep.SqliteDirectory, EnsureDirectory),
         new StartupStepBinding(StartupStep.SqliteConnectionAndPragma, VerifyConnection),
+        new StartupStepBinding(StartupStep.PreMigrationRecoveryPoint, CreatePreMigrationRecoveryPoint),
         new StartupStepBinding(StartupStep.DatabaseMigration, ApplyMigrations),
         new StartupStepBinding(StartupStep.HostSettingsLoad, bootstrapSettings.Load),
         new StartupStepBinding(StartupStep.BootstrapShellResolution, ResolveBootstrapShell),
@@ -291,6 +292,26 @@ internal sealed class StartupComposer
         databaseOptions!,
         connectionFactory!,
         new MigrationRunner(EmbeddedMigrationCatalog.Load()));
+
+    private StartupCheckResult CreatePreMigrationRecoveryPoint()
+    {
+        if (databaseOptions is null || connectionFactory is null)
+        {
+            return StartupCheckResult.Failed(BankingErrorCodes.SystemBusy);
+        }
+
+        if (!File.Exists(databaseOptions.FullPath))
+        {
+            return StartupCheckResult.NotAvailable;
+        }
+
+        SqliteDatabaseBackupService service = new(
+            databaseOptions, connectionFactory, timeProvider, HostVersion.Current);
+
+        BackupCreationResult created = service.Create(BackupKind.PreMigration);
+
+        return created.IsSuccess ? StartupCheckResult.Passed : StartupCheckResult.Failed(created.Detail);
+    }
 
     private StartupCheckResult ForeignKeyCheck() => Probe(static probe => probe.ForeignKeyCheck());
 

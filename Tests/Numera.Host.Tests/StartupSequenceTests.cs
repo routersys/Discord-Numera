@@ -32,6 +32,7 @@ public sealed class StartupSequenceTests
                 StartupStep.SingleInstanceLock,
                 StartupStep.SqliteDirectory,
                 StartupStep.SqliteConnectionAndPragma,
+                StartupStep.PreMigrationRecoveryPoint,
                 StartupStep.DatabaseMigration,
                 StartupStep.HostSettingsLoad,
                 StartupStep.BootstrapShellResolution,
@@ -49,9 +50,9 @@ public sealed class StartupSequenceTests
     }
 
     [TestMethod]
-    public void ElevenStepsPrecedeTheDiscordConnection()
+    public void TwelveStepsPrecedeTheDiscordConnection()
     {
-        Assert.HasCount(11, StartupSequence.BeforeDiscordConnection);
+        Assert.HasCount(12, StartupSequence.BeforeDiscordConnection);
         Assert.AreEqual(
             StartupStep.ReconciliationStartupCheck,
             StartupSequence.BeforeDiscordConnection[^1]);

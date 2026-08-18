@@ -94,3 +94,9 @@ internal static class DataDirectoryProtection
         new DirectoryInfo(directoryPath).SetAccessControl(security);
     }
 }
+
+internal static class HostVersion
+{
+    internal static string Current { get; } =
+        typeof(HostVersion).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+}
