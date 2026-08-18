@@ -119,8 +119,8 @@ internal sealed class StartupComposer
         OpenMainDatabase: VerifyConnection,
         VerifySchemaVersion: VerifySchemaVersion,
         QuickCheck: QuickCheck,
-        ForeignKeyCheck: static () => StartupCheckResult.NotAvailable,
-        IntegrityCheck: static () => StartupCheckResult.NotAvailable,
+        ForeignKeyCheck: ForeignKeyCheck,
+        IntegrityCheck: IntegrityCheck,
         FinancialReconciliation: Reconciliation,
         RecoverIncompleteWork: static () => StartupCheckResult.NotAvailable,
         VerifyNoOrphanState: static () => StartupCheckResult.NotAvailable,
@@ -285,6 +285,29 @@ internal sealed class StartupComposer
         databaseOptions!,
         connectionFactory!,
         new MigrationRunner(EmbeddedMigrationCatalog.Load()));
+
+    private StartupCheckResult ForeignKeyCheck() => Probe(static probe => probe.ForeignKeyCheck());
+
+    private StartupCheckResult IntegrityCheck() => Probe(static probe => probe.IntegrityCheck());
+
+    private StartupCheckResult Probe(Func<IDatabaseIntegrityProbe, DatabaseProbeResult> action)
+    {
+        if (connectionFactory is null)
+        {
+            return StartupCheckResult.Failed(BankingErrorCodes.SystemBusy);
+        }
+
+        try
+        {
+            DatabaseProbeResult result = action(new SqliteDatabaseIntegrityProbe(connectionFactory));
+
+            return result.IsOk ? StartupCheckResult.Passed : StartupCheckResult.Failed(result.Detail);
+        }
+        catch (PersistenceFailureException exception)
+        {
+            return StartupCheckResult.Failed(exception.Code);
+        }
+    }
 
     private StartupCheckResult Guarded(Func<SqliteDatabaseInitializer, StartupCheckResult> action)
     {
