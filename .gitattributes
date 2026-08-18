@@ -61,3 +61,14 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+###############################################################################
+# Font and image assets must never be line-ending normalised.
+#
+# assets/fonts の SHA-256 は font-manifest.json へ固定してあり、改行変換で破損すると
+# Card Rendering が Fail Closed する。
+###############################################################################
+*.ttf binary
+*.otf binary
+*.ttc binary
+*.png binary
