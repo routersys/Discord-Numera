@@ -204,6 +204,20 @@ internal static class CommandSurfaceValidator
 
     private static void ValidateModalForms(SourceProductionContext context, CommandSurface surface)
     {
+        foreach (HandlerDescriptor modal in surface.Modals)
+        {
+            bool declared = surface.ModalForms.Any(candidate => string.Equals(
+                candidate.TypeDisplayName,
+                modal.DeclaredInputTypeDisplayName,
+                System.StringComparison.Ordinal));
+
+            if (!declared)
+            {
+                Report(context, CommandDiagnostics.ModalFormMissing, Resolve(modal.Location),
+                    modal.EndpointDisplayName, modal.DeclaredInputTypeDisplayName ?? string.Empty);
+            }
+        }
+
         foreach (ModalFormDescriptor form in surface.ModalForms)
         {
             Location location = Resolve(form.Location);

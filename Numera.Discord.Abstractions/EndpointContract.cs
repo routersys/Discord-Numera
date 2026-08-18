@@ -38,10 +38,12 @@ public sealed class DiscordEndpointContext
         ulong channelId,
         string locale,
         string commandPath,
-        AuthorizationLevel level)
+        AuthorizationLevel level,
+        string sessionToken)
     {
         ArgumentNullException.ThrowIfNull(locale);
         ArgumentNullException.ThrowIfNull(commandPath);
+        ArgumentNullException.ThrowIfNull(sessionToken);
 
         InteractionId = interactionId;
         UserId = userId;
@@ -50,6 +52,7 @@ public sealed class DiscordEndpointContext
         Locale = locale;
         CommandPath = commandPath;
         Level = level;
+        SessionToken = sessionToken;
     }
 
     public ulong InteractionId { get; }
@@ -65,6 +68,8 @@ public sealed class DiscordEndpointContext
     public string CommandPath { get; }
 
     public AuthorizationLevel Level { get; }
+
+    public string SessionToken { get; }
 }
 
 public sealed class DiscordUserInput
@@ -262,4 +267,74 @@ public static class AutocompleteFailure
 {
     public const string OptionOutOfRange =
         "Autocomplete Option の名前は1文字以上100文字以下、値は100文字以下でなければなりません。";
+}
+
+public sealed class DiscordModalFieldDefinition
+{
+    public DiscordModalFieldDefinition(
+        string customId,
+        string label,
+        string placeholder,
+        EconomyModalFieldStyle style,
+        bool required,
+        int minimumLength,
+        int maximumLength)
+    {
+        ArgumentNullException.ThrowIfNull(customId);
+        ArgumentNullException.ThrowIfNull(label);
+        ArgumentNullException.ThrowIfNull(placeholder);
+
+        CustomId = customId;
+        Label = label;
+        Placeholder = placeholder;
+        Style = style;
+        Required = required;
+        MinimumLength = minimumLength;
+        MaximumLength = maximumLength;
+    }
+
+    public string CustomId { get; }
+
+    public string Label { get; }
+
+    public string Placeholder { get; }
+
+    public EconomyModalFieldStyle Style { get; }
+
+    public bool Required { get; }
+
+    public int MinimumLength { get; }
+
+    public int MaximumLength { get; }
+}
+
+public interface IModalFormCatalog
+{
+    IReadOnlyList<DiscordModalFieldDefinition> Resolve(string action);
+}
+
+public static class DiscordCustomId
+{
+    public const string Prefix = "bank";
+    public const string Version = "v1";
+    public const string Separator = ":";
+    public const string ButtonKind = "btn";
+    public const string SelectKind = "sel";
+    public const string ModalKind = "modal";
+    public const string Wildcard = "*";
+
+    public static string Button(string action, string sessionToken) => Compose(ButtonKind, action, sessionToken);
+
+    public static string Select(string action, string sessionToken) => Compose(SelectKind, action, sessionToken);
+
+    public static string Modal(string action, string sessionToken) => Compose(ModalKind, action, sessionToken);
+
+    private static string Compose(string kind, string action, string sessionToken)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(sessionToken);
+
+        return string.Concat(
+            Prefix, Separator, Version, Separator, kind, Separator, action, Separator, sessionToken);
+    }
 }

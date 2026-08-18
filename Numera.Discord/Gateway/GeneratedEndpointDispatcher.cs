@@ -11,6 +11,7 @@ public interface IGeneratedEndpointDispatcher
     Task<DiscordEndpointContext> CreateContextAsync(
         SocketInteractionContext context,
         string commandPath,
+        string sessionToken,
         CancellationToken cancellationToken);
 
     DiscordUserInput CreateUserInput(global::Discord.IUser user);
@@ -38,28 +39,34 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
     private readonly IDiscordEndpointExecutor executor;
     private readonly IAuthorizationResolver authorization;
     private readonly ErrorRenderer errorRenderer;
+    private readonly IModalFormCatalog modalForms;
 
     public GeneratedEndpointDispatcher(
         IDiscordEndpointExecutor executor,
         IAuthorizationResolver authorization,
-        ErrorRenderer errorRenderer)
+        ErrorRenderer errorRenderer,
+        IModalFormCatalog modalForms)
     {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(authorization);
         ArgumentNullException.ThrowIfNull(errorRenderer);
+        ArgumentNullException.ThrowIfNull(modalForms);
 
         this.executor = executor;
         this.authorization = authorization;
         this.errorRenderer = errorRenderer;
+        this.modalForms = modalForms;
     }
 
     public async Task<DiscordEndpointContext> CreateContextAsync(
         SocketInteractionContext context,
         string commandPath,
+        string sessionToken,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(commandPath);
+        ArgumentNullException.ThrowIfNull(sessionToken);
 
         ulong userId = context.Interaction.User.Id;
         ulong guildId = context.Interaction.GuildId ?? 0UL;
@@ -75,7 +82,8 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
             context.Interaction.ChannelId ?? 0UL,
             context.Interaction.UserLocale ?? string.Empty,
             commandPath,
-            EndpointAuthorization.ToContract(actor.Level));
+            EndpointAuthorization.ToContract(actor.Level),
+            sessionToken);
     }
 
     public DiscordUserInput CreateUserInput(global::Discord.IUser user)
@@ -133,6 +141,11 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
 
         DiscordInteractionExchange exchange = new(kind, new SocketResponseSink(context.Interaction));
 
+        if (response.Kind == DiscordResponseKind.Modal)
+        {
+            return executor.ExecuteModalAsync(exchange, response, ResolveFields(response), cancellationToken);
+        }
+
         if (response.Kind != DiscordResponseKind.Failure)
         {
             return executor.ExecuteAsync(exchange, response, cancellationToken);
@@ -143,5 +156,24 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
             OperationPublicId.From(context.Interaction.Id));
 
         return executor.ExecuteErrorAsync(exchange, rendered, cancellationToken);
+    }
+
+    private IReadOnlyList<DiscordModalField> ResolveFields(DiscordEndpointResponse response)
+    {
+        response.ViewData.TryGetValue(ComposerViewData.CustomId, out string? customId);
+
+        return
+        [
+            .. modalForms.Resolve(CustomIdRoute.Describe(customId)).Select(static definition =>
+                new DiscordModalField(
+                    definition.CustomId,
+                    definition.Label,
+                    null,
+                    definition.Placeholder,
+                    definition.MinimumLength,
+                    definition.MaximumLength,
+                    definition.Required,
+                    definition.Style)),
+        ];
     }
 }

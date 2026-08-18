@@ -119,7 +119,8 @@ public sealed class AuthorizationResolverTests
             2UL,
             "ja",
             "bank open",
-            Abstractions.AuthorizationLevel.GuildOperator);
+            Abstractions.AuthorizationLevel.GuildOperator,
+            string.Empty);
 
         AuthorizationContext actor = EndpointAuthorization.ToActor(context);
 

@@ -65,6 +65,19 @@ internal readonly struct TextSpanInfo
     public override int GetHashCode() => (Start * 397) ^ Length;
 }
 
+internal enum ComponentKind
+{
+    None = 0,
+    Button = 1,
+    Select = 2,
+}
+
+internal enum ModalFieldStyle
+{
+    Short = 1,
+    Paragraph = 2,
+}
+
 internal enum OptionValueKind
 {
     Unsupported = 0,
@@ -222,6 +235,8 @@ internal sealed class HandlerDescriptor
         bool endsWithCancellationToken,
         ImmutableArray<string> parameterTypeDisplayNames,
         string? declaredInputTypeDisplayName,
+        string? declaredInputTypeFullyQualifiedName,
+        ComponentKind componentKind,
         LocationInfo? location)
     {
         Key = key;
@@ -232,6 +247,8 @@ internal sealed class HandlerDescriptor
         EndsWithCancellationToken = endsWithCancellationToken;
         ParameterTypeDisplayNames = parameterTypeDisplayNames;
         DeclaredInputTypeDisplayName = declaredInputTypeDisplayName;
+        DeclaredInputTypeFullyQualifiedName = declaredInputTypeFullyQualifiedName;
+        ComponentKind = componentKind;
         Location = location;
     }
 
@@ -251,16 +268,26 @@ internal sealed class HandlerDescriptor
 
     internal string? DeclaredInputTypeDisplayName { get; }
 
+    internal string? DeclaredInputTypeFullyQualifiedName { get; }
+
+    internal ComponentKind ComponentKind { get; }
+
     internal LocationInfo? Location { get; }
 }
 
 internal sealed class ModalFormDescriptor
 {
-    internal ModalFormDescriptor(string title, ImmutableArray<ModalFieldDescriptor> fields, string typeDisplayName, LocationInfo? location)
+    internal ModalFormDescriptor(
+        string title,
+        ImmutableArray<ModalFieldDescriptor> fields,
+        string typeDisplayName,
+        string typeFullyQualifiedName,
+        LocationInfo? location)
     {
         Title = title;
         Fields = fields;
         TypeDisplayName = typeDisplayName;
+        TypeFullyQualifiedName = typeFullyQualifiedName;
         Location = location;
     }
 
@@ -270,23 +297,48 @@ internal sealed class ModalFormDescriptor
 
     internal string TypeDisplayName { get; }
 
+    internal string TypeFullyQualifiedName { get; }
+
     internal LocationInfo? Location { get; }
 }
 
 internal sealed class ModalFieldDescriptor
 {
-    internal ModalFieldDescriptor(string customId, string label, string placeholder)
+    internal ModalFieldDescriptor(
+        string propertyName,
+        string customId,
+        string label,
+        string placeholder,
+        ModalFieldStyle style,
+        bool required,
+        int minimumLength,
+        int maximumLength)
     {
+        PropertyName = propertyName;
         CustomId = customId;
         Label = label;
         Placeholder = placeholder;
+        Style = style;
+        Required = required;
+        MinimumLength = minimumLength;
+        MaximumLength = maximumLength;
     }
+
+    internal string PropertyName { get; }
 
     internal string CustomId { get; }
 
     internal string Label { get; }
 
     internal string Placeholder { get; }
+
+    internal ModalFieldStyle Style { get; }
+
+    internal bool Required { get; }
+
+    internal int MinimumLength { get; }
+
+    internal int MaximumLength { get; }
 }
 
 internal sealed class CommandSurface

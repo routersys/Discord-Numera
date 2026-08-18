@@ -34,10 +34,10 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
         IncrementalValuesProvider<CommandDescriptor> message =
             Commands(context, MessageAttribute, CommandKind.Message);
 
-        IncrementalValuesProvider<HandlerDescriptor> components = Handlers(context, ComponentAttribute, 1, -1);
-        IncrementalValuesProvider<HandlerDescriptor> modals = Handlers(context, ModalAttribute, 0, 1);
+        IncrementalValuesProvider<HandlerDescriptor> components = Handlers(context, ComponentAttribute, 1, -1, 0);
+        IncrementalValuesProvider<HandlerDescriptor> modals = Handlers(context, ModalAttribute, 0, 1, -1);
         IncrementalValuesProvider<HandlerDescriptor> providers =
-            Handlers(context, AutocompleteProviderAttribute, 0, -1);
+            Handlers(context, AutocompleteProviderAttribute, 0, -1, -1);
         IncrementalValuesProvider<ModalFormDescriptor> forms = ModalForms(context);
 
         IncrementalValueProvider<CommandSurface> surface = slash.Collect()
@@ -88,11 +88,13 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
         IncrementalGeneratorInitializationContext context,
         string attributeName,
         int keyArgumentIndex,
-        int inputTypeArgumentIndex) =>
+        int inputTypeArgumentIndex,
+        int componentKindArgumentIndex) =>
         context.SyntaxProvider.ForAttributeWithMetadataName(
             attributeName,
             static (node, _) => true,
-            (syntaxContext, _) => BuildHandler(syntaxContext, keyArgumentIndex, inputTypeArgumentIndex));
+            (syntaxContext, _) => BuildHandler(
+                syntaxContext, keyArgumentIndex, inputTypeArgumentIndex, componentKindArgumentIndex));
 
     private static IncrementalValuesProvider<ModalFormDescriptor> ModalForms(
         IncrementalGeneratorInitializationContext context) =>
@@ -128,7 +130,8 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
     private static HandlerDescriptor BuildHandler(
         GeneratorAttributeSyntaxContext context,
         int keyArgumentIndex,
-        int inputTypeArgumentIndex)
+        int inputTypeArgumentIndex,
+        int componentKindArgumentIndex)
     {
         IMethodSymbol method = (IMethodSymbol)context.TargetSymbol;
         AttributeData attribute = context.Attributes[0];
@@ -142,6 +145,12 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
             EndsWithCancellationToken(method),
             ReadParameterTypes(method),
             inputTypeArgumentIndex < 0 ? null : ReadTypeDisplayName(attribute, inputTypeArgumentIndex),
+            inputTypeArgumentIndex < 0
+                ? null
+                : ReadTypeFullyQualifiedName(attribute, inputTypeArgumentIndex),
+            componentKindArgumentIndex < 0
+                ? ComponentKind.None
+                : ReadComponentKind(attribute, componentKindArgumentIndex),
             LocationInfo.From(method.Locations.FirstOrDefault() ?? Location.None));
     }
 
@@ -163,15 +172,21 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
             }
 
             fields.Add(new ModalFieldDescriptor(
+                property.Name,
                 ReadString(fieldAttribute, 0) ?? string.Empty,
                 ReadString(fieldAttribute, 1) ?? string.Empty,
-                ReadString(fieldAttribute, 6) ?? string.Empty));
+                ReadString(fieldAttribute, 6) ?? string.Empty,
+                ReadInt32(fieldAttribute, 2) == 2 ? ModalFieldStyle.Paragraph : ModalFieldStyle.Short,
+                ReadBoolean(fieldAttribute, 3),
+                ReadInt32(fieldAttribute, 4),
+                ReadInt32(fieldAttribute, 5)));
         }
 
         return new ModalFormDescriptor(
             ReadString(attribute, 0) ?? string.Empty,
             fields.ToImmutable(),
             type.ToDisplayString(),
+            type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             LocationInfo.From(type.Locations.FirstOrDefault() ?? Location.None));
     }
 
@@ -275,6 +290,21 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
         && attribute.ConstructorArguments[index].Value is ITypeSymbol type
             ? type.ToDisplayString()
             : null;
+
+    private static string? ReadTypeFullyQualifiedName(AttributeData attribute, int index) =>
+        attribute.ConstructorArguments.Length > index
+        && attribute.ConstructorArguments[index].Value is ITypeSymbol type
+            ? type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            : null;
+
+    private static ComponentKind ReadComponentKind(AttributeData attribute, int index) =>
+        ReadInt32(attribute, index) == 2 ? ComponentKind.Select : ComponentKind.Button;
+
+    private static int ReadInt32(AttributeData attribute, int index) =>
+        attribute.ConstructorArguments.Length > index
+        && attribute.ConstructorArguments[index].Value is int value
+            ? value
+            : 0;
 
     private static string? ReadString(AttributeData attribute, int index) =>
         attribute.ConstructorArguments.Length > index

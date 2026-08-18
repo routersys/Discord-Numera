@@ -11,7 +11,8 @@ internal sealed record DiscordModalField(
     string? Placeholder,
     int MinimumLength,
     int MaximumLength,
-    bool Required);
+    bool Required,
+    EconomyModalFieldStyle Style = EconomyModalFieldStyle.Short);
 
 internal sealed record DiscordModalPayload(
     string CustomId,

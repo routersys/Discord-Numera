@@ -136,6 +136,11 @@ internal static class CommandDiagnostics
         "Endpoint の入力引数が規定型と一致しません",
         "Endpoint '{0}' の第 2 引数は '{1}' でなければなりません。");
 
+    internal static readonly DiagnosticDescriptor ModalFormMissing = Create(
+        "ECONCMD027",
+        "Modal の Form 型に Form 属性がありません",
+        "Endpoint '{0}' が指定した Form 型 '{1}' へ EconomyModalForm 属性を付与してください。");
+
     private static DiagnosticDescriptor Create(string id, string title, string messageFormat) =>
         new(id, title, messageFormat, Category, DiagnosticSeverity.Error, isEnabledByDefault: true);
 }

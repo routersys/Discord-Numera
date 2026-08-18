@@ -99,7 +99,7 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
         {
             TextInputBuilder input = new(
                 field.CustomId,
-                CanonicalTextInputStyle,
+                Resolve(field.Style),
                 field.Placeholder,
                 field.MinimumLength,
                 field.MaximumLength,
@@ -112,6 +112,11 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
 
         return builder.Build();
     }
+
+    private static TextInputStyle Resolve(Numera.Discord.Abstractions.EconomyModalFieldStyle style) =>
+        style == Numera.Discord.Abstractions.EconomyModalFieldStyle.Paragraph
+            ? TextInputStyle.Paragraph
+            : CanonicalTextInputStyle;
 
     private static void Apply(MessageProperties properties, DiscordEmbedPayload payload)
     {

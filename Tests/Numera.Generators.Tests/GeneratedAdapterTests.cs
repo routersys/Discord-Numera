@@ -54,7 +54,7 @@ public sealed class GeneratedAdapterTests
         StringAssert.Contains(run.AdapterSource, "public sealed class SampleHelpEndpointsModule : InteractionModuleBase<SocketInteractionContext>");
         StringAssert.Contains(run.AdapterSource, "[SlashCommand(\"help\", \"使い方を表示します。\")]");
         StringAssert.Contains(run.AdapterSource, "typeof(SampleHelpEndpointsModule)");
-        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"help\", CancellationToken.None)");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"help\", string.Empty, CancellationToken.None)");
         StringAssert.Contains(run.AdapterSource, "DiscordInteractionKind.SlashCommand");
     }
 
@@ -76,7 +76,7 @@ public sealed class GeneratedAdapterTests
         AssertCompiles(run);
         StringAssert.Contains(run.AdapterSource, "[Group(\"bank\", \"銀行の機能です。\")]");
         StringAssert.Contains(run.AdapterSource, "public sealed class BankModule");
-        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"bank list\", CancellationToken.None)");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"bank list\", string.Empty, CancellationToken.None)");
     }
 
     [TestMethod]
@@ -140,7 +140,7 @@ public sealed class GeneratedAdapterTests
         StringAssert.Contains(run.AdapterSource, "[Group(\"bank\", \"銀行の機能です。\")]");
         StringAssert.Contains(run.AdapterSource, "[Group(\"card\", \"カードの機能です。\")]");
         StringAssert.Contains(run.AdapterSource, "public sealed class BankCardModule");
-        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"bank card issue\", CancellationToken.None)");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"bank card issue\", string.Empty, CancellationToken.None)");
         Assert.AreEqual(1, Occurrences(run.AdapterSource, "typeof("));
     }
 
@@ -359,5 +359,111 @@ public sealed class GeneratedAdapterTests
         }
 
         return count;
+    }
+
+    [TestMethod]
+    public void AComponentEndpointGeneratesAWildcardAdapter()
+    {
+        GeneratorRun run = Run("""
+            public sealed class PanelEndpoints
+            {
+                [EconomyComponent(EconomyComponentKind.Button, "transfer-confirm")]
+                public Task<DiscordEndpointResponse> ConfirmAsync(
+                    DiscordEndpointContext context,
+                    DiscordComponentInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+
+                [EconomyComponent(EconomyComponentKind.Select, "source-account")]
+                public Task<DiscordEndpointResponse> SelectAsync(
+                    DiscordEndpointContext context,
+                    DiscordComponentInput input,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        AssertCompiles(run);
+        StringAssert.Contains(
+            run.AdapterSource,
+            "public sealed class SamplePanelEndpointsInteractionsModule : InteractionModuleBase<SocketInteractionContext>");
+        StringAssert.Contains(run.AdapterSource, "[ComponentInteraction(\"bank:v1:btn:transfer-confirm:*\", true)]");
+        StringAssert.Contains(run.AdapterSource, "[ComponentInteraction(\"bank:v1:sel:source-account:*\", true)]");
+        StringAssert.Contains(
+            run.AdapterSource,
+            "public async Task SourceAccountSelectAdapter(string sessionToken, string[] values)");
+        StringAssert.Contains(run.AdapterSource, "public async Task TransferConfirmButtonAdapter(string sessionToken)");
+        StringAssert.Contains(run.AdapterSource, "new DiscordComponentInput(\"source-account\", sessionToken, values),");
+        StringAssert.Contains(run.AdapterSource, "DiscordInteractionKind.SelectMenu");
+        StringAssert.Contains(run.AdapterSource, "DiscordInteractionKind.Button");
+        StringAssert.Contains(run.AdapterSource, "typeof(SamplePanelEndpointsInteractionsModule)");
+    }
+
+    [TestMethod]
+    public void AModalEndpointGeneratesATransportFormAndACatalog()
+    {
+        GeneratorRun run = Run("""
+            [EconomyModalForm("振込内容の入力")]
+            public sealed class TransferForm
+            {
+                [EconomyModalField("bank-code", "金融機関コード", EconomyModalFieldStyle.Short, true, 1, 16, "金融機関コードを入力してください")]
+                public string BankCode { get; set; } = string.Empty;
+
+                [EconomyModalField("memo", "メモ", EconomyModalFieldStyle.Paragraph, false, 0, 100, "必要な場合だけ入力してください")]
+                public string Memo { get; set; } = string.Empty;
+            }
+
+            public sealed class PanelEndpoints
+            {
+                [EconomyModal("transfer", typeof(TransferForm))]
+                public Task<DiscordEndpointResponse> SubmitAsync(
+                    DiscordEndpointContext context,
+                    TransferForm form,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        AssertCompiles(run);
+        StringAssert.Contains(run.AdapterSource, "public sealed class TransferFormTransport : IModal");
+        StringAssert.Contains(run.AdapterSource, "public string Title => \"振込内容の入力\";");
+        StringAssert.Contains(
+            run.AdapterSource,
+            "[ModalTextInput(\"memo\", global::Discord.TextInputStyle.Paragraph, \"必要な場合だけ入力してください\", 0, 100)]");
+        StringAssert.Contains(run.AdapterSource, "[RequiredInput(false)]");
+        StringAssert.Contains(run.AdapterSource, "[ModalInteraction(\"bank:v1:modal:transfer:*\", true)]");
+        StringAssert.Contains(
+            run.AdapterSource,
+            "public async Task TransferModalAdapter(string sessionToken, TransferFormTransport transport)");
+        StringAssert.Contains(run.AdapterSource, "BankCode = transport.BankCode,");
+        StringAssert.Contains(run.AdapterSource, "DiscordInteractionKind.ModalSubmit");
+        StringAssert.Contains(run.AdapterSource, "internal sealed class EconomyGeneratedModalFormCatalog : IModalFormCatalog");
+        StringAssert.Contains(run.AdapterSource, "\"transfer\" => TransferFields,");
+        StringAssert.Contains(
+            run.AdapterSource,
+            "new DiscordModalFieldDefinition(\"memo\", \"メモ\", \"必要な場合だけ入力してください\", EconomyModalFieldStyle.Paragraph, false, 0, 100),");
+    }
+
+    [TestMethod]
+    public void AModalWhoseFormLacksTheFormAttributeIsRejected()
+    {
+        GeneratorRun run = Run("""
+            public sealed class TransferForm
+            {
+                public string BankCode { get; set; } = string.Empty;
+            }
+
+            public sealed class PanelEndpoints
+            {
+                [EconomyModal("transfer", typeof(TransferForm))]
+                public Task<DiscordEndpointResponse> SubmitAsync(
+                    DiscordEndpointContext context,
+                    TransferForm form,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        Assert.IsTrue(run.HasError("ECONCMD027"));
     }
 }
