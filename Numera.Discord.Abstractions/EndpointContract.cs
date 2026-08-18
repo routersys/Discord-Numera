@@ -7,6 +7,26 @@ public enum DiscordResponseKind
     Modal = 3,
     Autocomplete = 4,
     NoContent = 5,
+    Failure = 6,
+}
+
+public sealed class DiscordEndpointFailure
+{
+    public DiscordEndpointFailure(string categoryToken, string errorCode, string? field)
+    {
+        ArgumentNullException.ThrowIfNull(categoryToken);
+        ArgumentNullException.ThrowIfNull(errorCode);
+
+        CategoryToken = categoryToken;
+        ErrorCode = errorCode;
+        Field = field;
+    }
+
+    public string CategoryToken { get; }
+
+    public string ErrorCode { get; }
+
+    public string? Field { get; }
 }
 
 public sealed class DiscordEndpointContext
@@ -131,13 +151,17 @@ public sealed class DiscordEndpointResponse
         DiscordResponseKind kind,
         string viewKey,
         IReadOnlyDictionary<string, string> viewData,
-        bool ephemeral)
+        bool ephemeral,
+        DiscordEndpointFailure? failure = null)
     {
         Kind = kind;
         ViewKey = viewKey;
         ViewData = viewData;
         Ephemeral = ephemeral;
+        Failure = failure;
     }
+
+    public DiscordEndpointFailure? Failure { get; }
 
     public DiscordResponseKind Kind { get; }
 
@@ -170,6 +194,14 @@ public sealed class DiscordEndpointResponse
 
     public static DiscordEndpointResponse NoContent() =>
         Create(DiscordResponseKind.NoContent, string.Empty, EmptyViewData, ephemeral: true);
+
+    public static DiscordEndpointResponse Failed(DiscordEndpointFailure failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        return new DiscordEndpointResponse(
+            DiscordResponseKind.Failure, string.Empty, EmptyViewData, ephemeral: true, failure);
+    }
 
     private static DiscordEndpointResponse Create(
         DiscordResponseKind kind,

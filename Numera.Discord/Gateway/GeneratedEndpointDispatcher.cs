@@ -2,6 +2,7 @@ using Discord.Interactions;
 using Numera.Application.Common;
 using Numera.Discord.Abstractions;
 using Numera.Discord.Commands;
+using Numera.Discord.Rendering;
 
 namespace Numera.Discord.Gateway;
 
@@ -27,16 +28,20 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
 {
     private readonly IDiscordEndpointExecutor executor;
     private readonly IAuthorizationResolver authorization;
+    private readonly ErrorRenderer errorRenderer;
 
     public GeneratedEndpointDispatcher(
         IDiscordEndpointExecutor executor,
-        IAuthorizationResolver authorization)
+        IAuthorizationResolver authorization,
+        ErrorRenderer errorRenderer)
     {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(authorization);
+        ArgumentNullException.ThrowIfNull(errorRenderer);
 
         this.executor = executor;
         this.authorization = authorization;
+        this.errorRenderer = errorRenderer;
     }
 
     public async Task<DiscordEndpointContext> CreateContextAsync(
@@ -87,6 +92,15 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
 
         DiscordInteractionExchange exchange = new(kind, new SocketResponseSink(context.Interaction));
 
-        return executor.ExecuteAsync(exchange, response, cancellationToken);
+        if (response.Kind != DiscordResponseKind.Failure)
+        {
+            return executor.ExecuteAsync(exchange, response, cancellationToken);
+        }
+
+        RenderedError rendered = errorRenderer.Render(
+            EndpointFailures.ToApplicationError(response.Failure!),
+            OperationPublicId.From(context.Interaction.Id));
+
+        return executor.ExecuteErrorAsync(exchange, rendered, cancellationToken);
     }
 }
