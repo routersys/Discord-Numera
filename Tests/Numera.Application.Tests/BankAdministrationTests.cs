@@ -72,7 +72,12 @@ public sealed class BankAdministrationTests
 
             harness.Registration = new CustomerAccountApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
-            harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Accounts = new BankAccountApplicationService(
+                gateway,
+                new PaymentApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
+                harness.Clock,
+                ids);
             harness.Administration = new BankAdministrationApplicationService(gateway, harness.Clock, ids);
 
             return harness;
@@ -182,6 +187,34 @@ public sealed class BankAdministrationTests
 
             return created.Value;
         }
+
+        public void OpenAccountingPeriods() => Execute("""
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            SELECT randomblob(16), accounting_book_id, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1
+            FROM accounting_books
+            WHERE NOT EXISTS(
+                SELECT 1 FROM accounting_periods p
+                WHERE p.accounting_book_id = accounting_books.accounting_book_id);
+            """);
+
+        public void FundDeposit(DepositAccountId depositAccountId, long amount) => Execute($"""
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                version, updated_at)
+            SELECT ledger_account_id, {amount}, 0, 1, 1 FROM deposit_accounts
+            WHERE deposit_account_id = x'{Convert.ToHexString(depositAccountId.Value.ToByteArray())}'
+            ON CONFLICT(ledger_account_id) DO UPDATE SET
+                posted_balance_minor = {amount}, version = version + 1;
+            """);
+
+        public void FundReserves(long amount) => Execute($"""
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                version, updated_at)
+            SELECT ledger_account_id, {amount}, 0, 1, 1 FROM ledger_accounts
+            WHERE account_kind IN ('CENTRAL_BANK_RESERVE_ASSET', 'CENTRAL_BANK_SETTLEMENT_LIABILITY')
+            ON CONFLICT(ledger_account_id) DO UPDATE SET
+                posted_balance_minor = {amount}, version = version + 1;
+            """);
 
         public async Task<CustomerAccountId> RegisterAsync(ulong discordUserId, string handle)
         {
@@ -543,7 +576,7 @@ public sealed class BankAdministrationTests
     }
 
     [TestMethod]
-    public async Task NonzeroInitialFundingWaitsForFundingWithARealRail()
+    public async Task NonzeroInitialFundingIsRejectedWhenTheRailHasNoBalance()
     {
         await using Harness harness = Harness.Create();
         await harness.CreateOperatingBankAsync(harness.CreateCommand());
@@ -551,20 +584,43 @@ public sealed class BankAdministrationTests
             harness.CreateCommand(institutionCode: "NUM0200", minimumInitialFunding: 500));
         CustomerAccountId customer = await harness.RegisterAsync(Customer, "taro");
         await harness.OpenAsync(customer);
+        harness.OpenAccountingPeriods();
 
         Result<AccountOpeningView> opened = await harness.OpenAsync(customer, "NUM0200");
 
-        Assert.IsTrue(opened.IsSuccess);
-        Assert.AreEqual(DepositAccountStatus.Pending, opened.Value.Status);
+        Assert.IsFalse(opened.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.AvailableBalanceInsufficient, opened.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("account_opening_applications WHERE required_funding_minor = 500"));
+    }
+
+    [TestMethod]
+    public async Task NonzeroInitialFundingCompletesThroughTheFundingRail()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.CreateOperatingBankAsync(harness.CreateCommand());
+        await harness.CreateOperatingBankAsync(
+            harness.CreateCommand(institutionCode: "NUM0200", minimumInitialFunding: 500));
+        CustomerAccountId customer = await harness.RegisterAsync(Customer, "taro");
+        Result<AccountOpeningView> rail = await harness.OpenAsync(customer);
+
+        harness.OpenAccountingPeriods();
+        harness.FundDeposit(rail.Value.Id, 5_000);
+        harness.FundReserves(50_000);
+
+        Result<AccountOpeningView> opened = await harness.OpenAsync(customer, "NUM0200");
+
+        Assert.IsTrue(opened.IsSuccess, opened.Error?.Code);
+        Assert.AreEqual(DepositAccountStatus.Active, opened.Value.Status);
+        Assert.AreEqual(500L, opened.Value.PostedBalance.Value);
         Assert.AreEqual(
-            "AWAITING_FUNDING",
+            "COMPLETED",
             harness.ReadText("""
                 SELECT status FROM account_opening_applications WHERE required_funding_minor = 500;
                 """));
         Assert.AreEqual(
             1L,
             harness.Count("""
-                account_opening_applications WHERE funding_source_deposit_account_id IS NOT NULL
+                account_opening_applications WHERE funding_payment_order_id IS NOT NULL
                 """));
     }
 

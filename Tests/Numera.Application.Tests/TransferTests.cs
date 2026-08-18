@@ -78,9 +78,10 @@ public sealed class TransferTests
 
             harness.Registration = new CustomerAccountApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
-            harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
             harness.Payments = new PaymentApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
+            harness.Accounts = new BankAccountApplicationService(
+                gateway, harness.Payments, harness.Clock, ids);
             harness.Maintenance = new SettlementMaintenanceService(
                 gateway, harness.Payments, harness.Clock, ids);
 

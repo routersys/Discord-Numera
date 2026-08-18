@@ -47,23 +47,37 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
     public const string DemandDepositControlCode = AccountOpeningWorkflow.DemandDepositControlCode;
     public const int NumberDigits = AccountOpeningWorkflow.NumberDigits;
 
+    public const string FundingOperationType = "ACCOUNT_OPEN_FUNDING";
+    public const string ActivatedEventType = "DEPOSIT_ACCOUNT_ACTIVATED";
+    public const string OpeningFeeTransactionType = "ACCOUNT_OPENING_FEE";
+    public const string OpeningFeeDescriptionCode = "ACCOUNT_OPENING_FEE";
+
     private readonly IBankingWriteGateway writeGateway;
+    private readonly PaymentApplicationService payments;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public BankAccountApplicationService(
         IBankingWriteGateway writeGateway,
+        PaymentApplicationService payments,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(payments);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.payments = payments;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
+
+    private readonly record struct OpeningResult(
+        AccountOpeningView View,
+        AccountOpeningApplicationId? ApplicationId,
+        PaymentOrderId? FundingPaymentOrderId);
 
     public Task<Result<AccountOpeningView>> OpenDepositAccountAsync(
         OpenDepositAccountCommand command,
@@ -81,12 +95,56 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
             OperationType,
             $"{command.CustomerAccountId.Value}.{institutionCode.Value}");
 
-        return writeGateway.ExecuteAsync(
-            unitOfWork => Open(unitOfWork, command, institutionCode, idempotencyKey),
-            cancellationToken);
+        return OpenAndFinalizeAsync(command, institutionCode, idempotencyKey, cancellationToken);
     }
 
-    private Result<AccountOpeningView> Open(
+    private async Task<Result<AccountOpeningView>> OpenAndFinalizeAsync(
+        OpenDepositAccountCommand command,
+        InstitutionCode institutionCode,
+        IdempotencyKey idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        Result<OpeningResult> opened = await writeGateway.ExecuteAsync(
+            unitOfWork => Open(unitOfWork, command, institutionCode, idempotencyKey),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!opened.IsSuccess)
+        {
+            return Result<AccountOpeningView>.Failure(opened.Error!);
+        }
+
+        if (opened.Value.FundingPaymentOrderId is not { } order
+            || opened.Value.ApplicationId is not { } applicationId)
+        {
+            return Result<AccountOpeningView>.Success(opened.Value.View);
+        }
+
+        Result<PaymentOrderView> debited = await writeGateway.ExecuteAsync(
+            unitOfWork => payments.PostSourceDebit(unitOfWork, order),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!debited.IsSuccess)
+        {
+            return Result<AccountOpeningView>.Failure(debited.Error!);
+        }
+
+        Result<PaymentOrderView> settled = await writeGateway.ExecuteAsync(
+            unitOfWork => payments.SettleInterbank(unitOfWork, order),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!settled.IsSuccess)
+        {
+            return Result<AccountOpeningView>.Failure(settled.Error!);
+        }
+
+        return settled.Value.Status == PaymentOrderStatus.Settled
+            ? await writeGateway.ExecuteAsync(
+                unitOfWork => Finalize(unitOfWork, applicationId),
+                cancellationToken).ConfigureAwait(false)
+            : Result<AccountOpeningView>.Success(opened.Value.View);
+    }
+
+    private Result<OpeningResult> Open(
         IBankingUnitOfWork unitOfWork,
         OpenDepositAccountCommand command,
         InstitutionCode institutionCode,
@@ -113,7 +171,8 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
         if (existing is not null)
         {
             return unitOfWork.BusinessOperations.Find(idempotencyKey) is not null
-                ? Result<AccountOpeningView>.Success(ToView(unitOfWork, bank, existing))
+                ? Result<OpeningResult>.Success(
+                    new OpeningResult(ToView(unitOfWork, bank, existing), null, null))
                 : Failure(ErrorCategory.Conflict, BankingErrorCodes.DepositAccountAlreadyExists);
         }
 
@@ -147,7 +206,7 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
 
         if (!resolved.IsSuccess)
         {
-            return Result<AccountOpeningView>.Failure(resolved.Error!);
+            return Result<OpeningResult>.Failure(resolved.Error!);
         }
 
         BusinessOperation operation = BusinessOperation.Start(
@@ -160,11 +219,11 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
             now);
 
         Result<AccountOpeningOutcome> outcome = OpenUnderContract(
-            unitOfWork, bank, customer, product, control, resolved.Value, now);
+            unitOfWork, command.GuildId, bank, customer, product, control, resolved.Value, now);
 
         if (!outcome.IsSuccess)
         {
-            return Result<AccountOpeningView>.Failure(outcome.Error!);
+            return Result<OpeningResult>.Failure(outcome.Error!);
         }
 
         unitOfWork.BusinessOperations.Add(operation);
@@ -173,11 +232,17 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
 
         Publish(unitOfWork, operation, outcome.Value, now);
 
-        return Result<AccountOpeningView>.Success(ToView(bank, outcome.Value));
+        AccountOpeningApplication? application = outcome.Value.Application;
+
+        return Result<OpeningResult>.Success(new OpeningResult(
+            ToView(bank, outcome.Value),
+            application?.Id,
+            application?.FundingPaymentOrderId));
     }
 
     private Result<AccountOpeningOutcome> OpenUnderContract(
         IBankingUnitOfWork unitOfWork,
+        ulong guildId,
         Bank bank,
         CustomerAccount customer,
         AccountProductSelection product,
@@ -223,12 +288,67 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
             control.CurrencyId,
             now);
 
-        if (advanced.IsSuccess)
+        if (!advanced.IsSuccess)
         {
-            unitOfWork.BankAdministration.UpdateOpeningApplication(application);
+            return advanced;
         }
 
+        if (application.Status == AccountOpeningApplicationStatus.AwaitingFunding)
+        {
+            Result reserved = ReserveFunding(
+                unitOfWork, guildId, bank, customer, contract, application, advanced.Value);
+
+            if (!reserved.IsSuccess)
+            {
+                return Result<AccountOpeningOutcome>.Failure(reserved.Error!);
+            }
+        }
+
+        unitOfWork.BankAdministration.UpdateOpeningApplication(application);
+
         return advanced;
+    }
+
+    private Result ReserveFunding(
+        IBankingUnitOfWork unitOfWork,
+        ulong guildId,
+        Bank bank,
+        CustomerAccount customer,
+        AccountOpeningContract contract,
+        AccountOpeningApplication application,
+        AccountOpeningOutcome outcome)
+    {
+        DepositAccount account = outcome.Account!;
+
+        if (unitOfWork.Branches.FindCodeById(account.BranchId) is not { } branchCode)
+        {
+            return Result.Failure(ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
+        }
+
+        string token = application.Id.Value.ToString();
+
+        Result<PaymentApplicationService.ReservedTransfer> reserved = payments.ReserveOpeningFunding(
+            unitOfWork,
+            new CreatePaymentOrderCommand(
+                guildId,
+                customer.Id,
+                application.FundingSourceDepositAccountId!.Value,
+                bank.InstitutionCode.Value,
+                branchCode,
+                account.AccountNumber.Value,
+                contract.RequiredFunding.Value,
+                null,
+                token),
+            IdempotencyKey.Create(FundingOperationType, token));
+
+        if (!reserved.IsSuccess)
+        {
+            return Result.Failure(reserved.Error!);
+        }
+
+        application.AttachFundingPayment(reserved.Value.OrderId);
+
+        return Result.Success();
     }
 
     private void Publish(
@@ -291,6 +411,6 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
             balance.AvailableBalance);
     }
 
-    private static Result<AccountOpeningView> Failure(ErrorCategory category, string code) =>
-        Result<AccountOpeningView>.Failure(category, code);
+    private static Result<OpeningResult> Failure(ErrorCategory category, string code) =>
+        Result<OpeningResult>.Failure(category, code);
 }

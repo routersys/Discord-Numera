@@ -68,7 +68,12 @@ public sealed class OpenDepositAccountTests
 
             harness.Registration = new CustomerAccountApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
-            harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Accounts = new BankAccountApplicationService(
+                gateway,
+                new PaymentApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
+                harness.Clock,
+                ids);
             harness.Queries = new BankQueryApplicationService(
                 new SqliteBankingReadGateway(harness.ConnectionFactory));
 

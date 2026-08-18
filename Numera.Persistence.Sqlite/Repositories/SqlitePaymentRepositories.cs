@@ -28,6 +28,16 @@ public sealed class SqliteBranchRepository : IBranchRepository
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? BranchId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)) : null;
     }
+
+    public string? FindCodeById(BranchId branchId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT branch_code FROM branches WHERE branch_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(branchId.Value));
+
+        return command.ExecuteScalar() as string;
+    }
 }
 
 public sealed class SqliteAccountingPeriodRepository : IAccountingPeriodRepository

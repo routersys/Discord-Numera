@@ -243,6 +243,8 @@ public interface IDepositAccountRepository
 public interface IBranchRepository
 {
     BranchId? FindIdByCode(BankId bankId, string branchCode);
+
+    string? FindCodeById(BranchId branchId);
 }
 
 public interface IAccountingPeriodRepository

@@ -68,9 +68,10 @@ public sealed class PaymentPreferenceApplicationTests
 
             harness.Registration = new CustomerAccountApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
-            harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
             harness.Payments = new PaymentApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
+            harness.Accounts = new BankAccountApplicationService(
+                gateway, harness.Payments, harness.Clock, ids);
 
             return harness;
         }

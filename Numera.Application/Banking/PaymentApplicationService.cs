@@ -315,7 +315,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             command.Kind, account.Id, account.AccountNumber.Suffix));
     }
 
-    private readonly record struct ReservedTransfer(PaymentOrderId OrderId, SettlementMode Mode);
+    internal readonly record struct ReservedTransfer(PaymentOrderId OrderId, SettlementMode Mode);
 
     private readonly record struct TransferRequest(
         InstitutionCode InstitutionCode,
@@ -375,11 +375,24 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         return true;
     }
 
+    internal Result<ReservedTransfer> ReserveOpeningFunding(
+        IBankingUnitOfWork unitOfWork,
+        CreatePaymentOrderCommand command,
+        IdempotencyKey idempotencyKey)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return TryValidate(command, out TransferRequest request, out ApplicationError? error)
+            ? ReserveFunds(unitOfWork, command, request, idempotencyKey, fundsAccountOpening: true)
+            : Result<ReservedTransfer>.Failure(error!.Category, error.Code, error.Field);
+    }
+
     private Result<ReservedTransfer> ReserveFunds(
         IBankingUnitOfWork unitOfWork,
         CreatePaymentOrderCommand command,
         TransferRequest request,
-        IdempotencyKey idempotencyKey)
+        IdempotencyKey idempotencyKey,
+        bool fundsAccountOpening = false)
     {
         BusinessOperation? existing = unitOfWork.BusinessOperations.Find(idempotencyKey);
         if (existing is not null)
@@ -458,7 +471,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 ErrorCategory.Validation, BankingErrorCodes.CurrencyMismatch);
         }
 
-        if (destination.Permits(AccountOperation.ExternalCredit) != StatusPermission.Allowed)
+        if (!AcceptsCredit(destination, fundsAccountOpening))
         {
             return Result<ReservedTransfer>.Failure(
                 ErrorCategory.AccountRestricted, BankingErrorCodes.DestinationAccountNotOperable);
@@ -730,7 +743,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             ToView(unitOfWork, order, plan.Quote.Amount, source, destination));
     }
 
-    private Result<PaymentOrderView> PostSourceDebit(
+    internal Result<PaymentOrderView> PostSourceDebit(
         IBankingUnitOfWork unitOfWork,
         PaymentOrderId paymentOrderId)
     {
@@ -1589,6 +1602,10 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             balance.PostedBalance,
             balance.AvailableBalance);
     }
+
+    private static bool AcceptsCredit(DepositAccount destination, bool fundsAccountOpening) =>
+        destination.Permits(AccountOperation.ExternalCredit) == StatusPermission.Allowed
+        || (fundsAccountOpening && destination.Status == DepositAccountStatus.Pending);
 
     private static Result<ReservedTransfer> Denied(TargetAccess access)
     {

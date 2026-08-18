@@ -22,6 +22,12 @@ public static partial class BankingErrorCodes
     public static string DepositAccountReopenNotAllowed { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 33);
 
+    public static string AccountOpeningApplicationNotFinalizable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 34);
+
+    public static string AccountOpeningFundingNotFinal { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 35);
+
     public static string AccountOpeningDisabled { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 30);
 
@@ -30,6 +36,9 @@ public static partial class BankingErrorCodes
 
     public static string OpeningFundingSourceUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 32);
+
+    public static string OpeningFundingInsufficient { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.InsufficientFunds, 30);
 
     public static string PrudentialPolicyUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 30);
