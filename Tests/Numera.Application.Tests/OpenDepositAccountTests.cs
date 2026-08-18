@@ -35,7 +35,7 @@ public sealed class OpenDepositAccountTests
 
         public CustomerAccountApplicationService Registration { get; private set; } = null!;
 
-        public DepositAccountApplicationService Accounts { get; private set; } = null!;
+        public BankAccountApplicationService Accounts { get; private set; } = null!;
 
         public EconomyScopeId Scope { get; } = EconomyScopeId.FromValue(EntityIdValue.FromBits(1));
 
@@ -62,7 +62,7 @@ public sealed class OpenDepositAccountTests
             SequentialIdGenerator ids = new(9_000);
 
             harness.Registration = new CustomerAccountApplicationService(gateway, harness.Clock, ids);
-            harness.Accounts = new DepositAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
 
             return harness;
         }
@@ -153,10 +153,10 @@ public sealed class OpenDepositAccountTests
             return result.Value.Id;
         }
 
-        public Task<Result<DepositAccountView>> OpenAsync(
+        public Task<Result<AccountOpeningView>> OpenAsync(
             CustomerAccountId customerAccountId,
             string institutionCode = Institution) =>
-            Accounts.OpenAsync(
+            Accounts.OpenDepositAccountAsync(
                 new OpenDepositAccountCommand(Scope, customerAccountId, institutionCode),
                 CancellationToken.None);
 
@@ -184,7 +184,7 @@ public sealed class OpenDepositAccountTests
         await using Harness harness = Harness.Create();
         CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
 
-        Result<DepositAccountView> result = await harness.OpenAsync(customer);
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer);
 
         Assert.IsTrue(result.IsSuccess);
         Assert.AreEqual(DepositAccountStatus.Active, result.Value.Status);
@@ -245,7 +245,7 @@ public sealed class OpenDepositAccountTests
         CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
         await harness.OpenAsync(customer);
 
-        Result<DepositAccountView> second = await harness.OpenAsync(customer);
+        Result<AccountOpeningView> second = await harness.OpenAsync(customer);
 
         Assert.IsTrue(second.IsSuccess);
         Assert.AreEqual(1L, harness.Count("deposit_accounts"));
@@ -258,8 +258,8 @@ public sealed class OpenDepositAccountTests
         CustomerAccountId first = await harness.RegisterAsync(FirstUser, "taro");
         CustomerAccountId second = await harness.RegisterAsync(SecondUser, "hanako");
 
-        Result<DepositAccountView> firstAccount = await harness.OpenAsync(first);
-        Result<DepositAccountView> secondAccount = await harness.OpenAsync(second);
+        Result<AccountOpeningView> firstAccount = await harness.OpenAsync(first);
+        Result<AccountOpeningView> secondAccount = await harness.OpenAsync(second);
 
         Assert.AreEqual("0000000001", firstAccount.Value.AccountNumber);
         Assert.AreEqual("0000000002", secondAccount.Value.AccountNumber);
@@ -272,7 +272,7 @@ public sealed class OpenDepositAccountTests
         await using Harness harness = Harness.Create();
         CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
 
-        Result<DepositAccountView> result = await harness.OpenAsync(customer, "NUM9999");
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer, "NUM9999");
 
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.BankNotFound, result.Error!.Code);
@@ -285,7 +285,7 @@ public sealed class OpenDepositAccountTests
         await using Harness harness = Harness.Create();
         CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
 
-        Result<DepositAccountView> result = await harness.OpenAsync(customer, "abc");
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer, "abc");
 
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(ErrorCategory.NotFound, result.Error!.Category);
@@ -301,7 +301,7 @@ public sealed class OpenDepositAccountTests
         await using Harness harness = Harness.Create(bankStatus: status);
         CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
 
-        Result<DepositAccountView> result = await harness.OpenAsync(customer);
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer);
 
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.BankNotOperating, result.Error!.Code);
@@ -314,7 +314,7 @@ public sealed class OpenDepositAccountTests
         await using Harness harness = Harness.Create(withProduct: false);
         CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
 
-        Result<DepositAccountView> result = await harness.OpenAsync(customer);
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer);
 
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(ErrorCategory.BankUnavailable, result.Error!.Category);
@@ -325,7 +325,7 @@ public sealed class OpenDepositAccountTests
     {
         await using Harness harness = Harness.Create();
 
-        Result<DepositAccountView> result = await harness.OpenAsync(
+        Result<AccountOpeningView> result = await harness.OpenAsync(
             CustomerAccountId.FromValue(EntityIdValue.FromBits(999)));
 
         Assert.IsFalse(result.IsSuccess);
@@ -351,7 +351,7 @@ public sealed class OpenDepositAccountTests
         await using Harness harness = Harness.Create();
         CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
 
-        Task<Result<DepositAccountView>>[] attempts =
+        Task<Result<AccountOpeningView>>[] attempts =
         [
             harness.OpenAsync(customer),
             harness.OpenAsync(customer),
@@ -359,7 +359,7 @@ public sealed class OpenDepositAccountTests
             harness.OpenAsync(customer),
         ];
 
-        Result<DepositAccountView>[] results = await Task.WhenAll(attempts);
+        Result<AccountOpeningView>[] results = await Task.WhenAll(attempts);
 
         Assert.AreEqual(1L, harness.Count("deposit_accounts"));
         Assert.AreEqual(1L, harness.Count("ledger_balance_projections"));
@@ -376,10 +376,10 @@ public sealed class OpenDepositAccountTests
 
         Assert.AreEqual(2L, harness.Count("outbox_events"));
         Assert.AreEqual(
-            DepositAccountApplicationService.OpenedEventType,
+            BankAccountApplicationService.OpenedEventType,
             harness.ReadText($"""
                 SELECT event_type FROM outbox_events
-                WHERE event_type = '{DepositAccountApplicationService.OpenedEventType}';
+                WHERE event_type = '{BankAccountApplicationService.OpenedEventType}';
                 """));
     }
 

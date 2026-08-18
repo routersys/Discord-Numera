@@ -37,7 +37,7 @@ public sealed class PaymentPreferenceApplicationTests
 
         public CustomerAccountApplicationService Registration { get; private set; } = null!;
 
-        public DepositAccountApplicationService Accounts { get; private set; } = null!;
+        public BankAccountApplicationService Accounts { get; private set; } = null!;
 
         public PaymentApplicationService Payments { get; private set; } = null!;
 
@@ -65,7 +65,7 @@ public sealed class PaymentPreferenceApplicationTests
             SequentialIdGenerator ids = new(11_000);
 
             harness.Registration = new CustomerAccountApplicationService(gateway, harness.Clock, ids);
-            harness.Accounts = new DepositAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
             harness.Payments = new PaymentApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
 
@@ -161,11 +161,11 @@ public sealed class PaymentPreferenceApplicationTests
             return result.Value.Id;
         }
 
-        public async Task<DepositAccountView> OpenAsync(
+        public async Task<AccountOpeningView> OpenAsync(
             CustomerAccountId customerAccountId,
             string institutionCode = Institution)
         {
-            Result<DepositAccountView> result = await Accounts.OpenAsync(
+            Result<AccountOpeningView> result = await Accounts.OpenDepositAccountAsync(
                 new OpenDepositAccountCommand(Scope, customerAccountId, institutionCode),
                 CancellationToken.None);
 
@@ -213,8 +213,8 @@ public sealed class PaymentPreferenceApplicationTests
         await using Harness harness = Harness.Create();
         CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
         CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
-        DepositAccountView source = await harness.OpenAsync(payer);
-        DepositAccountView destination = await harness.OpenAsync(payee);
+        AccountOpeningView source = await harness.OpenAsync(payer);
+        AccountOpeningView destination = await harness.OpenAsync(payee);
 
         Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
 
@@ -230,8 +230,8 @@ public sealed class PaymentPreferenceApplicationTests
         await using Harness harness = Harness.Create();
         CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
         CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
-        DepositAccountView source = await harness.OpenAsync(payer);
-        DepositAccountView destination = await harness.OpenAsync(payee);
+        AccountOpeningView source = await harness.OpenAsync(payer);
+        AccountOpeningView destination = await harness.OpenAsync(payee);
 
         Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
         TransferDestinationCandidate candidate = result.Value.Candidates[0];
@@ -246,8 +246,8 @@ public sealed class PaymentPreferenceApplicationTests
         await using Harness harness = Harness.Create();
         CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
         CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
-        DepositAccountView source = await harness.OpenAsync(payer);
-        DepositAccountView destination = await harness.OpenAsync(payee);
+        AccountOpeningView source = await harness.OpenAsync(payer);
+        AccountOpeningView destination = await harness.OpenAsync(payee);
         harness.Execute($"""
             UPDATE deposit_accounts SET public_receiving_enabled = 0, version = version + 1
             WHERE account_number = '{destination.AccountNumber}';
@@ -266,8 +266,8 @@ public sealed class PaymentPreferenceApplicationTests
         await using Harness harness = Harness.Create();
         CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
         CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
-        DepositAccountView source = await harness.OpenAsync(payer);
-        DepositAccountView destination = await harness.OpenAsync(payee);
+        AccountOpeningView source = await harness.OpenAsync(payer);
+        AccountOpeningView destination = await harness.OpenAsync(payee);
         harness.Execute($"""
             UPDATE deposit_accounts
             SET status = 'CLOSED_USER', closure_reason = 'USER', closed_at = 1, version = version + 1
@@ -285,7 +285,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView source = await harness.OpenAsync(payer);
+        AccountOpeningView source = await harness.OpenAsync(payer);
 
         Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OtherUser);
 
@@ -299,7 +299,7 @@ public sealed class PaymentPreferenceApplicationTests
         await using Harness harness = Harness.Create();
         CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
         CustomerAccountId payee = await harness.RegisterAsync(OtherUser, "hanako");
-        DepositAccountView source = await harness.OpenAsync(payer);
+        AccountOpeningView source = await harness.OpenAsync(payer);
         await harness.OpenAsync(payee);
 
         Result<TransferPreparationView> result = await harness.PrepareAsync(payee, source.Id, OwnerUser);
@@ -314,7 +314,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId payer = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView source = await harness.OpenAsync(payer);
+        AccountOpeningView source = await harness.OpenAsync(payer);
 
         Result<TransferPreparationView> result = await harness.PrepareAsync(payer, source.Id, OwnerUser);
 
@@ -327,7 +327,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView account = await harness.OpenAsync(owner);
+        AccountOpeningView account = await harness.OpenAsync(owner);
 
         Result<PaymentPreferenceView> result = await harness.SetAsync(owner, account.Id);
 
@@ -343,7 +343,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView account = await harness.OpenAsync(owner);
+        AccountOpeningView account = await harness.OpenAsync(owner);
 
         Result<PaymentPreferenceView> result = await harness.SetAsync(owner, account.Id);
 
@@ -356,8 +356,8 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create(withSecondBank: true);
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView first = await harness.OpenAsync(owner);
-        DepositAccountView second = await harness.OpenAsync(owner, OtherInstitution);
+        AccountOpeningView first = await harness.OpenAsync(owner);
+        AccountOpeningView second = await harness.OpenAsync(owner, OtherInstitution);
 
         await harness.SetAsync(owner, first.Id);
         Result<PaymentPreferenceView> result = await harness.SetAsync(owner, second.Id);
@@ -372,7 +372,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView account = await harness.OpenAsync(owner);
+        AccountOpeningView account = await harness.OpenAsync(owner);
 
         await harness.SetAsync(owner, account.Id, PaymentPreferenceKind.DefaultPayment);
         await harness.SetAsync(owner, account.Id, PaymentPreferenceKind.SalaryReceipt);
@@ -385,7 +385,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView account = await harness.OpenAsync(owner);
+        AccountOpeningView account = await harness.OpenAsync(owner);
 
         await harness.SetAsync(owner, account.Id);
         harness.Execute("UPDATE payment_preferences SET disabled_at = 1, version = version + 1;");
@@ -403,7 +403,7 @@ public sealed class PaymentPreferenceApplicationTests
         await using Harness harness = Harness.Create();
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
         CustomerAccountId other = await harness.RegisterAsync(OtherUser, "hanako");
-        DepositAccountView account = await harness.OpenAsync(owner);
+        AccountOpeningView account = await harness.OpenAsync(owner);
 
         Result<PaymentPreferenceView> result = await harness.SetAsync(other, account.Id);
 
@@ -418,7 +418,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView account = await harness.OpenAsync(owner);
+        AccountOpeningView account = await harness.OpenAsync(owner);
         harness.Execute("UPDATE deposit_accounts SET status = 'FROZEN', version = version + 1;");
 
         Result<PaymentPreferenceView> result = await harness.SetAsync(owner, account.Id);
@@ -433,7 +433,7 @@ public sealed class PaymentPreferenceApplicationTests
     {
         await using Harness harness = Harness.Create();
         CustomerAccountId owner = await harness.RegisterAsync(OwnerUser, "taro");
-        DepositAccountView account = await harness.OpenAsync(owner);
+        AccountOpeningView account = await harness.OpenAsync(owner);
         harness.Execute("UPDATE deposit_accounts SET status = 'DORMANT', version = version + 1;");
 
         Result<PaymentPreferenceView> result = await harness.SetAsync(

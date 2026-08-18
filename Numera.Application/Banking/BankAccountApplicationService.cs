@@ -12,7 +12,7 @@ public sealed record OpenDepositAccountCommand(
     CustomerAccountId CustomerAccountId,
     string InstitutionCode);
 
-public sealed record DepositAccountView(
+public sealed record AccountOpeningView(
     DepositAccountId Id,
     string InstitutionCode,
     string AccountNumber,
@@ -20,14 +20,14 @@ public sealed record DepositAccountView(
     MoneyMinor PostedBalance,
     MoneyMinor AvailableBalance);
 
-public interface IDepositAccountApplicationService
+public interface IBankAccountApplicationService
 {
-    Task<Result<DepositAccountView>> OpenAsync(
+    Task<Result<AccountOpeningView>> OpenDepositAccountAsync(
         OpenDepositAccountCommand command,
         CancellationToken cancellationToken);
 }
 
-public sealed class DepositAccountApplicationService : IDepositAccountApplicationService
+public sealed class BankAccountApplicationService : IBankAccountApplicationService
 {
     public const string OperationType = "ACCOUNT_OPEN";
     public const string OpenedEventType = "DEPOSIT_ACCOUNT_OPENED";
@@ -39,7 +39,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
-    public DepositAccountApplicationService(
+    public BankAccountApplicationService(
         IBankingWriteGateway writeGateway,
         IClock clock,
         IIdGenerator idGenerator)
@@ -53,7 +53,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
         this.idGenerator = idGenerator;
     }
 
-    public Task<Result<DepositAccountView>> OpenAsync(
+    public Task<Result<AccountOpeningView>> OpenDepositAccountAsync(
         OpenDepositAccountCommand command,
         CancellationToken cancellationToken)
     {
@@ -61,7 +61,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
 
         if (!InstitutionCode.TryParse(command.InstitutionCode, out InstitutionCode institutionCode))
         {
-            return Task.FromResult(Result<DepositAccountView>.Failure(
+            return Task.FromResult(Result<AccountOpeningView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.BankNotFound, nameof(command.InstitutionCode)));
         }
 
@@ -74,7 +74,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
             cancellationToken);
     }
 
-    private Result<DepositAccountView> Open(
+    private Result<AccountOpeningView> Open(
         IBankingUnitOfWork unitOfWork,
         OpenDepositAccountCommand command,
         InstitutionCode institutionCode,
@@ -96,7 +96,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
         if (existing is not null)
         {
             return unitOfWork.BusinessOperations.Find(idempotencyKey) is not null
-                ? Result<DepositAccountView>.Success(ToView(unitOfWork, bank, existing))
+                ? Result<AccountOpeningView>.Success(ToView(unitOfWork, bank, existing))
                 : Failure(ErrorCategory.Conflict, BankingErrorCodes.DepositAccountAlreadyExists);
         }
 
@@ -130,7 +130,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
 
         if (!resolved.IsSuccess)
         {
-            return Result<DepositAccountView>.Failure(resolved.Error!);
+            return Result<AccountOpeningView>.Failure(resolved.Error!);
         }
 
         BusinessOperation operation = BusinessOperation.Start(
@@ -148,7 +148,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
 
         if (!outcome.IsSuccess)
         {
-            return Result<DepositAccountView>.Failure(outcome.Error!);
+            return Result<AccountOpeningView>.Failure(outcome.Error!);
         }
 
         unitOfWork.BusinessOperations.Add(operation);
@@ -157,7 +157,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
 
         Publish(unitOfWork, operation, outcome.Value, now);
 
-        return Result<DepositAccountView>.Success(ToView(bank, outcome.Value));
+        return Result<AccountOpeningView>.Success(ToView(bank, outcome.Value));
     }
 
     private Result<AccountOpeningOutcome> OpenWithoutContract(
@@ -258,16 +258,16 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
             now));
     }
 
-    private static DepositAccountView ToView(Bank bank, AccountOpeningOutcome outcome) =>
+    private static AccountOpeningView ToView(Bank bank, AccountOpeningOutcome outcome) =>
         outcome.Account is { } account
-            ? new DepositAccountView(
+            ? new AccountOpeningView(
                 account.Id,
                 bank.InstitutionCode.Value,
                 account.AccountNumber.Value,
                 account.Status,
                 MoneyMinor.Zero,
                 MoneyMinor.Zero)
-            : new DepositAccountView(
+            : new AccountOpeningView(
                 DepositAccountId.FromValue(EntityIdValue.Empty),
                 bank.InstitutionCode.Value,
                 string.Empty,
@@ -275,7 +275,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
                 MoneyMinor.Zero,
                 MoneyMinor.Zero);
 
-    private static DepositAccountView ToView(
+    private static AccountOpeningView ToView(
         IBankingUnitOfWork unitOfWork,
         Bank bank,
         DepositAccount account)
@@ -283,7 +283,7 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
         LedgerBalance balance = unitOfWork.LedgerAccounts.FindProjection(account.LedgerAccountId)
             ?? LedgerBalance.Empty;
 
-        return new DepositAccountView(
+        return new AccountOpeningView(
             account.Id,
             bank.InstitutionCode.Value,
             account.AccountNumber.Value,
@@ -292,6 +292,6 @@ public sealed class DepositAccountApplicationService : IDepositAccountApplicatio
             balance.AvailableBalance);
     }
 
-    private static Result<DepositAccountView> Failure(ErrorCategory category, string code) =>
-        Result<DepositAccountView>.Failure(category, code);
+    private static Result<AccountOpeningView> Failure(ErrorCategory category, string code) =>
+        Result<AccountOpeningView>.Failure(category, code);
 }

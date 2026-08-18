@@ -7,12 +7,14 @@ public sealed class CommandApiClosureTests
 {
     private static readonly string[] ServicesOutsideSection52 =
     [
-        "IDepositAccountApplicationService",
         "ISuggestionApplicationService",
     ];
 
     private static readonly string[] MembersAwaitingImplementation =
     [
+        "IBankAccountApplicationService.CloseDepositAccountAsync",
+        "IBankAccountApplicationService.ReactivateDepositAccountAsync",
+        "IBankAccountApplicationService.UpdateLimitsAsync",
         "IBankAdministrationApplicationService.RetireBankAsync",
         "IBankAdministrationApplicationService.StartCreateBankAsync",
         "IBankAdministrationApplicationService.UpdateBankPolicyAsync",

@@ -42,7 +42,7 @@ public sealed class TransferTests
 
         public CustomerAccountApplicationService Registration { get; private set; } = null!;
 
-        public DepositAccountApplicationService Accounts { get; private set; } = null!;
+        public BankAccountApplicationService Accounts { get; private set; } = null!;
 
         public PaymentApplicationService Payments { get; private set; } = null!;
 
@@ -75,7 +75,7 @@ public sealed class TransferTests
             SequentialIdGenerator ids = new(9_000);
 
             harness.Registration = new CustomerAccountApplicationService(gateway, harness.Clock, ids);
-            harness.Accounts = new DepositAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
             harness.Payments = new PaymentApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Maintenance = new SettlementMaintenanceService(
@@ -626,11 +626,11 @@ public sealed class TransferTests
             return result.Value.Id;
         }
 
-        public async Task<DepositAccountView> OpenAsync(
+        public async Task<AccountOpeningView> OpenAsync(
             CustomerAccountId customerAccountId,
             string institutionCode = Institution)
         {
-            Result<DepositAccountView> result = await Accounts.OpenAsync(
+            Result<AccountOpeningView> result = await Accounts.OpenDepositAccountAsync(
                 new OpenDepositAccountCommand(Scope, customerAccountId, institutionCode),
                 CancellationToken.None);
 
@@ -671,17 +671,17 @@ public sealed class TransferTests
 
     private sealed record Parties(
         CustomerAccountId Payer,
-        DepositAccountView Source,
+        AccountOpeningView Source,
         CustomerAccountId Payee,
-        DepositAccountView Destination);
+        AccountOpeningView Destination);
 
     private static async Task<Parties> SetupAsync(Harness harness, long funding = 1_000)
     {
         CustomerAccountId payer = await harness.RegisterAsync(PayerUser, "taro");
         CustomerAccountId payee = await harness.RegisterAsync(PayeeUser, "hanako");
 
-        DepositAccountView source = await harness.OpenAsync(payer);
-        DepositAccountView destination = await harness.OpenAsync(payee);
+        AccountOpeningView source = await harness.OpenAsync(payer);
+        AccountOpeningView destination = await harness.OpenAsync(payee);
 
         harness.Fund(source.Id, funding);
 
@@ -842,7 +842,7 @@ public sealed class TransferTests
     private const int SettlementPayableSeed = 105;
     private const int IncomingSuspenseSeed = 108;
 
-    private static async Task<DepositAccountView> RemoteAccountAsync(Harness harness)
+    private static async Task<AccountOpeningView> RemoteAccountAsync(Harness harness)
     {
         CustomerAccountId remote = await harness.RegisterAsync(710_000_000_000_000_003UL, "jiro");
         return await harness.OpenAsync(remote, OtherInstitution);
@@ -851,7 +851,7 @@ public sealed class TransferTests
     private static Task<Result<PaymentOrderView>> InterbankTransferAsync(
         Harness harness,
         Parties parties,
-        DepositAccountView remote,
+        AccountOpeningView remote,
         long amount,
         string token = "interaction-1") =>
         harness.TransferAsync(
@@ -863,7 +863,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -880,7 +880,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -898,7 +898,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -915,7 +915,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -938,7 +938,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(100);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -960,7 +960,7 @@ public sealed class TransferTests
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
         harness.PublishTransferFee(PricedScheduleSeed, fixedMinor: 5, feeType: "INTERBANK_TRANSFER");
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -977,7 +977,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         for (int attempt = 0; attempt < 3; attempt++)
         {
@@ -999,7 +999,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(100);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> queued = await InterbankTransferAsync(harness, parties, remote, 300);
         Assert.AreEqual(PaymentOrderStatus.Queued, queued.Value.Status);
@@ -1022,7 +1022,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(100);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         SettlementMaintenanceReport report = await harness.Maintenance.ProcessQueuedAsync(
@@ -1040,7 +1040,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         SettlementMaintenanceReport report = await harness.Maintenance.ProcessQueuedAsync(
@@ -1056,7 +1056,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(100);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         harness.FundReserve(5_000);
@@ -1088,7 +1088,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(100);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         BusinessOperationId operation = QueuedOperation(harness);
@@ -1110,7 +1110,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(100);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         BusinessOperationId operation = QueuedOperation(harness);
@@ -1138,7 +1138,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(100);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         BusinessOperationId operation = QueuedOperation(harness);
@@ -1158,7 +1158,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         BusinessOperationId operation = BusinessOperationId.FromValue(
@@ -1178,7 +1178,7 @@ public sealed class TransferTests
     {
         await using Harness harness = Harness.Create(withSecondBank: true);
         Parties parties = await SetupAsync(harness);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 100);
 
@@ -1200,7 +1200,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
         harness.MakeDestinationIndirect();
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
@@ -1217,7 +1217,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
         harness.MakeDestinationIndirect();
 
         await InterbankTransferAsync(harness, parties, remote, 300);
@@ -1236,7 +1236,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
         harness.MakeDestinationIndirect();
 
         await InterbankTransferAsync(harness, parties, remote, 300);
@@ -1253,7 +1253,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
         harness.MakeDestinationIndirect();
         harness.SuspendDestinationAgent();
 
@@ -1887,7 +1887,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -1903,7 +1903,7 @@ public sealed class TransferTests
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
         harness.PublishPaymentNetwork("RTGS", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -1919,7 +1919,7 @@ public sealed class TransferTests
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: 300);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -1937,7 +1937,7 @@ public sealed class TransferTests
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: 300);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 299);
 
@@ -1951,7 +1951,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -1966,7 +1966,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -1981,7 +1981,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -1997,7 +1997,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -2013,7 +2013,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -2030,7 +2030,7 @@ public sealed class TransferTests
         await using Harness harness = Harness.Create(withSettlement: true);
         Parties parties = await SetupAsync(harness);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         await InterbankTransferAsync(harness, parties, remote, 200, "interaction-2");
@@ -2049,7 +2049,7 @@ public sealed class TransferTests
         harness.FundReserve(5_000);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
         harness.SuspendPaymentNetwork();
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         Result<PaymentOrderView> result = await InterbankTransferAsync(harness, parties, remote, 300);
 
@@ -2081,7 +2081,7 @@ public sealed class TransferTests
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(reserve);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, amount);
 
@@ -2186,7 +2186,7 @@ public sealed class TransferTests
         Assert.AreEqual(0L, harness.LedgerBalanceOf(ClearingPayableSeed));
     }
 
-    private static async Task<(Harness Harness, DepositAccountView Remote)> PreCreditAsync(
+    private static async Task<(Harness Harness, AccountOpeningView Remote)> PreCreditAsync(
         long exposureLimit,
         long prefundBalance,
         long amount)
@@ -2195,7 +2195,7 @@ public sealed class TransferTests
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
         harness.PublishPreCreditNetwork(exposureLimit, prefundBalance);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, amount);
 
@@ -2205,7 +2205,7 @@ public sealed class TransferTests
     [TestMethod]
     public async Task CoveredPreCreditCreditsTheBeneficiaryAtAcceptance()
     {
-        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 1_000, 300);
+        (Harness harness, AccountOpeningView remote) = await PreCreditAsync(10_000, 1_000, 300);
 
         await using (harness)
         {
@@ -2218,7 +2218,7 @@ public sealed class TransferTests
     [TestMethod]
     public async Task PreCreditDoesNotImplyInterbankFinality()
     {
-        (Harness harness, DepositAccountView _) = await PreCreditAsync(10_000, 1_000, 300);
+        (Harness harness, AccountOpeningView _) = await PreCreditAsync(10_000, 1_000, 300);
 
         await using (harness)
         {
@@ -2232,7 +2232,7 @@ public sealed class TransferTests
     [TestMethod]
     public async Task PreCreditedPaymentCompletesWithoutASecondBeneficiaryCredit()
     {
-        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 1_000, 300);
+        (Harness harness, AccountOpeningView remote) = await PreCreditAsync(10_000, 1_000, 300);
 
         await using (harness)
         {
@@ -2248,7 +2248,7 @@ public sealed class TransferTests
     [TestMethod]
     public async Task PrefundShortfallKeepsTheBeneficiaryUncredited()
     {
-        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 299, 300);
+        (Harness harness, AccountOpeningView remote) = await PreCreditAsync(10_000, 299, 300);
 
         await using (harness)
         {
@@ -2269,7 +2269,7 @@ public sealed class TransferTests
             Parties parties = await SetupAsync(harness, funding: 5_000);
             harness.FundReserve(5_000);
             harness.PublishPreCreditNetwork(exposureLimit: 300, prefundBalance: 10_000);
-            DepositAccountView remote = await RemoteAccountAsync(harness);
+            AccountOpeningView remote = await RemoteAccountAsync(harness);
 
             await InterbankTransferAsync(harness, parties, remote, 300);
             await InterbankTransferAsync(harness, parties, remote, 100, "interaction-2");
@@ -2282,7 +2282,7 @@ public sealed class TransferTests
     [TestMethod]
     public async Task UncoveredPreCreditIsPostedAfterFinalSettlement()
     {
-        (Harness harness, DepositAccountView remote) = await PreCreditAsync(10_000, 0, 300);
+        (Harness harness, AccountOpeningView remote) = await PreCreditAsync(10_000, 0, 300);
 
         await using (harness)
         {
@@ -2302,7 +2302,7 @@ public sealed class TransferTests
         Parties parties = await SetupAsync(harness);
         harness.FundReserve(5_000);
         harness.PublishPaymentNetwork("CLEARING", rtgsThreshold: null);
-        DepositAccountView remote = await RemoteAccountAsync(harness);
+        AccountOpeningView remote = await RemoteAccountAsync(harness);
 
         await InterbankTransferAsync(harness, parties, remote, 300);
         harness.LockClearingCycles();
