@@ -142,7 +142,7 @@ public static class TextCatalogKeys
     public const string OperationFooter = "embed.footer";
 }
 
-public static class CanonicalTextCatalog
+public static partial class CanonicalTextCatalog
 {
     public static IReadOnlyDictionary<string, string> Entries { get; } =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -176,5 +176,15 @@ public static class CanonicalTextCatalog
             [TextCatalogKeys.OperationFooter] = "操作ID: {operationPublicId}",
         };
 
-    public static TextCatalog Create() => TextCatalog.Create(Entries);
+    public static TextCatalog Create()
+    {
+        Dictionary<string, string> merged = new(Entries, StringComparer.Ordinal);
+
+        foreach ((string key, string text) in ViewEntries)
+        {
+            merged[key] = text;
+        }
+
+        return TextCatalog.Create(merged);
+    }
 }

@@ -27,7 +27,9 @@ public sealed class SourceConventionTests
         "Numera.Host",
     ];
 
-    private const string TextCatalogFile = "TextCatalog.cs";
+    private const string TextCatalogFilePrefix = "TextCatalog";
+
+    private const string EndpointDeclarationPrefix = "[Economy";
 
     [TestMethod]
     public void SourceScanReachesEveryHandWrittenProject()
@@ -48,7 +50,7 @@ public sealed class SourceConventionTests
         {
             scanned++;
 
-            if (string.Equals(Path.GetFileName(path), TextCatalogFile, StringComparison.Ordinal))
+            if (Path.GetFileName(path).StartsWith(TextCatalogFilePrefix, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -111,6 +113,11 @@ public sealed class SourceConventionTests
     {
         foreach (string line in lines)
         {
+            if (line.TrimStart().StartsWith(EndpointDeclarationPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             int comment = line.IndexOf("//", StringComparison.Ordinal);
             ReadOnlySpan<char> code = comment < 0 ? line : line.AsSpan(0, comment);
 

@@ -211,8 +211,13 @@ public sealed class GeneratedCommandManifestProviderTests
     {
         GeneratedCommandManifestProvider provider = new();
 
-        Assert.AreEqual(
-            EconomyCommandManifest.Declarations.Length,
-            provider.PrimaryCommands().Count + provider.ControlCommands().Count);
+        int roots = EconomyCommandManifest.Declarations
+            .Select(static declaration => declaration.GroupPath.Length == 0
+                ? declaration.Name
+                : declaration.GroupPath[0].Name)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+
+        Assert.AreEqual(roots, provider.PrimaryCommands().Count + provider.ControlCommands().Count);
     }
 }
