@@ -295,7 +295,7 @@ public interface IBankPolicyRepository
     MoneyMinor? FindMaximumActiveHolds(BankPolicyVersionId bankPolicyVersionId);
 }
 
-public interface IAccountLimitPreferenceRepository
+public partial interface IAccountLimitPreferenceRepository
 {
     TransferLimitSet? FindTransferLimits(DepositAccountId depositAccountId);
 }

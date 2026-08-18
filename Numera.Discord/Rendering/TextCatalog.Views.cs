@@ -1,6 +1,6 @@
 namespace Numera.Discord.Rendering;
 
-public static class ViewKeys
+internal static class ViewKeys
 {
     public const string AccountRegistered = "view.account.registered";
     public const string AccountStatus = "view.account.status";
@@ -13,6 +13,7 @@ public static class ViewKeys
     public const string ManageCurrencyCreated = "view.manage.currency_created";
     public const string ManageCurrencyIssued = "view.manage.currency_issued";
     public const string ManageCurrencyBurned = "view.manage.currency_burned";
+    public const string BankAccountClosing = "view.bank.closing";
     public const string ManagePanel = "view.manage.panel";
     public const string SystemPanel = "view.system.panel";
     public const string SystemCommandsSynced = "view.system.commands_synced";
@@ -73,6 +74,8 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageCurrencyBurned + ".title"] = "通貨を償却しました",
             [ViewKeys.ManageCurrencyBurned + ".description"] =
                 "{amount} を償却しました。発行済のベースマネーは {baseMoneySupply} です。",
+            [ViewKeys.BankAccountClosing + ".title"] = "解約を申し込みました",
+            [ViewKeys.BankAccountClosing + ".description"] = "口座の解約手続を開始しました。",
             [ViewKeys.ManagePanel + ".title"] = "管理メニュー",
             [ViewKeys.ManagePanel + ".description"] = "銀行と通貨の管理は /manage の各サブコマンドから行います。",
             [ViewKeys.SystemPanel + ".title"] = "システムメニュー",

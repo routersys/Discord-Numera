@@ -25,9 +25,21 @@ public interface IBankAccountApplicationService
     Task<Result<AccountOpeningView>> OpenDepositAccountAsync(
         OpenDepositAccountCommand command,
         CancellationToken cancellationToken);
+
+    Task<Result<AccountLimitPreferenceView>> UpdateLimitsAsync(
+        UpdateAccountLimitPreferenceCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result> ReactivateDepositAccountAsync(
+        ReactivateDepositAccountCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result> CloseDepositAccountAsync(
+        CloseDepositAccountCommand command,
+        CancellationToken cancellationToken);
 }
 
-public sealed class BankAccountApplicationService : IBankAccountApplicationService
+public sealed partial class BankAccountApplicationService : IBankAccountApplicationService
 {
     public const string OperationType = "ACCOUNT_OPEN";
     public const string OpenedEventType = "DEPOSIT_ACCOUNT_OPENED";

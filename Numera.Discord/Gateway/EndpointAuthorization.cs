@@ -2,7 +2,7 @@ using Numera.Application.Common;
 
 namespace Numera.Discord.Gateway;
 
-public static class EndpointAuthorization
+internal static class EndpointAuthorization
 {
     public static Abstractions.AuthorizationLevel ToContract(AuthorizationLevel level) => level switch
     {

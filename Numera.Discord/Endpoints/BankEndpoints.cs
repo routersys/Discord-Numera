@@ -133,6 +133,42 @@ public sealed class BankEndpoints : IEconomyEndpoint
             });
     }
 
+
+    [EconomySlashCommand("close", "口座の解約を申し込みます。")]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
+    public async Task<DiscordEndpointResponse> CloseAsync(
+        DiscordEndpointContext context,
+        [EconomyOption("account", "解約する口座を選びます。", true)] string account,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        Result<CustomerAccountStatusView> customer = await ResolveCustomerAsync(context, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!customer.IsSuccess)
+        {
+            return EndpointFailures.From(customer.Error!);
+        }
+
+        if (!DepositAccountReference.TryParse(account, out Numera.Domain.Common.DepositAccountId id))
+        {
+            return EndpointFailures.From(
+                ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+        }
+
+        Result result = await accounts
+            .CloseDepositAccountAsync(
+                new CloseDepositAccountCommand(customer.Value.Id, id),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? DiscordEndpointResponse.Message(
+                ViewKeys.BankAccountClosing,
+                new Dictionary<string, string>(StringComparer.Ordinal))
+            : EndpointFailures.From(result.Error!);
+    }
     private Task<Result<CustomerAccountStatusView>> ResolveCustomerAsync(
         DiscordEndpointContext context,
         CancellationToken cancellationToken) =>

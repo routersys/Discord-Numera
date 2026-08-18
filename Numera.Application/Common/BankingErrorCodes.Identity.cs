@@ -11,4 +11,6 @@ public static partial class BankingErrorCodes
     public static string LinkGrantExpired { get; } = ErrorCodeFormat.Compose(ErrorCategory.OperationExpired, 50);
 
     public static string LastLinkCannotBeRemoved { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 50);
+
+    public static string TransferLimitInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 50);
 }

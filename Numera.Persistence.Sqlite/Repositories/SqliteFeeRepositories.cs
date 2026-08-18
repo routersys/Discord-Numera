@@ -86,6 +86,29 @@ public sealed class SqliteAccountLimitPreferenceRepository : IAccountLimitPrefer
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? TransferLimitReader.Read(reader) : null;
     }
+
+    public void Set(DepositAccountId depositAccountId, TransferLimitSet limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO account_limit_preferences(
+                deposit_account_id, per_transfer_limit_minor, daily_outgoing_limit_minor, version)
+            VALUES($id, $perTransfer, $daily, 1)
+            ON CONFLICT(deposit_account_id) DO UPDATE SET
+                per_transfer_limit_minor = $perTransfer,
+                daily_outgoing_limit_minor = $daily,
+                version = account_limit_preferences.version + 1;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(depositAccountId.Value));
+        command.Parameters.AddWithValue(
+            "$perTransfer", (object?)limits.PerTransfer?.Value ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$daily", (object?)limits.DailyOutgoing?.Value ?? DBNull.Value);
+
+        command.ExecuteNonQuery();
+    }
 }
 
 internal static class TransferLimitReader

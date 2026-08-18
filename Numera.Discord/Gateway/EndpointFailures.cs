@@ -3,7 +3,7 @@ using Numera.Discord.Abstractions;
 
 namespace Numera.Discord.Gateway;
 
-public static class EndpointFailures
+internal static class EndpointFailures
 {
     public static DiscordEndpointResponse From(ApplicationError error)
     {
