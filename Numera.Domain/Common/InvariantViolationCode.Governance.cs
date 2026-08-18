@@ -26,4 +26,5 @@ public static partial class InvariantViolationCode
     public const string LoanContractStatusUnknown = "LOAN_CONTRACT_STATUS_UNKNOWN";
     public const string LoanScheduleTransitionInvalid = "LOAN_SCHEDULE_TRANSITION_INVALID";
     public const string LoanScheduleStatusUnknown = "LOAN_SCHEDULE_STATUS_UNKNOWN";
+    public const string CurrencyTrustTierUnknown = "CURRENCY_TRUST_TIER_UNKNOWN";
 }

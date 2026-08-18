@@ -545,3 +545,102 @@ public readonly record struct FxSettlementLegComponentId(EntityIdValue Value) : 
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct PresentationProfileVersionId(EntityIdValue Value) : IEntityId<PresentationProfileVersionId>
+{
+    public static string EntityName => "presentation_profile_version";
+
+    public static PresentationProfileVersionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct CurrencyTrustPolicyVersionId(EntityIdValue Value) : IEntityId<CurrencyTrustPolicyVersionId>
+{
+    public static string EntityName => "currency_trust_policy_version";
+
+    public static CurrencyTrustPolicyVersionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct CurrencyTrustDesignationId(EntityIdValue Value) : IEntityId<CurrencyTrustDesignationId>
+{
+    public static string EntityName => "currency_trust_designation";
+
+    public static CurrencyTrustDesignationId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct MonetaryAuthorityId(EntityIdValue Value) : IEntityId<MonetaryAuthorityId>
+{
+    public static string EntityName => "monetary_authority";
+
+    public static MonetaryAuthorityId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct OfficialReservePortfolioId(EntityIdValue Value) : IEntityId<OfficialReservePortfolioId>
+{
+    public static string EntityName => "official_reserve_portfolio";
+
+    public static OfficialReservePortfolioId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct OfficialReservePositionId(EntityIdValue Value) : IEntityId<OfficialReservePositionId>
+{
+    public static string EntityName => "official_reserve_position";
+
+    public static OfficialReservePositionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxInterventionMandateId(EntityIdValue Value) : IEntityId<FxInterventionMandateId>
+{
+    public static string EntityName => "fx_intervention_mandate";
+
+    public static FxInterventionMandateId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct LoanContractId(EntityIdValue Value) : IEntityId<LoanContractId>
+{
+    public static string EntityName => "loan_contract";
+
+    public static LoanContractId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct LoanScheduleId(EntityIdValue Value) : IEntityId<LoanScheduleId>
+{
+    public static string EntityName => "loan_schedule";
+
+    public static LoanScheduleId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct MerchantProfileId(EntityIdValue Value) : IEntityId<MerchantProfileId>
+{
+    public static string EntityName => "merchant_profile";
+
+    public static MerchantProfileId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct MerchantOperatorGrantId(EntityIdValue Value) : IEntityId<MerchantOperatorGrantId>
+{
+    public static string EntityName => "merchant_operator_grant";
+
+    public static MerchantOperatorGrantId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
