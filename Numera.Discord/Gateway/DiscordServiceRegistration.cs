@@ -25,6 +25,8 @@ public static class DiscordServiceRegistration
         services.AddSingleton(static provider => new ErrorRenderer(provider.GetRequiredService<ITextCatalog>()));
         services.AddSingleton<IDiscordResponseComposer, CatalogResponseComposer>();
         services.AddSingleton<IDiscordEndpointExecutor, DiscordEndpointExecutor>();
+        services.AddSingleton<IGeneratedEndpointDispatcher, GeneratedEndpointDispatcher>();
+        services.AddSingleton<IGeneratedModuleRegistrar, GeneratedModuleRegistrar>();
         services.AddSingleton<DiscordInteractionRouter>();
         services.TryAddSingleton<ICommandManifestProvider, GeneratedCommandManifestProvider>();
         services.AddSingleton<IApplicationCommandGateway>(static provider =>
