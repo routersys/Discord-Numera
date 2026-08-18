@@ -58,6 +58,8 @@ public sealed class CommerceCatalogTests
 
         public ExpiryMaintenanceService Expiries { get; private set; } = null!;
 
+        public DormancyMaintenanceService Dormancy { get; private set; } = null!;
+
         public static Harness Create()
         {
             string root = Path.Combine(Path.GetTempPath(), "numera-commerce", Guid.NewGuid().ToString("n"));
@@ -98,6 +100,7 @@ public sealed class CommerceCatalogTests
             harness.Cards = new BankCardApplicationService(
                 gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
             harness.Expiries = new ExpiryMaintenanceService(gateway, harness.Clock);
+            harness.Dormancy = new DormancyMaintenanceService(gateway, harness.Clock, ids);
 
             return harness;
         }
@@ -156,7 +159,9 @@ public sealed class CommerceCatalogTests
                 basis_points, minimum_minor, maximum_minor, waiver_counter_key,
                 free_occurrences_per_business_month)
             VALUES({Blob(32)}, {Blob(31)}, 'DEBIT_PURCHASE', 0, 'ANY', NULL, NULL, NULL, 0, NULL,
-                'ANY', NULL, NULL, 0, 0, 0, NULL, NULL, 0);
+                'ANY', NULL, NULL, 0, 0, 0, NULL, NULL, 0),
+                ({Blob(33)}, {Blob(31)}, 'DORMANCY_WEEKLY', 0, 'ANY', NULL, NULL, NULL, 0, NULL,
+                'ANY', NULL, NULL, 1, 0, 0, NULL, NULL, 0);
 
             UPDATE banks
             SET current_policy_version_id = {Blob(30)},
@@ -314,6 +319,20 @@ public sealed class CommerceCatalogTests
             command.Parameters.AddWithValue("$captured", status == "PARTIALLY_CAPTURED" ? 600L : 0L);
             command.Parameters.AddWithValue("$status", status);
             command.Parameters.AddWithValue("$expires", expiresAt);
+            command.ExecuteNonQuery();
+        }
+
+        public void SeedDormancy(DepositAccountId accountId, long nextDueAt)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE deposit_accounts
+                SET status = 'DORMANT', next_dormancy_fee_at = $due, version = version + 1
+                WHERE deposit_account_id = $id;
+                """;
+            command.Parameters.AddWithValue("$due", nextDueAt);
+            command.Parameters.AddWithValue("$id", accountId.Value.ToByteArray());
             command.ExecuteNonQuery();
         }
 
@@ -905,6 +924,100 @@ public sealed class CommerceCatalogTests
         Assert.AreEqual(
             "600",
             harness.ReadText("SELECT CAST(captured_amount_minor AS TEXT) FROM debit_card_authorizations;"));
+    }
+
+    [TestMethod]
+    public async Task ADormantAccountIsChargedTheWeeklyFee()
+    {
+        await using Harness harness = Harness.Create();
+        DepositAccountId account = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(account, 5_000L);
+        harness.SeedDormancy(account, 1_776_000_060_000L);
+
+        harness.Clock.Advance(120_000L);
+
+        DormancyMaintenanceReport report = await harness.Dormancy.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Assessed);
+        Assert.AreEqual(0, report.Closed);
+        Assert.AreEqual(4_999L, harness.PostedBalance(account));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM fee_assessments WHERE fee_type = 'DORMANCY_WEEKLY';
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM business_operations
+                WHERE operation_type = 'DORMANCY_FEE' AND status = 'COMMITTED';
+                """));
+    }
+
+    [TestMethod]
+    public async Task TheNextDueAdvancesExactlySevenDays()
+    {
+        await using Harness harness = Harness.Create();
+        DepositAccountId account = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(account, 5_000L);
+        harness.SeedDormancy(account, 1_776_000_060_000L);
+
+        harness.Clock.Advance(120_000L);
+
+        Assert.AreEqual(1, (await harness.Dormancy.ProcessDueAsync(CancellationToken.None)).Assessed);
+        Assert.AreEqual(
+            (1_776_000_060_000L + DormancyMaintenanceService.DormancyIntervalMilliseconds)
+                .ToString(System.Globalization.CultureInfo.InvariantCulture),
+            harness.ReadText("SELECT CAST(next_dormancy_fee_at AS TEXT) FROM deposit_accounts;"));
+    }
+
+    [TestMethod]
+    public async Task ADueIsNeverChargedTwice()
+    {
+        await using Harness harness = Harness.Create();
+        DepositAccountId account = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(account, 5_000L);
+        harness.SeedDormancy(account, 1_776_000_060_000L);
+
+        harness.Clock.Advance(120_000L);
+
+        Assert.AreEqual(1, (await harness.Dormancy.ProcessDueAsync(CancellationToken.None)).Assessed);
+        Assert.AreEqual(0, (await harness.Dormancy.ProcessDueAsync(CancellationToken.None)).Assessed);
+        Assert.AreEqual(4_999L, harness.PostedBalance(account));
+    }
+
+    [TestMethod]
+    public async Task DelayedDuesArePostedOldestFirst()
+    {
+        await using Harness harness = Harness.Create();
+        DepositAccountId account = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(account, 5_000L);
+        harness.SeedDormancy(account, 1_776_000_060_000L);
+
+        harness.Clock.Advance(3L * DormancyMaintenanceService.DormancyIntervalMilliseconds);
+
+        DormancyMaintenanceReport report = await harness.Dormancy.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(3, report.Assessed);
+        Assert.AreEqual(4_997L, harness.PostedBalance(account));
+    }
+
+    [TestMethod]
+    public async Task AZeroBalanceDormantAccountEntersClosing()
+    {
+        await using Harness harness = Harness.Create();
+        DepositAccountId account = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.SeedDormancy(account, 1_776_000_060_000L);
+
+        harness.Clock.Advance(120_000L);
+
+        DormancyMaintenanceReport report = await harness.Dormancy.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, report.Assessed);
+        Assert.AreEqual(1, report.Closed);
+        Assert.AreEqual("CLOSING", harness.ReadText("SELECT status FROM deposit_accounts;"));
+        Assert.AreEqual("DORMANCY", harness.ReadText("SELECT closure_reason FROM deposit_accounts;"));
+        Assert.AreEqual(0L, harness.Count("fee_assessments"));
     }
 
     [TestMethod]

@@ -226,6 +226,8 @@ public interface IDepositAccountRepository
 {
     void Add(Numera.Domain.Banking.DepositAccount account);
 
+    IReadOnlyList<Numera.Domain.Banking.DepositAccount> ListDueDormant(UtcTimestamp now, int limit);
+
     void Update(Numera.Domain.Banking.DepositAccount account);
 
     Numera.Domain.Banking.DepositAccount? Find(DepositAccountId id);

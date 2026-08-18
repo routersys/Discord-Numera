@@ -13,6 +13,8 @@ internal interface ISettlementMaintenanceRunner
     Task<CommerceMaintenanceReport> ExpireCheckoutsAsync(CancellationToken cancellationToken);
 
     Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken);
+
+    Task<DormancyMaintenanceReport> ProcessDueDormancyAsync(CancellationToken cancellationToken);
 }
 
 internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
@@ -20,20 +22,27 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
     private readonly SettlementMaintenanceService service;
     private readonly CommerceMaintenanceService commerce;
     private readonly ExpiryMaintenanceService expiries;
+    private readonly DormancyMaintenanceService dormancy;
 
     public SettlementMaintenanceRunner(
         SettlementMaintenanceService service,
         CommerceMaintenanceService commerce,
-        ExpiryMaintenanceService expiries)
+        ExpiryMaintenanceService expiries,
+        DormancyMaintenanceService dormancy)
     {
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(commerce);
         ArgumentNullException.ThrowIfNull(expiries);
+        ArgumentNullException.ThrowIfNull(dormancy);
 
         this.service = service;
         this.commerce = commerce;
         this.expiries = expiries;
+        this.dormancy = dormancy;
     }
+
+    public Task<DormancyMaintenanceReport> ProcessDueDormancyAsync(CancellationToken cancellationToken) =>
+        dormancy.ProcessDueAsync(cancellationToken);
 
     public Task<CommerceMaintenanceReport> ExpireCheckoutsAsync(CancellationToken cancellationToken) =>
         commerce.ExpireCheckoutsAsync(cancellationToken);
@@ -85,10 +94,14 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
                 .ConfigureAwait(false);
             ExpiryMaintenanceReport expiries = await runner.ProcessDueExpiriesAsync(cancellationToken)
                 .ConfigureAwait(false);
+            DormancyMaintenanceReport dormancy = await runner.ProcessDueDormancyAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            int dormancyCount = dormancy.Assessed + dormancy.Closed;
 
             diagnostics.SettlementMaintenanceCompleted(
-                queued.Examined + cycles.Examined + checkouts.Examined + expiries.Total,
-                queued.Settled + cycles.Settled + checkouts.Cancelled + expiries.Total);
+                queued.Examined + cycles.Examined + checkouts.Examined + expiries.Total + dormancyCount,
+                queued.Settled + cycles.Settled + checkouts.Cancelled + expiries.Total + dormancyCount);
         }
         catch (OperationCanceledException)
         {

@@ -77,6 +77,7 @@ internal static class BankingRegistration
         services.AddSingleton<SettlementMaintenanceService>();
         services.AddSingleton<CommerceMaintenanceService>();
         services.AddSingleton<ExpiryMaintenanceService>();
+        services.AddSingleton<DormancyMaintenanceService>();
         services.AddSingleton<ISettlementMaintenanceRunner, SettlementMaintenanceRunner>();
 
         return services;

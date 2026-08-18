@@ -278,6 +278,18 @@ public sealed class DepositAccount : VersionedEntity
         NextDormancyFeeAt = nextDormancyFeeAt;
     }
 
+    public void AdvanceDormancyFeeDue(UtcTimestamp nextDormancyFeeAt)
+    {
+        if (Status != DepositAccountStatus.Dormant)
+        {
+            throw InvariantViolationException.Create(
+                InvariantViolationCode.DepositAccountTransitionInvalid);
+        }
+
+        NextDormancyFeeAt = nextDormancyFeeAt;
+        AdvanceVersion();
+    }
+
     public void Reactivate(UtcTimestamp activityAt)
     {
         ChangeStatus(DepositAccountStatus.Active);

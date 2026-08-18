@@ -368,6 +368,30 @@ public sealed class SqliteDepositAccountRepository : IDepositAccountRepository
         }
     }
 
+    public IReadOnlyList<DepositAccount> ListDueDormant(UtcTimestamp now, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM deposit_accounts
+            WHERE status = 'DORMANT' AND next_dormancy_fee_at IS NOT NULL
+              AND next_dormancy_fee_at <= $now
+            ORDER BY next_dormancy_fee_at, deposit_account_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<DepositAccount> accounts = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            accounts.Add(Read(reader));
+        }
+
+        return accounts;
+    }
+
     public DepositAccount? Find(DepositAccountId id)
     {
         using SqliteCommand command = unitOfWork.CreateCommand(

@@ -41,6 +41,13 @@ internal sealed class RecordingMaintenanceRunner : ISettlementMaintenanceRunner
 
         return Task.FromResult(new ExpiryMaintenanceReport(1, 1, 0));
     }
+
+    public Task<DormancyMaintenanceReport> ProcessDueDormancyAsync(CancellationToken cancellationToken)
+    {
+        Calls.Add(nameof(ProcessDueDormancyAsync));
+
+        return Task.FromResult(new DormancyMaintenanceReport(1, 0));
+    }
 }
 
 internal sealed class RecordingMaintenanceDiagnostics : IMaintenanceDiagnostics
@@ -110,6 +117,7 @@ public sealed class SettlementMaintenanceWorkerTests
                 "ProcessClearingCyclesAsync",
                 "ExpireCheckoutsAsync",
                 "ProcessDueExpiriesAsync",
+                "ProcessDueDormancyAsync",
             },
             runner.Calls);
     }
@@ -121,8 +129,8 @@ public sealed class SettlementMaintenanceWorkerTests
 
         await worker.RunOnceAsync(CancellationToken.None);
 
-        Assert.AreEqual(11, diagnostics.LastExamined);
-        Assert.AreEqual(9, diagnostics.LastSettled);
+        Assert.AreEqual(12, diagnostics.LastExamined);
+        Assert.AreEqual(10, diagnostics.LastSettled);
     }
 
     [TestMethod]
