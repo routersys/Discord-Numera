@@ -12,6 +12,12 @@ namespace Numera.Discord.Endpoints;
 [EconomyCommandGroup("manage", "経済圏を管理します。")]
 public sealed class ManageEndpoints : IEconomyEndpoint
 {
+    private static readonly string[] CurrencyEditSteps =
+        ["metadata", "review", "publish"];
+
+    private static readonly string[] CurrencyRetireSteps =
+        ["confirm", "review", "retire"];
+
     private readonly ICurrencyAdministrationApplicationService currencies;
     private readonly IBankAdministrationApplicationService banks;
 
@@ -72,6 +78,48 @@ public sealed class ManageEndpoints : IEconomyEndpoint
                     ["baseMoneySupply"] = Text(result.Value.BaseMoneySupply),
                 })
             : EndpointFailures.From(result.Error!);
+    }
+
+    [EconomySlashCommand("currency-edit", "通貨の表示設定を編集します。")]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    public Task<DiscordEndpointResponse> EditCurrencyAsync(
+        DiscordEndpointContext context,
+        [EconomyOption("currency", "対象の通貨を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.CurrencyProviderKey)]
+        string currency,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(DiscordEndpointResponse.Message(
+            ViewKeys.ManageCurrencyEditor,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["code"] = currency,
+                ["steps"] = string.Join(" → ", CurrencyEditSteps),
+            }));
+    }
+
+    [EconomySlashCommand("currency-retire", "通貨の廃止手続を開始します。")]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    public Task<DiscordEndpointResponse> RetireCurrencyAsync(
+        DiscordEndpointContext context,
+        [EconomyOption("currency", "対象の通貨を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.CurrencyProviderKey)]
+        string currency,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(DiscordEndpointResponse.Message(
+            ViewKeys.ManageCurrencyRetireReview,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["code"] = currency,
+                ["steps"] = string.Join(" → ", CurrencyRetireSteps),
+            }));
     }
 
     [EconomySlashCommand("currency-issue", "通貨を追加発行します。")]

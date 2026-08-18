@@ -60,6 +60,10 @@ internal static class ViewKeys
     public const string ManageFxMarketCreated = "view.manage.fx_market_created";
     public const string ManageFxMarketState = "view.manage.fx_market_state";
     public const string ManageFxMarketPolicyPublished = "view.manage.fx_market_policy_published";
+    public const string ManageCurrencyEditor = "view.manage.currency_editor";
+    public const string ManageCurrencyRetireReview = "view.manage.currency_retire_review";
+    public const string ManageBankAsset = "view.manage.bank_asset";
+    public const string SystemReconcile = "view.system.reconcile";
 
     public const string FxMarket = "view.fx.market";
     public const string FxRate = "view.fx.rate";
@@ -265,6 +269,22 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageBankUpdated + ".title"] = "銀行の方針を更新しました",
             [ViewKeys.ManageBankUpdated + ".description"] =
                 "{institutionCode} {name} の方針を更新しました。状態は{status}です。",
+            [ViewKeys.ManageCurrencyEditor + ".title"] = "通貨の編集を開始しました",
+            [ViewKeys.ManageCurrencyEditor + ".description"] =
+                "{code} の編集を開始しました。手順は {steps} です。確定前に現在値と変更後を確認します。",
+            [ViewKeys.ManageCurrencyRetireReview + ".title"] = "通貨の廃止手続を開始しました",
+            [ViewKeys.ManageCurrencyRetireReview + ".description"] =
+                "{code} の廃止手続を開始しました。手順は {steps} です。公開済みの通貨は削除せず廃止状態へ移します。",
+            [ViewKeys.ManageBankAsset + ".title"] = "銀行画像の登録を開始しました",
+            [ViewKeys.ManageBankAsset + ".description"] =
+                "{institutionCode} の{kind}を登録します。手順は {steps} です。",
+            [ViewKeys.SystemReconcile + ".title"] = "整合性検査を開始しました",
+            [ViewKeys.SystemReconcile + ".description"] =
+                "検査範囲は {scope} です。手順は {steps} です。",
+            [ViewKeys.StatusOf("PUBLIC_LOGO")] = "公開ロゴ",
+            [ViewKeys.StatusOf("PUBLIC_BANNER")] = "公開バナー",
+            [ViewKeys.StatusOf("ATM_BANNER")] = "ATMバナー",
+            [ViewKeys.StatusOf("CARD_BACKGROUND")] = "カード背景",
             [ViewKeys.ManageFxMarketCreated + ".title"] = "為替市場を設置しました",
             [ViewKeys.ManageFxMarketCreated + ".description"] =
                 "市場 {market} を設置しました。状態は{status}です。価格桁数 {priceScale}、呼値 {tickSize}、売買単位 {lotSize} です。",

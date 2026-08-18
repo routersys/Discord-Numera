@@ -11,6 +11,13 @@ namespace Numera.Discord.Endpoints;
 [EconomyCommandGroup("manage", "経済圏を管理します。")]
 public sealed class ManageBankEndpoints : IEconomyEndpoint
 {
+    private const string AssetPublicLogo = "PUBLIC_LOGO";
+    private const string AssetPublicBanner = "PUBLIC_BANNER";
+    private const string AssetAtmBanner = "ATM_BANNER";
+    private const string AssetCardBackground = "CARD_BACKGROUND";
+
+    private static readonly string[] BankAssetSteps = ["upload", "review", "publish"];
+
     private readonly IBankAdministrationApplicationService banks;
     private readonly ITextCatalog catalog;
 
@@ -112,6 +119,34 @@ public sealed class ManageBankEndpoints : IEconomyEndpoint
                 ViewKeys.ManageBankRetired,
                 new Dictionary<string, string>(StringComparer.Ordinal) { ["institutionCode"] = bank })
             : EndpointFailures.From(result.Error!);
+    }
+
+    [EconomySlashCommand("bank-asset", "銀行の画像を登録する手続を開始します。")]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    public Task<DiscordEndpointResponse> BankAssetAsync(
+        DiscordEndpointContext context,
+        [EconomyOption("bank", "銀行を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.BankProviderKey)]
+        string bank,
+        [EconomyOption("kind", "登録する画像の種別を選びます。", true)]
+        [EconomyChoice("公開ロゴ", AssetPublicLogo)]
+        [EconomyChoice("公開バナー", AssetPublicBanner)]
+        [EconomyChoice("ATMバナー", AssetAtmBanner)]
+        [EconomyChoice("カード背景", AssetCardBackground)]
+        string kind,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(DiscordEndpointResponse.Message(
+            ViewKeys.ManageBankAsset,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["institutionCode"] = bank,
+                ["kind"] = catalog.Resolve(ViewKeys.StatusOf(kind)),
+                ["steps"] = string.Join(" → ", BankAssetSteps),
+            }));
     }
 
     private Dictionary<string, string> Describe(BankView view) =>
