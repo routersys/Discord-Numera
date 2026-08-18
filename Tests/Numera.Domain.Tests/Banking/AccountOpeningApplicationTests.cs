@@ -23,6 +23,9 @@ public sealed class AccountOpeningApplicationTests
 
     private static readonly DepositAccountId Account = DepositAccountId.FromValue(EntityIdValue.FromBits(7));
     private static readonly DepositAccountId Funding = DepositAccountId.FromValue(EntityIdValue.FromBits(8));
+    private static readonly PaymentOrderId FundingPayment =
+        PaymentOrderId.FromValue(EntityIdValue.FromBits(9));
+
     private static readonly UtcTimestamp Now = UtcTimestamp.FromUnixMilliseconds(1_776_000_000_000);
 
     private static AccountOpeningApplication Submit(
@@ -135,14 +138,59 @@ public sealed class AccountOpeningApplicationTests
 
         application.Approve(Now, null);
         application.AwaitFunding(Account, Funding);
+        application.AttachFundingPayment(FundingPayment);
 
         Assert.AreEqual(AccountOpeningApplicationStatus.AwaitingFunding, application.Status);
         Assert.AreEqual(Funding, application.FundingSourceDepositAccountId);
+        Assert.AreEqual(FundingPayment, application.FundingPaymentOrderId);
 
-        application.MarkReadyToActivate(Account);
+        application.MarkFunded();
         application.Complete(Now);
 
         Assert.AreEqual(AccountOpeningApplicationStatus.Completed, application.Status);
+    }
+
+    [TestMethod]
+    public void FundingPaymentIsAttachedOnlyWhileAwaitingFunding()
+    {
+        AccountOpeningApplication application = Submit(minimumInitialFunding: 500);
+
+        Assert.ThrowsExactly<InvariantViolationException>(
+            () => application.AttachFundingPayment(FundingPayment));
+
+        application.Approve(Now, null);
+        application.AwaitFunding(Account, Funding);
+        application.AttachFundingPayment(FundingPayment);
+
+        Assert.ThrowsExactly<InvariantViolationException>(
+            () => application.AttachFundingPayment(FundingPayment));
+    }
+
+    [TestMethod]
+    public void FundingCannotBeMarkedWithoutAPayment()
+    {
+        AccountOpeningApplication application = Submit(minimumInitialFunding: 500);
+
+        application.Approve(Now, null);
+        application.AwaitFunding(Account, Funding);
+
+        Assert.ThrowsExactly<InvariantViolationException>(application.MarkFunded);
+    }
+
+    [TestMethod]
+    public void PostedFundingBlocksCancellation()
+    {
+        AccountOpeningApplication application = Submit(minimumInitialFunding: 500);
+
+        application.Approve(Now, null);
+        application.AwaitFunding(Account, Funding);
+        application.AttachFundingPayment(FundingPayment);
+
+        Assert.ThrowsExactly<InvariantViolationException>(() => application.Cancel(fundingPosted: true));
+
+        application.Cancel(fundingPosted: false);
+
+        Assert.AreEqual(AccountOpeningApplicationStatus.Cancelled, application.Status);
     }
 
     [TestMethod]
@@ -155,7 +203,7 @@ public sealed class AccountOpeningApplicationTests
         application.Fail();
 
         Assert.AreEqual(AccountOpeningApplicationStatus.Failed, application.Status);
-        Assert.ThrowsExactly<InvariantViolationException>(() => application.Cancel());
+        Assert.ThrowsExactly<InvariantViolationException>(() => application.Cancel(fundingPosted: false));
     }
 
     [TestMethod]
@@ -178,7 +226,7 @@ public sealed class AccountOpeningApplicationTests
         application.MarkReadyToActivate(Account);
         application.Complete(Now);
 
-        Assert.ThrowsExactly<InvariantViolationException>(() => application.Cancel());
+        Assert.ThrowsExactly<InvariantViolationException>(() => application.Cancel(fundingPosted: false));
     }
 
     [TestMethod]
@@ -205,7 +253,7 @@ public sealed class AccountOpeningApplicationTests
     {
         AccountOpeningApplication application = Submit();
 
-        application.Cancel();
+        application.Cancel(fundingPosted: false);
 
         Assert.AreEqual(AccountOpeningApplicationStatus.Cancelled, application.Status);
     }

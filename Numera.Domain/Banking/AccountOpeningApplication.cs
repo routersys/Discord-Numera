@@ -283,9 +283,9 @@ public sealed class AccountOpeningApplication : VersionedEntity
         DecidedByDiscordUserId = decidedByDiscordUserId;
     }
 
-    public void Cancel()
+    public void Cancel(bool fundingPosted)
     {
-        if (FundingPaymentOrderId is not null)
+        if (fundingPosted)
         {
             throw InvariantViolationException.Create(
                 InvariantViolationCode.AccountOpeningApplicationTransitionInvalid);
@@ -299,6 +299,28 @@ public sealed class AccountOpeningApplication : VersionedEntity
         DepositAccountId = depositAccountId;
         FundingSourceDepositAccountId = fundingSourceDepositAccountId;
         Advance(AccountOpeningApplicationStatus.AwaitingFunding);
+    }
+
+    public void AttachFundingPayment(PaymentOrderId fundingPaymentOrderId)
+    {
+        if (Status != AccountOpeningApplicationStatus.AwaitingFunding || FundingPaymentOrderId is not null)
+        {
+            throw InvariantViolationException.Create(
+                InvariantViolationCode.AccountOpeningApplicationTransitionInvalid);
+        }
+
+        FundingPaymentOrderId = fundingPaymentOrderId;
+    }
+
+    public void MarkFunded()
+    {
+        if (FundingPaymentOrderId is null)
+        {
+            throw InvariantViolationException.Create(
+                InvariantViolationCode.AccountOpeningFundingInconsistent);
+        }
+
+        Advance(AccountOpeningApplicationStatus.ReadyToActivate);
     }
 
     public void MarkReadyToActivate(DepositAccountId depositAccountId)
