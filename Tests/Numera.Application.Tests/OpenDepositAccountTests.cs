@@ -40,6 +40,8 @@ public sealed class OpenDepositAccountTests
 
         public BankAccountApplicationService Accounts { get; private set; } = null!;
 
+        public BankQueryApplicationService Queries { get; private set; } = null!;
+
         public EconomyScopeId Scope { get; } = EconomyScopeId.FromValue(EntityIdValue.FromBits(1));
 
         public static Harness Create(string bankStatus = "OPERATING", bool withProduct = true)
@@ -67,6 +69,8 @@ public sealed class OpenDepositAccountTests
             harness.Registration = new CustomerAccountApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Queries = new BankQueryApplicationService(
+                new SqliteBankingReadGateway(harness.ConnectionFactory));
 
             return harness;
         }
@@ -400,5 +404,146 @@ public sealed class OpenDepositAccountTests
             harness.ReadText("""
                 SELECT status FROM business_operations WHERE idempotency_scope = 'ACCOUNT_OPEN';
                 """));
+    }
+
+    [TestMethod]
+    public async Task ListBanksReturnsTheSeededBank()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<BankPageView> result = await harness.Queries.ListBanksAsync(
+            new ListBanksQuery(GuildId, null), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(Institution, result.Value.Items.Single().InstitutionCode);
+        Assert.IsNull(result.Value.NextCursor);
+    }
+
+    [TestMethod]
+    public async Task ListBanksIsNotFoundForAGuildWithoutAnEconomy()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<BankPageView> result = await harness.Queries.ListBanksAsync(
+            new ListBanksQuery(999UL, null), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.GuildEconomyNotFound, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task BankDetailCarriesTheOpeningFlag()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<BankDetailView> result = await harness.Queries.GetBankDetailAsync(
+            new GetBankDetailQuery(GuildId, Institution), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(BankStatus.Operating, result.Value.Status);
+        Assert.IsTrue(result.Value.AcceptsAccountOpening);
+    }
+
+    [TestMethod]
+    public async Task AnUnknownBankIsNotFound()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<BankDetailView> result = await harness.Queries.GetBankDetailAsync(
+            new GetBankDetailQuery(GuildId, "NUM9999"), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.BankNotFound, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task ListProductsReturnsTheDefaultProduct()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<BankProductPageView> result = await harness.Queries.ListBankProductsAsync(
+            new ListBankProductsQuery(GuildId, Institution, null), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.IsTrue(result.Value.Items.Single().IsDefault);
+    }
+
+    [TestMethod]
+    public async Task CustomerAccountsAreListedAfterOpening()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
+        Result<AccountOpeningView> opened = await harness.OpenAsync(customer);
+
+        Result<BankAccountPageView> result = await harness.Queries.ListCustomerBankAccountsAsync(
+            new ListCustomerBankAccountsQuery(customer, null), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        BankAccountItem item = result.Value.Items.Single();
+        Assert.AreEqual(opened.Value.Id, item.DepositAccountId);
+        Assert.AreEqual(Institution, item.InstitutionCode);
+        Assert.AreEqual(4, item.AccountNumberSuffix.Length);
+    }
+
+    [TestMethod]
+    public async Task AccountDetailCarriesTheCanonicalFields()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
+        Result<AccountOpeningView> opened = await harness.OpenAsync(customer);
+
+        Result<DepositAccountDetailView> result = await harness.Queries.GetDepositAccountDetailAsync(
+            new GetDepositAccountDetailQuery(customer, opened.Value.Id), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(Institution, result.Value.InstitutionCode);
+        Assert.AreEqual(DepositAccountStatus.Active, result.Value.Status);
+        Assert.AreEqual(
+            result.Value.PostedBalance.Value - result.Value.HeldAmount.Value,
+            result.Value.AvailableBalance.Value);
+    }
+
+    [TestMethod]
+    public async Task AnotherCustomerCannotSeeTheAccountDetail()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId owner = await harness.RegisterAsync(FirstUser, "taro");
+        Result<AccountOpeningView> opened = await harness.OpenAsync(owner);
+        CustomerAccountId intruder = await harness.RegisterAsync(SecondUser, "hanako");
+
+        Result<DepositAccountDetailView> result = await harness.Queries.GetDepositAccountDetailAsync(
+            new GetDepositAccountDetailQuery(intruder, opened.Value.Id), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.NotFound, result.Error!.Category);
+    }
+
+    [TestMethod]
+    public async Task TheStatementOfANewAccountIsEmpty()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
+        Result<AccountOpeningView> opened = await harness.OpenAsync(customer);
+
+        Result<AccountStatementPageView> result = await harness.Queries.GetAccountStatementAsync(
+            new GetAccountStatementQuery(customer, opened.Value.Id, null), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(0, result.Value.Items.Count);
+        Assert.IsNull(result.Value.NextCursor);
+    }
+
+    [TestMethod]
+    public async Task AStatementForAForeignAccountIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId owner = await harness.RegisterAsync(FirstUser, "taro");
+        Result<AccountOpeningView> opened = await harness.OpenAsync(owner);
+        CustomerAccountId intruder = await harness.RegisterAsync(SecondUser, "hanako");
+
+        Result<AccountStatementPageView> result = await harness.Queries.GetAccountStatementAsync(
+            new GetAccountStatementQuery(intruder, opened.Value.Id, null), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
     }
 }

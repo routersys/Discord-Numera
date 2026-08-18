@@ -13,6 +13,12 @@ public static class ViewKeys
     public const string ManageCurrencyCreated = "view.manage.currency_created";
     public const string ManageCurrencyIssued = "view.manage.currency_issued";
     public const string ManageCurrencyBurned = "view.manage.currency_burned";
+    public const string BankList = "view.bank.list";
+    public const string BankListEmpty = "view.bank.list_empty";
+    public const string BankAccountList = "view.bank.accounts";
+    public const string BankAccountListEmpty = "view.bank.accounts_empty";
+    public const string Statement = "view.bank.statement";
+    public const string StatementEmpty = "view.bank.statement_empty";
 
     public const string StatusPrefix = "status.";
 
@@ -61,6 +67,18 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageCurrencyBurned + ".title"] = "通貨を償却しました",
             [ViewKeys.ManageCurrencyBurned + ".description"] =
                 "{amount} を償却しました。発行済のベースマネーは {baseMoneySupply} です。",
+            [ViewKeys.BankList + ".title"] = "銀行の一覧",
+            [ViewKeys.BankList + ".description"] = "{count}件の銀行があります。{items}",
+            [ViewKeys.BankListEmpty + ".title"] = "銀行がありません",
+            [ViewKeys.BankListEmpty + ".description"] = "この経済圏にはまだ銀行がありません。",
+            [ViewKeys.BankAccountList + ".title"] = "口座の一覧",
+            [ViewKeys.BankAccountList + ".description"] = "{count}件の口座があります。{items}",
+            [ViewKeys.BankAccountListEmpty + ".title"] = "口座がありません",
+            [ViewKeys.BankAccountListEmpty + ".description"] = "まだ口座がありません。/bank open で開設できます。",
+            [ViewKeys.Statement + ".title"] = "取引明細",
+            [ViewKeys.Statement + ".description"] = "{count}件の取引があります。{items}",
+            [ViewKeys.StatementEmpty + ".title"] = "取引がありません",
+            [ViewKeys.StatementEmpty + ".description"] = "この口座にはまだ取引がありません。",
             [ViewKeys.StatusOf("ACTIVE")] = "利用可能",
             [ViewKeys.StatusOf("OPERATING")] = "利用可能",
             [ViewKeys.StatusOf("PENDING")] = "処理待ち",

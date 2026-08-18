@@ -20,7 +20,10 @@ public sealed class EndpointSurfaceTests
             {
                 "account register",
                 "account status",
+                "bank accounts",
+                "bank list",
                 "bank open",
+                "bank statement",
                 "bank transfer",
                 "help",
                 "manage currency-burn",
