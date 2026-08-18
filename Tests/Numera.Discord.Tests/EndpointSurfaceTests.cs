@@ -24,6 +24,7 @@ public sealed class EndpointSurfaceTests
                 "account status",
                 "account unlink",
                 "bank accounts",
+                "bank atm",
                 "bank card",
                 "bank close",
                 "bank list",
@@ -47,6 +48,8 @@ public sealed class EndpointSurfaceTests
                 "manage currency-create",
                 "manage currency-issue",
                 "manage panel",
+                "shop browse",
+                "shop orders",
                 "system commands-sync",
                 "system panel",
             },
@@ -67,6 +70,7 @@ public sealed class EndpointSurfaceTests
                 "ManageModule",
                 "NumeraDiscordEndpointsBankEndpointsInteractionsModule",
                 "NumeraDiscordEndpointsHelpEndpointsModule",
+                "ShopModule",
                 "SystemModule",
             },
             modules);
@@ -82,7 +86,8 @@ public sealed class EndpointSurfaceTests
             .. provider.PrimaryCommands().Select(static entry => entry.Name).Order(StringComparer.Ordinal),
         ];
 
-        CollectionAssert.AreEqual(new[] { "account", "bank", "fx", "help", "manage" }, primary);
+        CollectionAssert.AreEqual(
+            new[] { "account", "bank", "fx", "help", "manage", "shop" }, primary);
         Assert.AreEqual("system", provider.ControlCommands().Single().Name);
     }
 

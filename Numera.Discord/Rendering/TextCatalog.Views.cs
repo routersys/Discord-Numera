@@ -70,6 +70,14 @@ internal static class ViewKeys
     public const string FxHistoryEmpty = "view.fx.history_empty";
     public const string FxOrderCancelled = "view.fx.order_cancelled";
 
+    public const string ShopStores = "view.shop.stores";
+    public const string ShopStoresEmpty = "view.shop.stores_empty";
+    public const string ShopProducts = "view.shop.products";
+    public const string ShopProductsEmpty = "view.shop.products_empty";
+    public const string ShopOrders = "view.shop.orders";
+    public const string ShopOrdersEmpty = "view.shop.orders_empty";
+    public const string BankAtm = "view.bank.atm";
+
     public const string FxSidePrefix = "fx_side.";
 
     public static string FxSideOf(string internalToken) => FxSidePrefix + internalToken;
@@ -269,6 +277,21 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.StatusOf("INTERNAL_FINAL")] = "行内完了",
             [ViewKeys.FxSideOf("BUY_BASE")] = "買い",
             [ViewKeys.FxSideOf("SELL_BASE")] = "売り",
+            [ViewKeys.ShopStores + ".title"] = "加盟店一覧",
+            [ViewKeys.ShopStores + ".description"] = "{count}件の加盟店があります。{items}{cursor}",
+            [ViewKeys.ShopStoresEmpty + ".title"] = "加盟店がありません",
+            [ViewKeys.ShopStoresEmpty + ".description"] = "このサーバーで利用できる加盟店はまだありません。",
+            [ViewKeys.ShopProducts + ".title"] = "商品一覧",
+            [ViewKeys.ShopProducts + ".description"] = "{count}件の商品があります。{items}{cursor}",
+            [ViewKeys.ShopProductsEmpty + ".title"] = "商品がありません",
+            [ViewKeys.ShopProductsEmpty + ".description"] = "この加盟店には販売中の商品がありません。",
+            [ViewKeys.ShopOrders + ".title"] = "注文履歴",
+            [ViewKeys.ShopOrders + ".description"] = "{count}件の注文があります。{items}{cursor}",
+            [ViewKeys.ShopOrdersEmpty + ".title"] = "注文がありません",
+            [ViewKeys.ShopOrdersEmpty + ".description"] = "まだ注文はありません。",
+            [ViewKeys.BankAtm + ".title"] = "ATM",
+            [ViewKeys.BankAtm + ".description"] =
+                "{terminal} は {status} です。取扱通貨は {currencies} 種類です。",
             [ViewKeys.FxMarket + ".title"] = "為替市場",
             [ViewKeys.FxMarket + ".description"] =
                 "最良買気配は {bestBid}、最良売気配は {bestAsk} です。板の版数は {orderBookVersion} です。",
