@@ -13,6 +13,8 @@ namespace Numera.Application.Tests;
 [TestClass]
 public sealed class PaymentPreferenceApplicationTests
 {
+    private const ulong GuildId = 900UL;
+
     private const string Institution = "NUM0001";
     private const string OtherInstitution = "NUM0002";
     private const ulong OwnerUser = 720_000_000_000_000_001UL;
@@ -156,7 +158,7 @@ public sealed class PaymentPreferenceApplicationTests
         public async Task<CustomerAccountId> RegisterAsync(ulong discordUserId, string handle)
         {
             Result<CustomerAccountView> result = await Registration.RegisterCustomerAccountAsync(
-                new RegisterCustomerAccountCommand(Scope, discordUserId, handle, "利用者"),
+                new RegisterCustomerAccountCommand(GuildId, discordUserId, handle, "利用者"),
                 CancellationToken.None);
 
             return result.Value.Id;

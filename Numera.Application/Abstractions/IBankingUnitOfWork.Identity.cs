@@ -14,6 +14,11 @@ public interface IEconomyScopeReadRepository
     EconomyScopeId? FindByGuild(ulong guildId);
 }
 
+public partial interface IGuildEconomyRepository
+{
+    EconomyScopeId? FindEconomyScope(ulong guildId);
+}
+
 public partial interface IBankingReadContext
 {
     ICustomerIdentityReadRepository CustomerIdentities { get; }

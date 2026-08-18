@@ -13,6 +13,8 @@ namespace Numera.Application.Tests;
 [TestClass]
 public sealed class TransferTests
 {
+    private const ulong GuildId = 900UL;
+
     private const string Institution = "NUM0001";
     private const string OtherInstitution = "NUM0002";
     private const string Branch = "001";
@@ -621,7 +623,7 @@ public sealed class TransferTests
         public async Task<CustomerAccountId> RegisterAsync(ulong discordUserId, string handle)
         {
             Result<CustomerAccountView> result = await Registration.RegisterCustomerAccountAsync(
-                new RegisterCustomerAccountCommand(Scope, discordUserId, handle, "利用者"),
+                new RegisterCustomerAccountCommand(GuildId, discordUserId, handle, "利用者"),
                 CancellationToken.None);
 
             return result.Value.Id;

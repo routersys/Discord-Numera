@@ -31,6 +31,8 @@ internal sealed class SequentialIdGenerator : IIdGenerator
 [TestClass]
 public sealed class RegisterCustomerAccountTests
 {
+    private const ulong GuildId = 900UL;
+
     private const ulong DiscordUser = 123456789012345678UL;
 
     private sealed class Harness : IAsyncDisposable
@@ -126,7 +128,7 @@ public sealed class RegisterCustomerAccountTests
             string handle = "taro",
             string displayName = "山田太郎") =>
             Service.RegisterCustomerAccountAsync(
-                new RegisterCustomerAccountCommand(Scope, discordUserId, handle, displayName),
+                new RegisterCustomerAccountCommand(GuildId, discordUserId, handle, displayName),
                 CancellationToken.None);
 
         public Task<Result<CustomerAccountStatusView>> StatusAsync(ulong discordUserId = DiscordUser) =>

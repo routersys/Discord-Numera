@@ -495,4 +495,18 @@ public sealed class SqliteGuildEconomyRepository : IGuildEconomyRepository
 
         return command.ExecuteScalar() as string;
     }
+
+    public EconomyScopeId? FindEconomyScope(ulong guildId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT economy_scope_id FROM guild_economies WHERE guild_id = $guildId AND status = 'ACTIVE';
+            """);
+        command.Parameters.AddWithValue(
+            "$guildId",
+            guildId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        return command.ExecuteScalar() is byte[] bytes
+            ? EconomyScopeId.FromValue(EntityIdValue.FromBytes(bytes))
+            : null;
+    }
 }

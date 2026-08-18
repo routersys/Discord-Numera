@@ -13,6 +13,8 @@ namespace Numera.Application.Tests;
 [TestClass]
 public sealed class OpenDepositAccountTests
 {
+    private const ulong GuildId = 900UL;
+
     private const string Institution = "NUM0001";
     private const ulong FirstUser = 700_000_000_000_000_001UL;
     private const ulong SecondUser = 700_000_000_000_000_002UL;
@@ -149,7 +151,7 @@ public sealed class OpenDepositAccountTests
         public async Task<CustomerAccountId> RegisterAsync(ulong discordUserId, string handle)
         {
             Result<CustomerAccountView> result = await Registration.RegisterCustomerAccountAsync(
-                new RegisterCustomerAccountCommand(Scope, discordUserId, handle, "利用者"),
+                new RegisterCustomerAccountCommand(GuildId, discordUserId, handle, "利用者"),
                 CancellationToken.None);
 
             return result.Value.Id;

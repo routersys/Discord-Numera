@@ -7,7 +7,7 @@ using Numera.Domain.Identity;
 namespace Numera.Application.Banking;
 
 public sealed record RegisterCustomerAccountCommand(
-    EconomyScopeId EconomyScopeId,
+    ulong GuildId,
     ulong DiscordUserId,
     string PublicHandle,
     string DisplayName);
@@ -115,7 +115,7 @@ public sealed class CustomerAccountApplicationService : ICustomerAccountApplicat
         IdempotencyKey idempotencyKey = IdempotencyKey.Create(OperationType, discordUserId.ToString());
 
         return writeGateway.ExecuteAsync(
-            unitOfWork => Register(unitOfWork, discordUserId, handle, displayName, command.EconomyScopeId, idempotencyKey),
+            unitOfWork => Register(unitOfWork, discordUserId, handle, displayName, command.GuildId, idempotencyKey),
             cancellationToken);
     }
 
@@ -124,9 +124,19 @@ public sealed class CustomerAccountApplicationService : ICustomerAccountApplicat
         DiscordUserId discordUserId,
         PublicHandle handle,
         DisplayName displayName,
-        EconomyScopeId economyScopeId,
+        ulong guildId,
         IdempotencyKey idempotencyKey)
     {
+        EconomyScopeId? resolved = unitOfWork.GuildEconomies.FindEconomyScope(guildId);
+
+        if (resolved is null)
+        {
+            return Result<CustomerAccountView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
+        EconomyScopeId economyScopeId = resolved.Value;
+
         BusinessOperation? existing = unitOfWork.BusinessOperations.Find(idempotencyKey);
         if (existing is not null)
         {

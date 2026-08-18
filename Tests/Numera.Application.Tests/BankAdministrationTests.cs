@@ -187,7 +187,7 @@ public sealed class BankAdministrationTests
         public async Task<CustomerAccountId> RegisterAsync(ulong discordUserId, string handle)
         {
             Result<CustomerAccountView> result = await Registration.RegisterCustomerAccountAsync(
-                new RegisterCustomerAccountCommand(Scope, discordUserId, handle, "利用者"),
+                new RegisterCustomerAccountCommand(Guild, discordUserId, handle, "利用者"),
                 CancellationToken.None);
 
             return result.Value.Id;

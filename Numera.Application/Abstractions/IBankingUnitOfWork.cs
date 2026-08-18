@@ -388,7 +388,7 @@ public interface ISystemOwnerRepository
     bool Contains(string discordUserId);
 }
 
-public interface IGuildEconomyRepository
+public partial interface IGuildEconomyRepository
 {
     string? FindGuildId(EconomyScopeId economyScopeId);
 }
