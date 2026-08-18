@@ -129,6 +129,28 @@ public sealed class PaymentPreferenceApplicationTests
                 deposit_insurance_class_code, overdraft_policy, created_at)
             VALUES({Blob(seed + 6)}, {Blob(seed + 5)}, 1, 1, NULL, 1000000000, 'ACTUAL_365_FIXED', 0, NULL,
                 NULL, NULL, 'INTERNAL', 'STANDARD', 'NONE', 1);
+
+            INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
+                minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
+                reopen_closed_account_allowed, public_receiving_enabled_default, cash_card_enabled,
+                debit_card_enabled, integrated_cash_debit_default, automatic_bank_card_issue_mode,
+                cash_atm_enabled, cash_card_validity_months, debit_card_validity_months,
+                per_transfer_limit_minor, daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
+                maximum_active_holds_minor, effective_from, effective_to, version)
+            VALUES({Blob(seed + 7)}, {Blob(seed + 2)}, 1, 0, 0, 0, 1, 1, 0, 0, 0, 'NONE', 1, NULL, 12,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1);
+
+            INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                effective_to, version)
+            VALUES({Blob(seed + 8)}, {Blob(seed + 2)}, 1, NULL, 1);
+
+            UPDATE banks
+            SET current_policy_version_id = {Blob(seed + 7)},
+                current_fee_schedule_version_id = {Blob(seed + 8)},
+                version = version + 1
+            WHERE bank_id = {Blob(seed + 2)};
             """);
 
         public void Execute(string sql)

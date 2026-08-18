@@ -107,6 +107,28 @@ public sealed class OpenDepositAccountTests
                     owner_reference_type, owner_reference_id, status, created_at, version)
                 VALUES({Blob(7)}, {Blob(4)}, NULL, '2000', 'DEMAND_DEPOSIT_CONTROL', 'LIABILITY', 'CREDIT',
                     {Blob(2)}, 0, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
+                    minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
+                    reopen_closed_account_allowed, public_receiving_enabled_default, cash_card_enabled,
+                    debit_card_enabled, integrated_cash_debit_default, automatic_bank_card_issue_mode,
+                    cash_atm_enabled, cash_card_validity_months, debit_card_validity_months,
+                    per_transfer_limit_minor, daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                    daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                    daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
+                    maximum_active_holds_minor, effective_from, effective_to, version)
+                VALUES({Blob(30)}, {Blob(5)}, 1, 0, 0, 0, 1, 1, 0, 0, 0, 'NONE', 1, NULL, 12,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1);
+
+                INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                    effective_to, version)
+                VALUES({Blob(31)}, {Blob(5)}, 1, NULL, 1);
+
+                UPDATE banks
+                SET current_policy_version_id = {Blob(30)},
+                    current_fee_schedule_version_id = {Blob(31)},
+                    version = version + 1
+                WHERE bank_id = {Blob(5)};
                 """);
 
             if (!withProduct)
@@ -285,6 +307,49 @@ public sealed class OpenDepositAccountTests
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.BankNotFound, result.Error!.Code);
         Assert.AreEqual(0L, harness.Count("deposit_accounts"));
+    }
+
+    [TestMethod]
+    public async Task BankWithoutAPolicyVersionRejectsOpening()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
+        harness.Execute("UPDATE banks SET current_policy_version_id = NULL;");
+
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.BankPolicyUnavailable, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("deposit_accounts"));
+    }
+
+    [TestMethod]
+    public async Task BankWithoutAFeeScheduleRejectsOpening()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
+        harness.Execute("UPDATE banks SET current_fee_schedule_version_id = NULL;");
+
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.FeeScheduleUnavailable, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("deposit_accounts"));
+    }
+
+    [TestMethod]
+    public async Task OpeningRecordsAnApprovedApplication()
+    {
+        await using Harness harness = Harness.Create();
+        CustomerAccountId customer = await harness.RegisterAsync(FirstUser, "taro");
+
+        Result<AccountOpeningView> result = await harness.OpenAsync(customer);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(1L, harness.Count("account_opening_applications"));
+        Assert.AreEqual(
+            "COMPLETED",
+            harness.ReadText("SELECT status FROM account_opening_applications;"));
     }
 
     [TestMethod]

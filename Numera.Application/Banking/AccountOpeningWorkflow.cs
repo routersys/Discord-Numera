@@ -26,7 +26,7 @@ internal static class AccountOpeningWorkflow
     internal const string DemandDepositControlCode = "2000";
     internal const int NumberDigits = 10;
 
-    internal static Result<AccountOpeningContract?> ResolveContract(
+    internal static Result<AccountOpeningContract> ResolveContract(
         IBankingUnitOfWork unitOfWork,
         EconomyScopeId economyScopeId,
         Bank bank,
@@ -34,26 +34,22 @@ internal static class AccountOpeningWorkflow
         CurrencyId currencyId,
         UtcTimestamp now)
     {
-        if (bank.CurrentPolicyVersionId is not { } policyVersionId)
+        if (bank.CurrentPolicyVersionId is not { } policyVersionId
+            || unitOfWork.BankAdministration.FindBankPolicyVersion(policyVersionId) is not { } policy)
         {
-            return Result<AccountOpeningContract?>.Success(null);
-        }
-
-        if (unitOfWork.BankAdministration.FindBankPolicyVersion(policyVersionId) is not { } policy)
-        {
-            return Result<AccountOpeningContract?>.Failure(
+            return Result<AccountOpeningContract>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.BankPolicyUnavailable);
         }
 
         if (bank.CurrentFeeScheduleVersionId is not { } feeScheduleVersionId)
         {
-            return Result<AccountOpeningContract?>.Failure(
+            return Result<AccountOpeningContract>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.FeeScheduleUnavailable);
         }
 
         if (EconomyBusinessCalendar.Resolve(unitOfWork.EconomyCalendars, economyScopeId, now) is not { } point)
         {
-            return Result<AccountOpeningContract?>.Failure(
+            return Result<AccountOpeningContract>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
         }
 
@@ -61,7 +57,7 @@ internal static class AccountOpeningWorkflow
             unitOfWork, feeScheduleVersionId, FeeType.AccountOpening, product.ProductId, point);
         if (!openingFee.IsSuccess)
         {
-            return Result<AccountOpeningContract?>.Failure(openingFee.Error!);
+            return Result<AccountOpeningContract>.Failure(openingFee.Error!);
         }
 
         MoneyMinor cashCardFee = MoneyMinor.Zero;
@@ -73,7 +69,7 @@ internal static class AccountOpeningWorkflow
                 unitOfWork, feeScheduleVersionId, FeeType.CashCardIssue, product.ProductId, point);
             if (!resolved.IsSuccess)
             {
-                return Result<AccountOpeningContract?>.Failure(resolved.Error!);
+                return Result<AccountOpeningContract>.Failure(resolved.Error!);
             }
 
             cashCardFee = resolved.Value;
@@ -85,7 +81,7 @@ internal static class AccountOpeningWorkflow
                 unitOfWork, feeScheduleVersionId, FeeType.DebitCardIssue, product.ProductId, point);
             if (!resolved.IsSuccess)
             {
-                return Result<AccountOpeningContract?>.Failure(resolved.Error!);
+                return Result<AccountOpeningContract>.Failure(resolved.Error!);
             }
 
             debitCardFee = resolved.Value;
@@ -101,12 +97,12 @@ internal static class AccountOpeningWorkflow
 
             if (revenue is null)
             {
-                return Result<AccountOpeningContract?>.Failure(
+                return Result<AccountOpeningContract>.Failure(
                     ErrorCategory.BankUnavailable, BankingErrorCodes.FeeRevenueAccountUnavailable);
             }
         }
 
-        return Result<AccountOpeningContract?>.Success(new AccountOpeningContract(
+        return Result<AccountOpeningContract>.Success(new AccountOpeningContract(
             policy, feeScheduleVersionId, openingFee.Value, cashCardFee, debitCardFee, required));
     }
 

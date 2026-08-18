@@ -142,7 +142,7 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
 
         UtcTimestamp now = clock.Now();
 
-        Result<AccountOpeningContract?> resolved = AccountOpeningWorkflow.ResolveContract(
+        Result<AccountOpeningContract> resolved = AccountOpeningWorkflow.ResolveContract(
             unitOfWork, economyScopeId, bank, product, control.CurrencyId, now);
 
         if (!resolved.IsSuccess)
@@ -159,9 +159,8 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
             idempotencyKey,
             now);
 
-        Result<AccountOpeningOutcome> outcome = resolved.Value is { } contract
-            ? OpenUnderContract(unitOfWork, bank, customer, product, control, contract, now)
-            : OpenWithoutContract(unitOfWork, bank, customer, product, control, now);
+        Result<AccountOpeningOutcome> outcome = OpenUnderContract(
+            unitOfWork, bank, customer, product, control, resolved.Value, now);
 
         if (!outcome.IsSuccess)
         {
@@ -175,23 +174,6 @@ public sealed partial class BankAccountApplicationService : IBankAccountApplicat
         Publish(unitOfWork, operation, outcome.Value, now);
 
         return Result<AccountOpeningView>.Success(ToView(bank, outcome.Value));
-    }
-
-    private Result<AccountOpeningOutcome> OpenWithoutContract(
-        IBankingUnitOfWork unitOfWork,
-        Bank bank,
-        CustomerAccount customer,
-        AccountProductSelection product,
-        LedgerAccount control,
-        UtcTimestamp now)
-    {
-        DepositAccount account = AccountOpeningWorkflow.Provision(
-            unitOfWork, idGenerator, bank, customer, product, control, publicReceivingEnabled: true, now);
-
-        account.FinalizeOpening();
-        unitOfWork.DepositAccounts.Update(account);
-
-        return Result<AccountOpeningOutcome>.Success(new AccountOpeningOutcome(null, account, bank));
     }
 
     private Result<AccountOpeningOutcome> OpenUnderContract(

@@ -172,6 +172,29 @@ public sealed class TransferTests
                 INSERT INTO branches(branch_id, bank_id, branch_code, name, status, created_at, closed_at, version)
                 VALUES({Blob(23)}, {Blob(22)}, '{Branch}', '本店', 'ACTIVE', 1, NULL, 1);
 
+                INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
+                    minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
+                    reopen_closed_account_allowed, public_receiving_enabled_default, cash_card_enabled,
+                    debit_card_enabled, integrated_cash_debit_default, automatic_bank_card_issue_mode,
+                    cash_atm_enabled, cash_card_validity_months, debit_card_validity_months,
+                    per_transfer_limit_minor, daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                    daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                    daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
+                    maximum_active_holds_minor, effective_from, effective_to, version)
+                VALUES({Blob(60)}, {Blob(22)}, 1, 0, 0, 0, 1, 1, 0, 0, 0, 'NONE', 1, NULL, 12,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1);
+
+                INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                    effective_to, version)
+                VALUES({Blob(61)}, {Blob(22)}, 1, NULL, 1);
+
+                UPDATE banks
+                SET current_policy_version_id = {Blob(60)},
+                    current_fee_schedule_version_id = {Blob(61)},
+                    version = version + 1
+                WHERE bank_id = {Blob(22)};
+
+
                 INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
                     account_kind, accounting_type, normal_side, currency_id, posting_allowed,
                     owner_reference_type, owner_reference_id, status, created_at, version)
@@ -277,6 +300,29 @@ public sealed class TransferTests
                     current_fee_schedule_version_id, created_at, version)
                 VALUES({Blob(122)}, {Blob(1)}, {Blob(120)}, 'NUM0003', '代理決済銀行', 'NORMAL', NULL,
                     'OPERATING', {Blob(121)}, NULL, NULL, 1, 1);
+
+                INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
+                    minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
+                    reopen_closed_account_allowed, public_receiving_enabled_default, cash_card_enabled,
+                    debit_card_enabled, integrated_cash_debit_default, automatic_bank_card_issue_mode,
+                    cash_atm_enabled, cash_card_validity_months, debit_card_validity_months,
+                    per_transfer_limit_minor, daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                    daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                    daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
+                    maximum_active_holds_minor, effective_from, effective_to, version)
+                VALUES({Blob(62)}, {Blob(122)}, 1, 0, 0, 0, 1, 1, 0, 0, 0, 'NONE', 1, NULL, 12,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1);
+
+                INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                    effective_to, version)
+                VALUES({Blob(63)}, {Blob(122)}, 1, NULL, 1);
+
+                UPDATE banks
+                SET current_policy_version_id = {Blob(62)},
+                    current_fee_schedule_version_id = {Blob(63)},
+                    version = version + 1
+                WHERE bank_id = {Blob(122)};
+
 
                 INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
                     starts_on, ends_on, status, closed_at, version)
