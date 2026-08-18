@@ -36,6 +36,7 @@ public static class DiscordServiceRegistration
         services.AddSingleton<Endpoints.ManageEndpoints>();
         services.AddSingleton<Endpoints.SuggestionEndpoints>();
         services.AddSingleton<Endpoints.BankQueryEndpoints>();
+        services.AddSingleton<Endpoints.BankCardEndpoints>();
         services.AddSingleton<Endpoints.ManagePanelEndpoints>();
         services.AddSingleton<Endpoints.SystemEndpoints>();
         services.AddSingleton<DiscordInteractionRouter>();

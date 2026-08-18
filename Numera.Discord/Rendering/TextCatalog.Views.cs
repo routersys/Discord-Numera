@@ -45,6 +45,14 @@ internal static class ViewKeys
     public const string FieldFee = "fee";
     public const string FieldTotal = "total";
 
+    public const string BankCard = "view.bank.card";
+
+    public const string CardFormPrefix = "card_form.";
+
+    public const string CardCapabilityAbsent = "card_capability.absent";
+
+    public static string CardFormOf(string internalToken) => CardFormPrefix + internalToken;
+
     public const string StatusPrefix = "status.";
 
     public const string StatusUnknown = "status.unknown";
@@ -172,6 +180,16 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.StatusOf("COMPLETED")] = "完了",
             [ViewKeys.StatusOf("FAILED")] = "失敗",
             [ViewKeys.StatusOf("RESOLUTION")] = "破綻処理中",
+            [ViewKeys.StatusOf("LOCKED")] = "利用停止中",
+            [ViewKeys.StatusOf("REPLACED")] = "再発行済み",
+            [ViewKeys.StatusOf("EXPIRED")] = "期限切れ",
+            [ViewKeys.CardFormOf("CASH_ONLY")] = "キャッシュカード",
+            [ViewKeys.CardFormOf("DEBIT_ONLY")] = "デビットカード",
+            [ViewKeys.CardFormOf("INTEGRATED_CASH_DEBIT")] = "一体型カード",
+            [ViewKeys.CardCapabilityAbsent] = "なし",
+            [ViewKeys.BankCard + ".title"] = "銀行カード",
+            [ViewKeys.BankCard + ".description"] =
+                "{institutionCode} の{form}です。カード状態は{status}、キャッシュカード機能は{cashCard}、デビット機能は{debitCard}、識別番号は {displayIdentifier} です。",
             [ViewKeys.StatusUnknown] = "状態を表示できません",
         };
 }

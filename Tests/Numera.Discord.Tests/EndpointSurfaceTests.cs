@@ -24,6 +24,7 @@ public sealed class EndpointSurfaceTests
                 "account status",
                 "account unlink",
                 "bank accounts",
+                "bank card",
                 "bank close",
                 "bank list",
                 "bank open",
