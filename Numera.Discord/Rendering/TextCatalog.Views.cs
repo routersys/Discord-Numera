@@ -58,6 +58,22 @@ internal static class ViewKeys
     public const string ManageBankUpdated = "view.manage.bank_updated";
     public const string ManageBankRetired = "view.manage.bank_retired";
 
+    public const string FxMarket = "view.fx.market";
+    public const string FxRate = "view.fx.rate";
+    public const string FxBoard = "view.fx.board";
+    public const string FxBoardEmpty = "view.fx.board_empty";
+    public const string FxChart = "view.fx.chart";
+    public const string FxChartEmpty = "view.fx.chart_empty";
+    public const string FxOrders = "view.fx.orders";
+    public const string FxOrdersEmpty = "view.fx.orders_empty";
+    public const string FxHistory = "view.fx.history";
+    public const string FxHistoryEmpty = "view.fx.history_empty";
+    public const string FxOrderCancelled = "view.fx.order_cancelled";
+
+    public const string FxSidePrefix = "fx_side.";
+
+    public static string FxSideOf(string internalToken) => FxSidePrefix + internalToken;
+
     public const string ScheduledPaymentKindPrefix = "scheduled_payment_kind.";
 
     public static string ScheduledPaymentKindOf(string internalToken) =>
@@ -241,6 +257,42 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageBankRetired + ".title"] = "銀行の廃止手続を開始しました",
             [ViewKeys.ManageBankRetired + ".description"] =
                 "{institutionCode} の廃止手続を開始しました。",
+            [ViewKeys.StatusOf("PARTIALLY_FILLED")] = "一部約定",
+            [ViewKeys.StatusOf("FILLED")] = "約定済み",
+            [ViewKeys.StatusOf("OPEN")] = "板に出ている",
+            [ViewKeys.StatusOf("REJECTED")] = "拒否",
+            [ViewKeys.StatusOf("PENDING_APPROVAL")] = "承認待ち",
+            [ViewKeys.StatusOf("RETIRED")] = "廃止済み",
+            [ViewKeys.StatusOf("DRAFT")] = "下書き",
+            [ViewKeys.StatusOf("PUBLISHED")] = "公開中",
+            [ViewKeys.StatusOf("CLEARING")] = "清算中",
+            [ViewKeys.StatusOf("INTERNAL_FINAL")] = "行内完了",
+            [ViewKeys.FxSideOf("BUY_BASE")] = "買い",
+            [ViewKeys.FxSideOf("SELL_BASE")] = "売り",
+            [ViewKeys.FxMarket + ".title"] = "為替市場",
+            [ViewKeys.FxMarket + ".description"] =
+                "最良買気配は {bestBid}、最良売気配は {bestAsk} です。板の版数は {orderBookVersion} です。",
+            [ViewKeys.FxRate + ".title"] = "為替レート",
+            [ViewKeys.FxRate + ".description"] =
+                "直近約定は {lastTrade}、買気配 {bestBid} 売気配 {bestAsk} スプレッド {spread} です。24時間の高値は {high}、安値は {low}、出来高は {volume} です。",
+            [ViewKeys.FxBoard + ".title"] = "板情報",
+            [ViewKeys.FxBoard + ".description"] = "買い板{bids}売り板{asks}",
+            [ViewKeys.FxBoardEmpty + ".title"] = "板がありません",
+            [ViewKeys.FxBoardEmpty + ".description"] = "この市場にはまだ注文がありません。",
+            [ViewKeys.FxChart + ".title"] = "為替チャート",
+            [ViewKeys.FxChart + ".description"] = "{interval}秒足で{count}本の足があります。",
+            [ViewKeys.FxChartEmpty + ".title"] = "チャートがありません",
+            [ViewKeys.FxChartEmpty + ".description"] = "この市場にはまだ約定がありません。",
+            [ViewKeys.FxOrders + ".title"] = "為替注文の一覧",
+            [ViewKeys.FxOrders + ".description"] = "{count}件の注文があります。{items}",
+            [ViewKeys.FxOrdersEmpty + ".title"] = "注文がありません",
+            [ViewKeys.FxOrdersEmpty + ".description"] = "まだ為替注文を出していません。",
+            [ViewKeys.FxHistory + ".title"] = "約定履歴",
+            [ViewKeys.FxHistory + ".description"] = "{count}件の約定があります。",
+            [ViewKeys.FxHistoryEmpty + ".title"] = "約定がありません",
+            [ViewKeys.FxHistoryEmpty + ".description"] = "この市場にはまだ約定がありません。",
+            [ViewKeys.FxOrderCancelled + ".title"] = "注文を取り消しました",
+            [ViewKeys.FxOrderCancelled + ".description"] = "注文の状態は{status}です。",
             [ViewKeys.StatusUnknown] = "状態を表示できません",
         };
 }

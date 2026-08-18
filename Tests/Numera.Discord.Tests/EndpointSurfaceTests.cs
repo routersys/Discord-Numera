@@ -31,6 +31,14 @@ public sealed class EndpointSurfaceTests
                 "bank payments",
                 "bank statement",
                 "bank transfer",
+                "fx board",
+                "fx cancel",
+                "fx chart",
+                "fx history",
+                "fx market",
+                "fx order",
+                "fx orders",
+                "fx rate",
                 "help",
                 "manage bank-create",
                 "manage bank-edit",
@@ -55,6 +63,7 @@ public sealed class EndpointSurfaceTests
             {
                 "AccountModule",
                 "BankModule",
+                "FxModule",
                 "ManageModule",
                 "NumeraDiscordEndpointsBankEndpointsInteractionsModule",
                 "NumeraDiscordEndpointsHelpEndpointsModule",
@@ -73,7 +82,7 @@ public sealed class EndpointSurfaceTests
             .. provider.PrimaryCommands().Select(static entry => entry.Name).Order(StringComparer.Ordinal),
         ];
 
-        CollectionAssert.AreEqual(new[] { "account", "bank", "help", "manage" }, primary);
+        CollectionAssert.AreEqual(new[] { "account", "bank", "fx", "help", "manage" }, primary);
         Assert.AreEqual("system", provider.ControlCommands().Single().Name);
     }
 

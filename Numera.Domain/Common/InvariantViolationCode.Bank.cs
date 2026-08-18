@@ -15,4 +15,6 @@ public static partial class InvariantViolationCode
     public const string BankOperatorGrantTransitionInvalid = "BANK_OPERATOR_GRANT_TRANSITION_INVALID";
     public const string BankOperatorGrantStatusUnknown = "BANK_OPERATOR_GRANT_STATUS_UNKNOWN";
     public const string BankOperatorGrantSelfService = "BANK_OPERATOR_GRANT_SELF_SERVICE";
+    public const string AccountProductTransitionInvalid = "ACCOUNT_PRODUCT_TRANSITION_INVALID";
+    public const string AccountProductStatusUnknown = "ACCOUNT_PRODUCT_STATUS_UNKNOWN";
 }

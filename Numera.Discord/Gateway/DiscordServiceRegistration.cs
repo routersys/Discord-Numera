@@ -44,6 +44,7 @@ public static class DiscordServiceRegistration
         services.AddSingleton<Rendering.IBankCardRenderer, Rendering.BankCardRenderer>();
         services.AddSingleton<Numera.Application.Abstractions.IBankCardImageRenderer, Rendering.SkiaBankCardImageRenderer>();
         services.AddSingleton<Endpoints.BankCardEndpoints>();
+        services.AddSingleton<Endpoints.FxEndpoints>();
         services.AddSingleton<Endpoints.BankPaymentsEndpoints>();
         services.AddSingleton<Endpoints.ManagePanelEndpoints>();
         services.AddSingleton<Endpoints.SystemEndpoints>();

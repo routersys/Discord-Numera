@@ -36,6 +36,12 @@ public sealed class StateMachineClosureTests
         ["payment_networks"] = Tokens<PaymentNetworkStatus>(static value => value.ToToken()),
         ["bank_operator_grants"] = Tokens<BankOperatorGrantStatus>(static value => value.ToToken()),
         ["bank_cards"] = Tokens<BankCardStatus>(static value => value.ToToken()),
+        ["account_products"] = Tokens<AccountProductStatus>(static value => value.ToToken()),
+        ["fx_markets"] = Tokens<FxMarketStatus>(static value => value.ToToken()),
+        ["fx_orders"] = Tokens<FxOrderStatus>(static value => value.ToToken()),
+        ["fx_settlement_legs"] = Tokens<FxSettlementLegStatus>(static value => value.ToToken()),
+        ["fx_settlement_leg_components"] =
+            Tokens<FxSettlementLegComponentStatus>(static value => value.ToToken()),
         ["bank_card_design_template_versions"] =
             Tokens<BankCardDesignVersionStatus>(static value => value.ToToken()),
         ["cash_cards"] = Tokens<CashCardStatus>(static value => value.ToToken()),
@@ -51,7 +57,6 @@ public sealed class StateMachineClosureTests
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
     [
-        "account_products",
         "accounting_books",
         "accounting_periods",
         "accounting_transactions",

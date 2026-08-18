@@ -473,3 +473,75 @@ public readonly record struct BankCardDesignTextSlotId(EntityIdValue Value)
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct FxMarketId(EntityIdValue Value) : IEntityId<FxMarketId>
+{
+    public static string EntityName => "fx_market";
+
+    public static FxMarketId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxMarketPolicyVersionId(EntityIdValue Value) : IEntityId<FxMarketPolicyVersionId>
+{
+    public static string EntityName => "fx_market_policy_version";
+
+    public static FxMarketPolicyVersionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxFundingEndpointId(EntityIdValue Value) : IEntityId<FxFundingEndpointId>
+{
+    public static string EntityName => "fx_funding_endpoint";
+
+    public static FxFundingEndpointId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxSettlementEndpointId(EntityIdValue Value) : IEntityId<FxSettlementEndpointId>
+{
+    public static string EntityName => "fx_settlement_endpoint";
+
+    public static FxSettlementEndpointId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxOrderId(EntityIdValue Value) : IEntityId<FxOrderId>
+{
+    public static string EntityName => "fx_order";
+
+    public static FxOrderId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxTradeId(EntityIdValue Value) : IEntityId<FxTradeId>
+{
+    public static string EntityName => "fx_trade";
+
+    public static FxTradeId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxSettlementLegId(EntityIdValue Value) : IEntityId<FxSettlementLegId>
+{
+    public static string EntityName => "fx_settlement_leg";
+
+    public static FxSettlementLegId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct FxSettlementLegComponentId(EntityIdValue Value) : IEntityId<FxSettlementLegComponentId>
+{
+    public static string EntityName => "fx_settlement_leg_component";
+
+    public static FxSettlementLegComponentId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

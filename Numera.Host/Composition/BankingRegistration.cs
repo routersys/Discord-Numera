@@ -43,6 +43,8 @@ internal static class BankingRegistration
         services.AddSingleton<IPrudentialAdministrationApplicationService, PrudentialAdministrationApplicationService>();
         services.AddSingleton<IBankOperatorGrantApplicationService, BankOperatorGrantApplicationService>();
         services.AddSingleton<IBankCardApplicationService, BankCardApplicationService>();
+        services.AddSingleton<IFxAdministrationApplicationService, FxAdministrationApplicationService>();
+        services.AddSingleton<IFxApplicationService, FxApplicationService>();
         services.AddSingleton<IEconomyCalendarAdministrationApplicationService, EconomyCalendarAdministrationApplicationService>();
         services.AddSingleton<IPaymentManagementApplicationService, PaymentManagementApplicationService>();
         services.AddSingleton<IFeeAdministrationApplicationService, FeeAdministrationApplicationService>();
