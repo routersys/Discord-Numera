@@ -41,21 +41,22 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
 
     internal SqliteGovernanceRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
 
-    public void AddPresentationProfile(PresentationProfileRecord profile)
+    public void AddPresentationProfile(PresentationProfileRecord profile, UtcTimestamp createdAt)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         using SqliteCommand command = unitOfWork.CreateCommand($"""
             INSERT INTO presentation_profile_versions({ProfileColumns}, created_at)
             VALUES($id, $scope, $bank, $info, $success, $warning, $error, $neutral, $status,
-                $version, 0);
+                $version, $now);
             """);
 
         BindProfile(command, profile);
+        command.Parameters.AddWithValue("$now", createdAt.UnixMilliseconds);
         command.ExecuteNonQuery();
     }
 
-    public void UpdatePresentationProfile(PresentationProfileRecord profile)
+    public void UpdatePresentationProfile(PresentationProfileRecord profile, UtcTimestamp occurredAt)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -63,12 +64,13 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
             UPDATE presentation_profile_versions
             SET information_rgb = $info, success_rgb = $success, warning_rgb = $warning,
                 error_rgb = $error, neutral_rgb = $neutral, status = $status, version = $version,
-                published_at = CASE WHEN $status = 'PUBLISHED' THEN 0 ELSE published_at END,
-                retired_at = CASE WHEN $status = 'RETIRED' THEN 0 ELSE retired_at END
+                published_at = CASE WHEN $status = 'PUBLISHED' THEN $now ELSE published_at END,
+                retired_at = CASE WHEN $status = 'RETIRED' THEN $now ELSE retired_at END
             WHERE presentation_profile_version_id = $id;
             """);
 
         BindProfile(command, profile);
+        command.Parameters.AddWithValue("$now", occurredAt.UnixMilliseconds);
         command.ExecuteNonQuery();
     }
 

@@ -119,9 +119,9 @@ public sealed record MerchantOperatorGrantRecord(
 
 public interface IGovernanceRepository
 {
-    void AddPresentationProfile(PresentationProfileRecord profile);
+    void AddPresentationProfile(PresentationProfileRecord profile, UtcTimestamp createdAt);
 
-    void UpdatePresentationProfile(PresentationProfileRecord profile);
+    void UpdatePresentationProfile(PresentationProfileRecord profile, UtcTimestamp occurredAt);
 
     PresentationProfileRecord? FindPresentationProfile(PresentationProfileVersionId id);
 

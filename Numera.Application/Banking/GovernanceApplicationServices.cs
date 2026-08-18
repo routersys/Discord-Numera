@@ -1,6 +1,7 @@
 using System.Globalization;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 
@@ -29,7 +30,8 @@ public sealed record PreviewPresentationProfileQuery(
 
 public sealed record PublishPresentationProfileCommand(
     AuthorizationContext Actor,
-    PresentationProfileVersionId PresentationProfileVersionId);
+    PresentationProfileVersionId PresentationProfileVersionId,
+    long ExpectedVersion);
 
 public sealed record RetirePresentationProfileCommand(
     AuthorizationContext Actor,
@@ -76,6 +78,9 @@ public interface IPresentationProfileAdministrationApplicationService
 public sealed class PresentationProfileAdministrationApplicationService
     : IPresentationProfileAdministrationApplicationService
 {
+    public const string ProfilePublishOperationType = "PRESENTATION_PROFILE_PUBLISH";
+    public const string ProfilePublishedEventType = "PRESENTATION_PROFILE_PUBLISHED";
+
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
@@ -186,13 +191,13 @@ public sealed class PresentationProfileAdministrationApplicationService
             1);
 
         PresentationProfileStatusCatalog.EnsureCreatable(draft.Status);
-        unitOfWork.Governance.AddPresentationProfile(draft);
+        unitOfWork.Governance.AddPresentationProfile(draft, clock.Now());
 
         return Result<PresentationProfileDraftView>.Success(
             new PresentationProfileDraftView(draft.Id, draft.Status, draft.Version));
     }
 
-    private static Result<PresentationProfileDraftView> UpdateDraft(
+    private Result<PresentationProfileDraftView> UpdateDraft(
         IBankingUnitOfWork unitOfWork,
         UpdatePresentationProfileDraftCommand command)
     {
@@ -220,13 +225,13 @@ public sealed class PresentationProfileAdministrationApplicationService
             Version = resolved.Value.Version + 1,
         };
 
-        unitOfWork.Governance.UpdatePresentationProfile(updated);
+        unitOfWork.Governance.UpdatePresentationProfile(updated, clock.Now());
 
         return Result<PresentationProfileDraftView>.Success(
             new PresentationProfileDraftView(updated.Id, updated.Status, updated.Version));
     }
 
-    private static Result<PresentationProfileVersionView> Publish(
+    private Result<PresentationProfileVersionView> Publish(
         IBankingUnitOfWork unitOfWork,
         PublishPresentationProfileCommand command)
     {
@@ -240,17 +245,48 @@ public sealed class PresentationProfileAdministrationApplicationService
 
         PresentationProfileRecord draft = resolved.Value;
 
+        if (draft.Version != command.ExpectedVersion)
+        {
+            return Result<PresentationProfileVersionView>.Failure(
+                ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
+        }
+
+        if (!IsPublishable(draft))
+        {
+            return Result<PresentationProfileVersionView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.PresentationProfilePaletteInvalid);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            ProfilePublishOperationType,
+            draft.EconomyScopeId,
+            actorPartyId: null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(
+                ProfilePublishOperationType,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{draft.Id.Value}:{command.ExpectedVersion}")),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
         if (unitOfWork.Governance.FindPublishedPresentationProfile(
                 draft.EconomyScopeId, draft.BankId) is { } current)
         {
             PresentationProfileStatusCatalog.EnsureTransition(
                 current.Status, PresentationProfileVersionStatus.Retired);
 
-            unitOfWork.Governance.UpdatePresentationProfile(current with
-            {
-                Status = PresentationProfileVersionStatus.Retired,
-                Version = current.Version + 1,
-            });
+            unitOfWork.Governance.UpdatePresentationProfile(
+                current with
+                {
+                    Status = PresentationProfileVersionStatus.Retired,
+                    Version = current.Version + 1,
+                },
+                now);
         }
 
         PresentationProfileStatusCatalog.EnsureTransition(
@@ -262,13 +298,45 @@ public sealed class PresentationProfileAdministrationApplicationService
             Version = draft.Version + 1,
         };
 
-        unitOfWork.Governance.UpdatePresentationProfile(published);
+        unitOfWork.Governance.UpdatePresentationProfile(published, now);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.BankAdministration.AddAuditRecord(
+            AuditRecordId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            ProfilePublishOperationType,
+            "presentation_profile_version",
+            published.Id.Value,
+            reason: null,
+            now);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            ProfilePublishedEventType,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $$"""{"presentation_profile_version_id":"{{published.Id.Value}}"}"""),
+            now));
 
         return Result<PresentationProfileVersionView>.Success(new PresentationProfileVersionView(
             published.Id, published.EconomyScopeId, published.BankId, published.Status));
     }
 
-    private static Result<bool> Retire(
+    private static bool IsPublishable(PresentationProfileRecord profile) =>
+        IsChannelValid(profile.InformationRgb)
+        && IsChannelValid(profile.SuccessRgb)
+        && IsChannelValid(profile.WarningRgb)
+        && IsChannelValid(profile.ErrorRgb)
+        && IsChannelValid(profile.NeutralRgb);
+
+    private static bool IsChannelValid(int? channel) =>
+        channel is null || channel is >= 0 and <= 0xFFFFFF;
+
+    private Result<bool> Retire(
         IBankingUnitOfWork unitOfWork,
         RetirePresentationProfileCommand command)
     {
@@ -298,11 +366,13 @@ public sealed class PresentationProfileAdministrationApplicationService
                 ErrorCategory.Conflict, BankingErrorCodes.PresentationProfileNotRetirable);
         }
 
-        unitOfWork.Governance.UpdatePresentationProfile(profile with
-        {
-            Status = PresentationProfileVersionStatus.Retired,
-            Version = profile.Version + 1,
-        });
+        unitOfWork.Governance.UpdatePresentationProfile(
+            profile with
+            {
+                Status = PresentationProfileVersionStatus.Retired,
+                Version = profile.Version + 1,
+            },
+            clock.Now());
 
         return Result<bool>.Success(true);
     }
