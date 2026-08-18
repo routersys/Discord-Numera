@@ -54,6 +54,10 @@ internal static class ViewKeys
     public const string PaymentsMandates = "view.bank.payments_mandates";
     public const string PaymentsMandatesEmpty = "view.bank.payments_mandates_empty";
 
+    public const string ManageBankDraft = "view.manage.bank_draft";
+    public const string ManageBankUpdated = "view.manage.bank_updated";
+    public const string ManageBankRetired = "view.manage.bank_retired";
+
     public const string ScheduledPaymentKindPrefix = "scheduled_payment_kind.";
 
     public static string ScheduledPaymentKindOf(string internalToken) =>
@@ -228,6 +232,15 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.PaymentsMandates + ".description"] = "{count}件の口座振替があります。{items}",
             [ViewKeys.PaymentsMandatesEmpty + ".title"] = "口座振替がありません",
             [ViewKeys.PaymentsMandatesEmpty + ".description"] = "まだ口座振替を承認していません。",
+            [ViewKeys.ManageBankDraft + ".title"] = "銀行設立を開始しました",
+            [ViewKeys.ManageBankDraft + ".description"] =
+                "金融機関コード {institutionCode} で設立を開始しました。手順は {steps} です。",
+            [ViewKeys.ManageBankUpdated + ".title"] = "銀行の方針を更新しました",
+            [ViewKeys.ManageBankUpdated + ".description"] =
+                "{institutionCode} {name} の方針を更新しました。状態は{status}です。",
+            [ViewKeys.ManageBankRetired + ".title"] = "銀行の廃止手続を開始しました",
+            [ViewKeys.ManageBankRetired + ".description"] =
+                "{institutionCode} {name} の廃止手続を開始しました。状態は{status}です。",
             [ViewKeys.StatusUnknown] = "状態を表示できません",
         };
 }

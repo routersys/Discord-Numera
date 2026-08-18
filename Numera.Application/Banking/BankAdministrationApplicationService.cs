@@ -36,6 +36,32 @@ public sealed record RejectAccountOpeningCommand(
     AccountOpeningApplicationId AccountOpeningApplicationId,
     string ReasonCode);
 
+public sealed record StartCreateBankCommand(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    EconomyScopeId? TargetEconomyScopeId = null);
+
+public sealed record UpdateBankPolicyCommand(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    long ExpectedBankVersion,
+    bool OpeningEnabled,
+    int MinimumCustomerAccountAgeDays,
+    long MinimumInitialFundingMinor,
+    bool RequiresManualApproval,
+    bool ReopenClosedAccountAllowed,
+    bool PublicReceivingEnabledDefault);
+
+public sealed record RetireBankCommand(
+    AuthorizationContext Actor,
+    string InstitutionCode);
+
+public sealed record BankDraftView(
+    EconomyScopeId EconomyScopeId,
+    string InstitutionCode,
+    CurrencyId CurrencyId,
+    IReadOnlyList<string> Steps);
+
 public sealed record BankView(
     BankId Id,
     string InstitutionCode,
@@ -54,6 +80,18 @@ public sealed record AccountOpeningApplicationView(
 
 public interface IBankAdministrationApplicationService
 {
+    Task<Result<BankDraftView>> StartCreateBankAsync(
+        StartCreateBankCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<BankView>> UpdateBankPolicyAsync(
+        UpdateBankPolicyCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<BankView>> RetireBankAsync(
+        RetireBankCommand command,
+        CancellationToken cancellationToken);
+
     Task<Result<BankView>> CommitCreateBankAsync(
         CommitCreateBankCommand command,
         CancellationToken cancellationToken);
@@ -89,6 +127,22 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
     private const string ClientBankDepositPrefix = "2500-";
     private const int DefaultDebitCardValidityMonths = 60;
 
+    private static readonly string[] BankCreateWizardSteps =
+    [
+        "IDENTITY",
+        "OPENING_POLICY",
+        "ACCOUNT_PRODUCT",
+        "FEE_SCHEDULE",
+        "TRANSFER_LIMITS",
+        "DORMANCY",
+        "BANK_CARD",
+        "ATM_CASH",
+        "SETTLEMENT",
+        "BRANDING",
+        "REVIEW",
+        "COMMIT",
+    ];
+
     private static readonly FeeType[] CatchAllFeeTypes =
     [
         FeeType.AccountOpening,
@@ -116,6 +170,198 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
+
+    public Task<Result<BankDraftView>> StartCreateBankAsync(
+        StartCreateBankCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => StartCreateBank(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<BankView>> UpdateBankPolicyAsync(
+        UpdateBankPolicyCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => UpdateBankPolicy(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<BankView>> RetireBankAsync(
+        RetireBankCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => RetireBank(unitOfWork, command), cancellationToken);
+    }
+
+    private static Result<BankDraftView> StartCreateBank(
+        IBankingUnitOfWork unitOfWork,
+        StartCreateBankCommand command)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, command.Actor, command.TargetEconomyScopeId);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<BankDraftView>.Failure(scope.Error!);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(unitOfWork, command.Actor, scope.Value);
+
+        if (!authorized.IsSuccess)
+        {
+            return Result<BankDraftView>.Failure(authorized.Error!);
+        }
+
+        if (unitOfWork.BankAdministration.InstitutionCodeExists(command.InstitutionCode))
+        {
+            return Result<BankDraftView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.BankAlreadyExists);
+        }
+
+        if (unitOfWork.BankAdministration.FindActiveCurrency(scope.Value) is not { } currency)
+        {
+            return Result<BankDraftView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
+        }
+
+        return Result<BankDraftView>.Success(
+            new BankDraftView(scope.Value, command.InstitutionCode, currency, BankCreateWizardSteps));
+    }
+
+    private Result<BankView> UpdateBankPolicy(
+        IBankingUnitOfWork unitOfWork,
+        UpdateBankPolicyCommand command)
+    {
+        Result<Bank> resolved = ResolveManagedBank(unitOfWork, command.Actor, command.InstitutionCode);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<BankView>.Failure(resolved.Error!);
+        }
+
+        Bank bank = resolved.Value;
+
+        if (bank.Version != command.ExpectedBankVersion)
+        {
+            return Result<BankView>.Failure(
+                ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
+        }
+
+        if (bank.CurrentPolicyVersionId is not { } currentId
+            || unitOfWork.BankAdministration.FindBankPolicyVersion(currentId) is not { } current)
+        {
+            return Result<BankView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankPolicyVersionNotFound);
+        }
+
+        BankPolicyVersion replacement;
+
+        try
+        {
+            replacement = BankPolicyVersion.Create(
+                BankPolicyVersionId.FromValue(idGenerator.NextId()),
+                bank.Id,
+                command.OpeningEnabled,
+                command.MinimumCustomerAccountAgeDays,
+                MoneyMinor.FromMinor(command.MinimumInitialFundingMinor),
+                command.RequiresManualApproval,
+                command.ReopenClosedAccountAllowed,
+                command.PublicReceivingEnabledDefault,
+                current.CashCardEnabled,
+                current.DebitCardEnabled,
+                current.IntegratedCashDebitDefault,
+                current.AutomaticBankCardIssueMode,
+                current.CashAtmEnabled,
+                current.CashCardValidityMonths,
+                current.DebitCardValidityMonths,
+                current.PerTransferLimit,
+                current.DailyOutgoingLimit,
+                current.MaximumActiveHolds,
+                clock.Now(),
+                effectiveTo: null,
+                current.Version + 1);
+        }
+        catch (InvariantViolationException)
+        {
+            return Result<BankView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.BankPolicyInputInvalid);
+        }
+
+        unitOfWork.BankAdministration.AddBankPolicyVersion(replacement);
+        bank.ApplyPolicyVersion(replacement.Id);
+        unitOfWork.BankAdministration.UpdateBank(bank);
+
+        return Result<BankView>.Success(ToView(bank));
+    }
+
+    private static Result<BankView> RetireBank(
+        IBankingUnitOfWork unitOfWork,
+        RetireBankCommand command)
+    {
+        Result<Bank> resolved = ResolveManagedBank(unitOfWork, command.Actor, command.InstitutionCode);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<BankView>.Failure(resolved.Error!);
+        }
+
+        Bank bank = resolved.Value;
+
+        if (bank.Status is not (BankStatus.Restricted or BankStatus.Resolution))
+        {
+            return Result<BankView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.BankNotRetirable);
+        }
+
+        if (unitOfWork.Relationships.CountByBank(bank.Id) > 0)
+        {
+            return Result<BankView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.BankHasCustomers);
+        }
+
+        bank.BeginClosing();
+        unitOfWork.BankAdministration.UpdateBank(bank);
+
+        return Result<BankView>.Success(ToView(bank));
+    }
+
+    private static Result<Bank> ResolveManagedBank(
+        IBankingUnitOfWork unitOfWork,
+        AuthorizationContext actor,
+        string institutionCode)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(unitOfWork, actor, requested: null);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<Bank>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Banks.FindByInstitutionCode(scope.Value, institutionCode) is not { } bank)
+        {
+            return Result<Bank>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(unitOfWork, actor, bank.EconomyScopeId);
+
+        return authorized.IsSuccess
+            ? Result<Bank>.Success(bank)
+            : Result<Bank>.Failure(authorized.Error!);
+    }
+
+    private static BankView ToView(Bank bank) =>
+        new(
+            bank.Id,
+            bank.InstitutionCode.Value,
+            bank.Name.Value,
+            bank.Status,
+            bank.CurrentPolicyVersionId!.Value,
+            bank.CurrentFeeScheduleVersionId!.Value);
 
     public Task<Result<BankView>> CommitCreateBankAsync(
         CommitCreateBankCommand command,

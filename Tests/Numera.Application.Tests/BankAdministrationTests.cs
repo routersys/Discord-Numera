@@ -638,4 +638,127 @@ public sealed class BankAdministrationTests
 
         Assert.AreEqual(Convert.ToHexString(bank.PolicyVersionId.Value.ToByteArray()), policy);
     }
+
+    [TestMethod]
+    public async Task StartingTheWizardReturnsTheCanonicalStepOrder()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<BankDraftView> result = await harness.Administration.StartCreateBankAsync(
+            new StartCreateBankCommand(harness.Actor, Institution), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(Institution, result.Value.InstitutionCode);
+        Assert.AreEqual("IDENTITY", result.Value.Steps[0]);
+        Assert.AreEqual("COMMIT", result.Value.Steps[^1]);
+        Assert.AreEqual(12, result.Value.Steps.Count);
+    }
+
+    [TestMethod]
+    public async Task StartingTheWizardForAnExistingCodeIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        Assert.IsTrue((await harness.CreateBankAsync(harness.CreateCommand())).IsSuccess);
+
+        Result<BankDraftView> result = await harness.Administration.StartCreateBankAsync(
+            new StartCreateBankCommand(harness.Actor, Institution), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.Conflict, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.BankAlreadyExists, result.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task ACustomerCannotStartTheWizard()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<BankDraftView> result = await harness.Administration.StartCreateBankAsync(
+            new StartCreateBankCommand(
+                new AuthorizationContext(AuthorizationLevel.Customer, Customer, Guild), Institution),
+            CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.Forbidden, result.Error!.Category);
+    }
+
+    [TestMethod]
+    public async Task UpdatingThePolicyPublishesANewImmutableVersion()
+    {
+        await using Harness harness = Harness.Create();
+        BankView bank = await harness.CreateOperatingBankAsync(harness.CreateCommand());
+        long before = harness.Count("bank_policy_versions");
+
+        Result<BankView> result = await harness.Administration.UpdateBankPolicyAsync(
+            new UpdateBankPolicyCommand(
+                harness.Actor, Institution, ExpectedBankVersion(harness, bank),
+                OpeningEnabled: false, 30, 1_000, true, true, false),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(before + 1, harness.Count("bank_policy_versions"));
+        Assert.AreEqual(
+            "0",
+            harness.ReadText("""
+                SELECT CAST(p.opening_enabled AS TEXT) FROM bank_policy_versions p
+                INNER JOIN banks b ON b.current_policy_version_id = p.bank_policy_version_id;
+                """));
+    }
+
+    [TestMethod]
+    public async Task UpdatingThePolicyWithAStaleVersionConflicts()
+    {
+        await using Harness harness = Harness.Create();
+        BankView bank = await harness.CreateOperatingBankAsync(harness.CreateCommand());
+
+        Result<BankView> result = await harness.Administration.UpdateBankPolicyAsync(
+            new UpdateBankPolicyCommand(
+                harness.Actor, Institution, ExpectedBankVersion(harness, bank) - 1,
+                OpeningEnabled: false, 0, 0, false, false, true),
+            CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.ConcurrencyConflict, result.Error!.Category);
+    }
+
+    [TestMethod]
+    public async Task AnOperatingBankCannotBeRetiredDirectly()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.CreateOperatingBankAsync(harness.CreateCommand());
+
+        Result<BankView> result = await harness.Administration.RetireBankAsync(
+            new RetireBankCommand(harness.Actor, Institution), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.Conflict, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.BankNotRetirable, result.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task ARestrictedBankWithoutCustomersEntersClosing()
+    {
+        await using Harness harness = Harness.Create();
+        BankView bank = await harness.CreateOperatingBankAsync(harness.CreateCommand());
+
+        harness.Execute($"""
+            UPDATE banks SET status = 'RESTRICTED', version = version + 1
+            WHERE bank_id = x'{Convert.ToHexString(bank.Id.Value.ToByteArray())}';
+            """);
+
+        Result<BankView> result = await harness.Administration.RetireBankAsync(
+            new RetireBankCommand(harness.Actor, Institution), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(BankStatus.Closing, result.Value.Status);
+        Assert.AreEqual("CLOSING", harness.ReadText("SELECT status FROM banks;"));
+    }
+
+    private static long ExpectedBankVersion(Harness harness, BankView bank) =>
+        long.Parse(
+            harness.ReadText($"""
+                SELECT CAST(version AS TEXT) FROM banks
+                WHERE bank_id = x'{Convert.ToHexString(bank.Id.Value.ToByteArray())}';
+                """),
+            System.Globalization.CultureInfo.InvariantCulture);
 }

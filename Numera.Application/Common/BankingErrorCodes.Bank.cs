@@ -50,4 +50,11 @@ public static partial class BankingErrorCodes
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 32);
 
     public static string CurrencyUnavailable { get; } = ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 33);
+
+    public static string BankPolicyVersionNotFound { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.NotFound, 32);
+
+    public static string BankNotRetirable { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 36);
+
+    public static string BankHasCustomers { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 37);
 }
