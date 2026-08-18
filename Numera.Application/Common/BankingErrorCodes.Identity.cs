@@ -13,4 +13,8 @@ public static partial class BankingErrorCodes
     public static string LastLinkCannotBeRemoved { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 50);
 
     public static string TransferLimitInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 50);
+
+    public static string PrudentialPolicyInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 51);
+
+    public static string PrudentialPolicyNotDraft { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 51);
 }
