@@ -225,6 +225,15 @@ public readonly record struct AuditRecordId(EntityIdValue Value) : IEntityId<Aud
     public override string ToString() => Value.ToString();
 }
 
+public readonly record struct OperationResultId(EntityIdValue Value) : IEntityId<OperationResultId>
+{
+    public static string EntityName => "operation_result";
+
+    public static OperationResultId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
 public readonly record struct ResolutionCaseId(EntityIdValue Value) : IEntityId<ResolutionCaseId>
 {
     public static string EntityName => "resolution_case";

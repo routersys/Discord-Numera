@@ -297,6 +297,10 @@ public interface ICommerceRepository
 
     CommerceOrderRecord? FindOrder(CommerceOrderId id);
 
+    IReadOnlyList<CommerceOrderRecord> ListExpiredAwaitingConfirmationOrders(
+        UtcTimestamp now,
+        int limit);
+
     IReadOnlyList<CommerceOrderRecord> ListOrdersForCustomer(
         CustomerAccountId customerAccountId,
         CommerceOrderId? after,

@@ -643,6 +643,32 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         return reader.Read() ? ReadOrder(reader) : null;
     }
 
+    public IReadOnlyList<CommerceOrderRecord> ListExpiredAwaitingConfirmationOrders(
+        UtcTimestamp now,
+        int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {OrderColumns} FROM commerce_orders
+            WHERE status = $status AND checkout_expires_at <= $now
+            ORDER BY checkout_expires_at, commerce_order_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$status", CommerceOrderStatus.AwaitingConfirmation.ToToken());
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<CommerceOrderRecord> orders = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            orders.Add(ReadOrder(reader));
+        }
+
+        return orders;
+    }
+
     public IReadOnlyList<CommerceOrderRecord> ListOrdersForCustomer(
         CustomerAccountId customerAccountId,
         CommerceOrderId? after,

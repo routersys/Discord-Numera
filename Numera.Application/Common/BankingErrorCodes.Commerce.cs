@@ -133,4 +133,7 @@ public static partial class BankingErrorCodes
 
     public static string MerchantFulfillmentScopeInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 193);
+
+    public static string CommerceCheckoutTokenInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 194);
 }

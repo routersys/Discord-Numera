@@ -1,6 +1,7 @@
 using System.Globalization;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 using Numera.Domain.Identity;
@@ -17,7 +18,8 @@ public sealed record ListMerchantProductsQuery(
 public sealed record CreateCommerceCheckoutCommand(
     AuthorizationContext Actor,
     MerchantProductId MerchantProductId,
-    int Quantity);
+    int Quantity,
+    string IdempotencyToken);
 
 public sealed record ReviewCommerceCheckoutCommand(
     AuthorizationContext Actor,
@@ -130,6 +132,9 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
 {
     internal const long CheckoutLifetimeMilliseconds = 24 * 60 * 60 * 1000;
     internal const long ConfirmationLifetimeMilliseconds = 300 * 1000;
+    internal const string CheckoutOperationType = "COMMERCE_CHECKOUT_CREATE";
+    internal const string CheckoutCreatedEventType = "COMMERCE_CHECKOUT_CREATED";
+    internal const string CheckoutResultKind = "COMMERCE_ORDER";
 
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
@@ -303,6 +308,22 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
         IBankingUnitOfWork unitOfWork,
         CreateCommerceCheckoutCommand command)
     {
+        if (string.IsNullOrWhiteSpace(command.IdempotencyToken))
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.Validation,
+                BankingErrorCodes.CommerceCheckoutTokenInvalid,
+                nameof(command.IdempotencyToken));
+        }
+
+        IdempotencyKey idempotencyKey =
+            IdempotencyKey.Create(CheckoutOperationType, command.IdempotencyToken);
+
+        if (unitOfWork.BusinessOperations.Find(idempotencyKey) is { } replayed)
+        {
+            return Replay(unitOfWork, replayed);
+        }
+
         if (command.Quantity <= 0)
         {
             return Result<CommerceCheckoutView>.Failure(
@@ -453,6 +474,13 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
 
         unitOfWork.Commerce.UpdateOrder(awaiting);
 
+        Result recorded = RecordCheckoutOperation(unitOfWork, command, idempotencyKey, awaiting, now);
+
+        if (!recorded.IsSuccess)
+        {
+            return Result<CommerceCheckoutView>.Failure(recorded.Error!);
+        }
+
         return Result<CommerceCheckoutView>.Success(new CommerceCheckoutView(
             awaiting.Id,
             awaiting.MerchantProfileId,
@@ -469,6 +497,106 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
                     line.Quantity,
                     line.LineSubtotal),
             ]));
+    }
+
+    private Result RecordCheckoutOperation(
+        IBankingUnitOfWork unitOfWork,
+        CreateCommerceCheckoutCommand command,
+        IdempotencyKey idempotencyKey,
+        CommerceOrderRecord order,
+        UtcTimestamp now)
+    {
+        if (unitOfWork.GuildEconomies.FindEconomyScope(command.Actor.GuildId) is not { } economyScopeId)
+        {
+            return Result.Failure(ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            CheckoutOperationType,
+            economyScopeId,
+            actorPartyId: null,
+            idGenerator.NextId(),
+            idempotencyKey,
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.OperationResults.Add(new OperationResultRecord(
+            OperationResultId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            CheckoutResultKind,
+            OrderReference(order.Id),
+            now));
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            CheckoutCreatedEventType,
+            OrderReference(order.Id),
+            now));
+
+        return Result.Success();
+    }
+
+    private static Result<CommerceCheckoutView> Replay(
+        IBankingUnitOfWork unitOfWork,
+        BusinessOperation operation)
+    {
+        if (unitOfWork.OperationResults.Find(operation.Id) is not { } result ||
+            !TryReadOrderId(result.ResultJson, out CommerceOrderId orderId) ||
+            unitOfWork.Commerce.FindOrder(orderId) is not { } order)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
+        }
+
+        return Result<CommerceCheckoutView>.Success(new CommerceCheckoutView(
+            order.Id,
+            order.MerchantProfileId,
+            order.PresentmentCurrencyId,
+            order.OrderTotalPresentment,
+            order.Status,
+            order.CheckoutExpiresAt,
+            [
+                .. unitOfWork.Commerce.ListOrderLines(order.Id).Select(static line =>
+                    new CommerceCheckoutLineView(
+                        line.Id,
+                        line.MerchantProductId,
+                        line.ProductNameSnapshot,
+                        line.UnitPrice,
+                        line.Quantity,
+                        line.LineSubtotal)),
+            ]));
+    }
+
+    private static string OrderReference(CommerceOrderId id) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $$"""{"commerce_order_id":"{{id.Value}}"}""");
+
+    private static bool TryReadOrderId(string resultJson, out CommerceOrderId orderId)
+    {
+        const string Marker = "\"commerce_order_id\":\"";
+        int start = resultJson.IndexOf(Marker, StringComparison.Ordinal);
+
+        if (start >= 0)
+        {
+            int open = start + Marker.Length;
+            int close = resultJson.IndexOf('"', open);
+
+            if (close > open &&
+                EntityIdValue.TryParse(resultJson.AsSpan(open, close - open), out EntityIdValue value))
+            {
+                orderId = CommerceOrderId.FromValue(value);
+                return true;
+            }
+        }
+
+        orderId = default;
+        return false;
     }
 
     private Result<CommerceCheckoutConfirmationView> ReviewCheckout(

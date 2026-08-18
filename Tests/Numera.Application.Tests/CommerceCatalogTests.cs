@@ -44,6 +44,8 @@ public sealed class CommerceCatalogTests
 
         public CommerceApplicationService Commerce { get; private set; } = null!;
 
+        public CommerceMaintenanceService Maintenance { get; private set; } = null!;
+
         public static Harness Create()
         {
             string root = Path.Combine(Path.GetTempPath(), "numera-commerce", Guid.NewGuid().ToString("n"));
@@ -75,6 +77,7 @@ public sealed class CommerceCatalogTests
                 ids);
             harness.Merchants = new MerchantAdministrationApplicationService(gateway, harness.Clock, ids);
             harness.Commerce = new CommerceApplicationService(gateway, harness.Clock, ids);
+            harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock);
 
             return harness;
         }
@@ -366,7 +369,8 @@ public sealed class CommerceCatalogTests
         await harness.OpenAccountAsync(BuyerUser, "buyer");
 
         Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
-            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 2), CancellationToken.None);
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 2, "checkout-1"),
+            CancellationToken.None);
 
         Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
         Assert.AreEqual(CommerceOrderStatus.AwaitingConfirmation, checkout.Value.Status);
@@ -380,6 +384,100 @@ public sealed class CommerceCatalogTests
     }
 
     [TestMethod]
+    public async Task TheSameInteractionReturnsTheSameOrder()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProductView product = await CreateActiveProductAsync(harness, profile.Id);
+        await harness.OpenAccountAsync(BuyerUser, "buyer");
+
+        Result<CommerceCheckoutView> first = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "interaction-7"),
+            CancellationToken.None);
+
+        Result<CommerceCheckoutView> second = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "interaction-7"),
+            CancellationToken.None);
+
+        Assert.IsTrue(first.IsSuccess, first.Error?.Code);
+        Assert.IsTrue(second.IsSuccess, second.Error?.Code);
+        Assert.AreEqual(first.Value.CommerceOrderId, second.Value.CommerceOrderId);
+        Assert.AreEqual(1, second.Value.Lines.Count);
+        Assert.AreEqual(1L, harness.Count("commerce_orders"));
+        Assert.AreEqual(1L, harness.Count("commerce_payments"));
+        Assert.AreEqual(1L, harness.Count("operation_results"));
+    }
+
+    [TestMethod]
+    public async Task CheckoutCreationEnqueuesOneOutboxEvent()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProductView product = await CreateActiveProductAsync(harness, profile.Id);
+        await harness.OpenAccountAsync(BuyerUser, "buyer");
+
+        Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "interaction-8"),
+            CancellationToken.None);
+
+        Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM outbox_events o
+                INNER JOIN business_operations b
+                    ON b.business_operation_id = o.business_operation_id
+                WHERE o.event_type = 'COMMERCE_CHECKOUT_CREATED'
+                  AND b.operation_type = 'COMMERCE_CHECKOUT_CREATE'
+                  AND b.status = 'COMMITTED';
+                """));
+    }
+
+    [TestMethod]
+    public async Task AnExpiredCheckoutIsCancelledByMaintenance()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProductView product = await CreateActiveProductAsync(harness, profile.Id);
+        await harness.OpenAccountAsync(BuyerUser, "buyer");
+
+        Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "interaction-9"),
+            CancellationToken.None);
+
+        Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
+
+        harness.Clock.Advance(CommerceApplicationService.CheckoutLifetimeMilliseconds + 1);
+
+        CommerceMaintenanceReport report = await harness.Maintenance.ExpireCheckoutsAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(1, report.Examined);
+        Assert.AreEqual(1, report.Cancelled);
+        Assert.AreEqual("CANCELLED", harness.ReadText("SELECT status FROM commerce_orders;"));
+        Assert.AreEqual("CANCELLED", harness.ReadText("SELECT status FROM commerce_payments;"));
+    }
+
+    [TestMethod]
+    public async Task AnUnexpiredCheckoutSurvivesMaintenance()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProductView product = await CreateActiveProductAsync(harness, profile.Id);
+        await harness.OpenAccountAsync(BuyerUser, "buyer");
+
+        Assert.IsTrue((await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "interaction-10"),
+            CancellationToken.None)).IsSuccess);
+
+        CommerceMaintenanceReport report = await harness.Maintenance.ExpireCheckoutsAsync(
+            CancellationToken.None);
+
+        Assert.AreEqual(0, report.Examined);
+        Assert.AreEqual("AWAITING_CONFIRMATION", harness.ReadText("SELECT status FROM commerce_orders;"));
+    }
+
+    [TestMethod]
     public async Task CheckoutOutsideThePaymentScopeIsRejected()
     {
         await using Harness harness = Harness.Create();
@@ -388,7 +486,8 @@ public sealed class CommerceCatalogTests
         await harness.OpenAccountAsync(BuyerUser, "buyer");
 
         Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
-            new CreateCommerceCheckoutCommand(Buyer(OtherGuildId), product.Id, 1), CancellationToken.None);
+            new CreateCommerceCheckoutCommand(Buyer(OtherGuildId), product.Id, 1, "checkout-2"),
+            CancellationToken.None);
 
         Assert.IsFalse(checkout.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.MerchantProductNotSellable, checkout.Error!.Code);
@@ -423,7 +522,8 @@ public sealed class CommerceCatalogTests
         await harness.OpenAccountAsync(BuyerUser, "buyer");
 
         Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
-            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1), CancellationToken.None);
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "checkout-3"),
+            CancellationToken.None);
 
         Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
         Assert.AreEqual(0L, harness.Count("debit_card_authorizations"));
