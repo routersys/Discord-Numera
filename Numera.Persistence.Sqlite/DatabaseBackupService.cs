@@ -37,18 +37,35 @@ public sealed record BackupCreationResult(bool IsSuccess, string DatabasePath, s
         new(false, string.Empty, string.Empty, detail);
 }
 
-internal sealed record BackupVerificationResult(bool IsSuccess, string Detail)
+public sealed record BackupVerificationResult(bool IsSuccess, string Detail)
 {
-    internal static BackupVerificationResult Passed { get; } = new(true, string.Empty);
+    public static BackupVerificationResult Passed { get; } = new(true, string.Empty);
 
-    internal static BackupVerificationResult Failed(string detail) => new(false, detail);
+    public static BackupVerificationResult Failed(string detail) => new(false, detail);
 }
 
 internal sealed record BackupEntry(string DatabasePath, string ManifestPath, BackupManifest Manifest);
 
-internal interface IDatabaseBackupService
+public sealed record BackupSummary(
+    int AutomaticCount,
+    int ManualCount,
+    int PreMigrationCount,
+    long TotalBytes,
+    string OldestCreatedAtUtc,
+    string NewestCreatedAtUtc)
+{
+    public static BackupSummary Empty { get; } = new(0, 0, 0, 0L, string.Empty, string.Empty);
+
+    public int Count => AutomaticCount + ManualCount + PreMigrationCount;
+}
+
+public interface IDatabaseBackupService
 {
     BackupCreationResult Create(BackupKind kind);
+
+    BackupVerificationResult VerifyAt(string databasePath);
+
+    BackupSummary Summarize();
 
     int PruneAutomatic();
 }
@@ -271,6 +288,41 @@ public sealed class SqliteDatabaseBackupService : IDatabaseBackupService
 
         return entries;
     }
+
+    public BackupVerificationResult VerifyAt(string databasePath)
+    {
+        ArgumentNullException.ThrowIfNull(databasePath);
+
+        string fullPath = Path.GetFullPath(databasePath);
+
+        BackupEntry? entry = List().FirstOrDefault(candidate => string.Equals(
+            Path.GetFullPath(candidate.DatabasePath), fullPath, StringComparison.OrdinalIgnoreCase));
+
+        return entry is null ? BackupVerificationResult.Failed(BackupFailure.ManifestMissing) : Verify(entry);
+    }
+
+    public BackupSummary Summarize()
+    {
+        BackupEntry[] entries = [.. List()];
+
+        if (entries.Length == 0)
+        {
+            return BackupSummary.Empty;
+        }
+
+        string[] created = [.. entries.Select(static entry => entry.Manifest.CreatedAtUtc).Order(StringComparer.Ordinal)];
+
+        return new BackupSummary(
+            entries.Count(static entry => IsKind(entry, BackupKind.Automatic)),
+            entries.Count(static entry => IsKind(entry, BackupKind.Manual)),
+            entries.Count(static entry => IsKind(entry, BackupKind.PreMigration)),
+            entries.Sum(static entry => entry.Manifest.DatabaseLengthBytes),
+            created[0],
+            created[^1]);
+    }
+
+    private static bool IsKind(BackupEntry entry, BackupKind kind) =>
+        string.Equals(entry.Manifest.BackupKind, Token(kind), StringComparison.Ordinal);
 
     public int PruneAutomatic()
     {
