@@ -20,8 +20,7 @@ public sealed class DirectDebitMandate : VersionedEntity
             .Allow(
                 DirectDebitMandateStatus.Pending,
                 DirectDebitMandateStatus.Active,
-                DirectDebitMandateStatus.Revoked,
-                DirectDebitMandateStatus.Expired)
+                DirectDebitMandateStatus.Revoked)
             .Allow(
                 DirectDebitMandateStatus.Active,
                 DirectDebitMandateStatus.Suspended,

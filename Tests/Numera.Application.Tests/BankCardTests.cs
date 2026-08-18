@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Numera.Application.Abstractions;
 using Numera.Application.Banking;
 using Numera.Application.Common;
 using Numera.Domain.Accounting;
@@ -18,6 +19,12 @@ public sealed class BankCardTests
     private const string Institution = "NUM0001";
     private const ulong FirstUser = 760_000_000_000_000_001UL;
     private const ulong SecondUser = 760_000_000_000_000_002UL;
+
+    private sealed class StubCardImageRenderer : IBankCardImageRenderer
+    {
+        public BankCardImage? TryRender(BankCardRenderModel model) =>
+            new("bank-card.png", 1026, 647, [0x89, 0x50, 0x4E, 0x47, 0x0D]);
+    }
 
     private sealed class Harness : IAsyncDisposable
     {
@@ -71,7 +78,8 @@ public sealed class BankCardTests
                     gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
                 harness.Clock,
                 ids);
-            harness.Cards = new BankCardApplicationService(gateway, harness.Clock, ids);
+            harness.Cards = new BankCardApplicationService(
+                gateway, harness.Clock, ids, new StubCardImageRenderer());
 
             return harness;
         }
@@ -317,19 +325,18 @@ public sealed class BankCardTests
         CustomerAccountId customer = harness.CustomerOf(account);
         await IssueAsync(harness, customer, account);
 
-        Result<BankCardView> locked = await harness.Cards.SetBankCardLockAsync(
+        Result locked = await harness.Cards.SetBankCardLockAsync(
             new SetBankCardLockCommand(customer, account, Locked: true), CancellationToken.None);
 
         Assert.IsTrue(locked.IsSuccess);
-        Assert.AreEqual(BankCardStatus.Locked, locked.Value.Status);
-        Assert.AreEqual(CashCardStatus.Active, locked.Value.CashCardStatus);
         Assert.AreEqual("LOCKED", harness.ReadText("SELECT status FROM bank_cards;"));
+        Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM cash_cards;"));
 
-        Result<BankCardView> unlocked = await harness.Cards.SetBankCardLockAsync(
+        Result unlocked = await harness.Cards.SetBankCardLockAsync(
             new SetBankCardLockCommand(customer, account, Locked: false), CancellationToken.None);
 
         Assert.IsTrue(unlocked.IsSuccess);
-        Assert.AreEqual(BankCardStatus.Active, unlocked.Value.Status);
+        Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM bank_cards;"));
     }
 
     [TestMethod]
@@ -340,19 +347,19 @@ public sealed class BankCardTests
         CustomerAccountId customer = harness.CustomerOf(account);
         await IssueAsync(harness, customer, account);
 
-        Result<BankCardView> cash = await harness.Cards.SetCashCardLockAsync(
+        Result cash = await harness.Cards.SetCashCardLockAsync(
             new SetCashCardLockCommand(customer, account, Locked: true), CancellationToken.None);
 
         Assert.IsTrue(cash.IsSuccess);
-        Assert.AreEqual(BankCardStatus.Active, cash.Value.Status);
-        Assert.AreEqual(CashCardStatus.Locked, cash.Value.CashCardStatus);
-        Assert.AreEqual(DebitCardStatus.Active, cash.Value.DebitCardStatus);
+        Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM bank_cards;"));
+        Assert.AreEqual("LOCKED", harness.ReadText("SELECT status FROM cash_cards;"));
+        Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM debit_cards;"));
 
-        Result<BankCardView> debit = await harness.Cards.SetDebitCardLockAsync(
+        Result debit = await harness.Cards.SetDebitCardLockAsync(
             new SetDebitCardLockCommand(customer, account, Locked: true), CancellationToken.None);
 
         Assert.IsTrue(debit.IsSuccess);
-        Assert.AreEqual(DebitCardStatus.Locked, debit.Value.DebitCardStatus);
+        Assert.AreEqual("LOCKED", harness.ReadText("SELECT status FROM debit_cards;"));
     }
 
     [TestMethod]
@@ -363,7 +370,7 @@ public sealed class BankCardTests
         CustomerAccountId customer = harness.CustomerOf(account);
         await IssueAsync(harness, customer, account, BankCardForm.DebitOnly);
 
-        Result<BankCardView> result = await harness.Cards.SetCashCardLockAsync(
+        Result result = await harness.Cards.SetCashCardLockAsync(
             new SetCashCardLockCommand(customer, account, Locked: true), CancellationToken.None);
 
         Assert.IsFalse(result.IsSuccess);
@@ -412,36 +419,36 @@ public sealed class BankCardTests
     }
 
     [TestMethod]
-    public async Task TheRenderModelCarriesTheDebitDisplayNumber()
+    public async Task TheRenderedImageIsACanonicalPng()
     {
         await using Harness harness = Harness.Create();
         DepositAccountId account = await harness.OpenAsync(FirstUser, "taro");
         CustomerAccountId customer = harness.CustomerOf(account);
         await IssueAsync(harness, customer, account);
 
-        Result<BankCardRenderView> result = await harness.Cards.RenderBankCardAsync(
-            new RenderBankCardQuery(customer, account), CancellationToken.None);
+        Result<BankCardImage> result = await harness.Cards.RenderBankCardAsync(
+            new RenderBankCardCommand(customer, account), CancellationToken.None);
 
         Assert.IsTrue(result.IsSuccess);
-        Assert.AreEqual(Institution, result.Value.InstitutionCode);
-        Assert.AreEqual("ヌメラ銀行", result.Value.BankName);
-        Assert.IsNotNull(result.Value.DebitDisplayNumber);
-        Assert.IsNotNull(result.Value.ExpiresAt);
+        Assert.AreEqual("bank-card.png", result.Value.FileName);
+        Assert.AreEqual(1026, result.Value.Width);
+        Assert.AreEqual(647, result.Value.Height);
+        CollectionAssert.AreEqual(
+            new byte[] { 0x89, 0x50, 0x4E, 0x47 }, result.Value.Content.Take(4).ToArray());
     }
 
     [TestMethod]
-    public async Task TheRenderModelOmitsTheDebitNumberForACashOnlyCard()
+    public async Task ACashOnlyCardStillRenders()
     {
         await using Harness harness = Harness.Create();
         DepositAccountId account = await harness.OpenAsync(FirstUser, "taro");
         CustomerAccountId customer = harness.CustomerOf(account);
         await IssueAsync(harness, customer, account, BankCardForm.CashOnly);
 
-        Result<BankCardRenderView> result = await harness.Cards.RenderBankCardAsync(
-            new RenderBankCardQuery(customer, account), CancellationToken.None);
+        Result<BankCardImage> result = await harness.Cards.RenderBankCardAsync(
+            new RenderBankCardCommand(customer, account), CancellationToken.None);
 
         Assert.IsTrue(result.IsSuccess);
-        Assert.IsNull(result.Value.DebitDisplayNumber);
-        Assert.IsNull(result.Value.ExpiresAt);
+        Assert.IsTrue(result.Value.Content.Length > 0);
     }
 }

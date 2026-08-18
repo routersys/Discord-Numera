@@ -4,6 +4,7 @@ using Numera.Application.Common;
 using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
+using Numera.Domain.Identity;
 
 namespace Numera.Application.Banking;
 
@@ -11,7 +12,7 @@ public sealed record GetBankCardQuery(
     CustomerAccountId CustomerAccountId,
     DepositAccountId DepositAccountId);
 
-public sealed record RenderBankCardQuery(
+public sealed record RenderBankCardCommand(
     CustomerAccountId CustomerAccountId,
     DepositAccountId DepositAccountId);
 
@@ -51,13 +52,16 @@ public sealed record BankCardView(
     string DisplayIdentifier,
     long? ExpiresAt);
 
-public sealed record BankCardRenderView(
+public sealed record BankCardRenderModel(
     string InstitutionCode,
     string BankName,
+    string CustomerDisplayName,
     BankCardForm Form,
     string DisplayIdentifier,
     string? DebitDisplayNumber,
     long? ExpiresAt);
+
+public sealed record BankCardImage(string FileName, int Width, int Height, byte[] Content);
 
 public interface IBankCardApplicationService
 {
@@ -71,20 +75,20 @@ public interface IBankCardApplicationService
         ReplaceBankCardCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<BankCardView>> SetBankCardLockAsync(
+    Task<Result> SetBankCardLockAsync(
         SetBankCardLockCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<BankCardView>> SetCashCardLockAsync(
+    Task<Result> SetCashCardLockAsync(
         SetCashCardLockCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<BankCardView>> SetDebitCardLockAsync(
+    Task<Result> SetDebitCardLockAsync(
         SetDebitCardLockCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<BankCardRenderView>> RenderBankCardAsync(
-        RenderBankCardQuery query,
+    Task<Result<BankCardImage>> RenderBankCardAsync(
+        RenderBankCardCommand command,
         CancellationToken cancellationToken);
 }
 
@@ -95,19 +99,23 @@ public sealed class BankCardApplicationService : IBankCardApplicationService
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
+    private readonly IBankCardImageRenderer imageRenderer;
 
     public BankCardApplicationService(
         IBankingWriteGateway writeGateway,
         IClock clock,
-        IIdGenerator idGenerator)
+        IIdGenerator idGenerator,
+        IBankCardImageRenderer imageRenderer)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
+        ArgumentNullException.ThrowIfNull(imageRenderer);
 
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+        this.imageRenderer = imageRenderer;
     }
 
     public Task<Result<BankCardView>> GetBankCardAsync(
@@ -121,15 +129,25 @@ public sealed class BankCardApplicationService : IBankCardApplicationService
             cancellationToken);
     }
 
-    public Task<Result<BankCardRenderView>> RenderBankCardAsync(
-        RenderBankCardQuery query,
+    public async Task<Result<BankCardImage>> RenderBankCardAsync(
+        RenderBankCardCommand command,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(
-            unitOfWork => Render(unitOfWork, query),
-            cancellationToken);
+        Result<BankCardRenderModel> model = await writeGateway
+            .ExecuteAsync(unitOfWork => Render(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!model.IsSuccess)
+        {
+            return Result<BankCardImage>.Failure(model.Error!);
+        }
+
+        return imageRenderer.TryRender(model.Value) is { } image
+            ? Result<BankCardImage>.Success(image)
+            : Result<BankCardImage>.Failure(
+                ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.BankCardRendererUnavailable);
     }
 
     public Task<Result<BankCardView>> IssueBankCardAsync(
@@ -150,38 +168,41 @@ public sealed class BankCardApplicationService : IBankCardApplicationService
         return writeGateway.ExecuteAsync(unitOfWork => Replace(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<BankCardView>> SetBankCardLockAsync(
+    public async Task<Result> SetBankCardLockAsync(
         SetBankCardLockCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(
-            unitOfWork => SetBankCardLock(unitOfWork, command),
-            cancellationToken);
+        return Discard(await writeGateway
+            .ExecuteAsync(unitOfWork => SetBankCardLock(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false));
     }
 
-    public Task<Result<BankCardView>> SetCashCardLockAsync(
+    public async Task<Result> SetCashCardLockAsync(
         SetCashCardLockCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(
-            unitOfWork => SetCashCardLock(unitOfWork, command),
-            cancellationToken);
+        return Discard(await writeGateway
+            .ExecuteAsync(unitOfWork => SetCashCardLock(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false));
     }
 
-    public Task<Result<BankCardView>> SetDebitCardLockAsync(
+    public async Task<Result> SetDebitCardLockAsync(
         SetDebitCardLockCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(
-            unitOfWork => SetDebitCardLock(unitOfWork, command),
-            cancellationToken);
+        return Discard(await writeGateway
+            .ExecuteAsync(unitOfWork => SetDebitCardLock(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false));
     }
+
+    private static Result Discard(Result<BankCardView> outcome) =>
+        outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
 
     private Result<BankCardView> Issue(IBankingUnitOfWork unitOfWork, IssueBankCardCommand command)
     {
@@ -429,25 +450,27 @@ public sealed class BankCardApplicationService : IBankCardApplicationService
             : Result<BankCardView>.Failure(resolved.Error!);
     }
 
-    private static Result<BankCardRenderView> Render(
+    private static Result<BankCardRenderModel> Render(
         IBankingUnitOfWork unitOfWork,
-        RenderBankCardQuery query)
+        RenderBankCardCommand command)
     {
         Result<BankCard> resolved = ResolveCard(
-            unitOfWork, query.CustomerAccountId, query.DepositAccountId);
+            unitOfWork, command.CustomerAccountId, command.DepositAccountId);
 
         if (!resolved.IsSuccess)
         {
-            return Result<BankCardRenderView>.Failure(resolved.Error!);
+            return Result<BankCardRenderModel>.Failure(resolved.Error!);
         }
 
         BankCard card = resolved.Value;
         Bank? bank = unitOfWork.Banks.Find(card.BankId);
         DebitCard? debit = unitOfWork.BankCards.FindDebitCardByBankCard(card.Id);
+        CustomerAccount? customer = unitOfWork.CustomerAccounts.Find(command.CustomerAccountId);
 
-        return Result<BankCardRenderView>.Success(new BankCardRenderView(
+        return Result<BankCardRenderModel>.Success(new BankCardRenderModel(
             bank is { } resolvedBank ? resolvedBank.InstitutionCode.Value : string.Empty,
             bank is { } namedBank ? namedBank.Name.Value : string.Empty,
+            customer is { } holder ? holder.DisplayName.Value : string.Empty,
             card.Form,
             card.DisplayIdentifier,
             debit is { Status: not DebitCardStatus.Closed } ? debit.DisplayNumber : null,

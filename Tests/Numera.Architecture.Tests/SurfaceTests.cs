@@ -6,9 +6,9 @@ namespace Numera.Architecture.Tests;
 public sealed class SurfaceTests
 {
     private const int DomainBudget = 224;
-    private const int ApplicationBudget = 201;
+    private const int ApplicationBudget = 208;
     private const int PersistenceBudget = 76;
-    private const int DiscordBudget = 45;
+    private const int DiscordBudget = 44;
 
     private static void AssertWithinBudget(Assembly assembly, int budget)
     {

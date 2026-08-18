@@ -240,7 +240,7 @@ public static partial class CanonicalTextCatalog
                 "{institutionCode} {name} の方針を更新しました。状態は{status}です。",
             [ViewKeys.ManageBankRetired + ".title"] = "銀行の廃止手続を開始しました",
             [ViewKeys.ManageBankRetired + ".description"] =
-                "{institutionCode} {name} の廃止手続を開始しました。状態は{status}です。",
+                "{institutionCode} の廃止手続を開始しました。",
             [ViewKeys.StatusUnknown] = "状態を表示できません",
         };
 }

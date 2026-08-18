@@ -74,7 +74,7 @@ public sealed partial class BankPaymentsEndpoints : IEconomyEndpoint
         string? cursor,
         CancellationToken cancellationToken)
     {
-        Result<BeneficiaryPageView> result = await payments
+        Result<SavedBeneficiaryPageView> result = await payments
             .ListBeneficiariesAsync(
                 new ListBeneficiariesQuery(customerAccountId, cursor), cancellationToken)
             .ConfigureAwait(false);

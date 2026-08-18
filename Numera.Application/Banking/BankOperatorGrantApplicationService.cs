@@ -28,7 +28,7 @@ public interface IBankOperatorGrantApplicationService
         GrantBankOperatorCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<BankOperatorGrantView>> RevokeAsync(
+    Task<Result> RevokeAsync(
         RevokeBankOperatorCommand command,
         CancellationToken cancellationToken);
 }
@@ -62,13 +62,13 @@ public sealed class BankOperatorGrantApplicationService : IBankOperatorGrantAppl
         return writeGateway.ExecuteAsync(unitOfWork => Grant(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<BankOperatorGrantView>> RevokeAsync(
+    public Task<Result> RevokeAsync(
         RevokeBankOperatorCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(unitOfWork => Revoke(unitOfWork, command), cancellationToken);
+        return RevokeInternalAsync(command, cancellationToken);
     }
 
     private Result<BankOperatorGrantView> Grant(
@@ -114,15 +114,24 @@ public sealed class BankOperatorGrantApplicationService : IBankOperatorGrantAppl
                 grant.Status.ToToken()));
     }
 
-    private Result<BankOperatorGrantView> Revoke(
-        IBankingUnitOfWork unitOfWork,
-        RevokeBankOperatorCommand command)
+    private async Task<Result> RevokeInternalAsync(
+        RevokeBankOperatorCommand command,
+        CancellationToken cancellationToken)
+    {
+        Result<bool> outcome = await writeGateway
+            .ExecuteAsync(unitOfWork => Revoke(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false);
+
+        return outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
+    }
+
+    private Result<bool> Revoke(IBankingUnitOfWork unitOfWork, RevokeBankOperatorCommand command)
     {
         Result<Bank> resolved = ResolveBank(unitOfWork, command.Actor, command.InstitutionCode);
 
         if (!resolved.IsSuccess)
         {
-            return Result<BankOperatorGrantView>.Failure(resolved.Error!);
+            return Result<bool>.Failure(resolved.Error!);
         }
 
         Bank bank = resolved.Value;
@@ -130,19 +139,14 @@ public sealed class BankOperatorGrantApplicationService : IBankOperatorGrantAppl
 
         if (unitOfWork.BankOperatorGrants.FindActive(bank.Id, target) is not { } grant)
         {
-            return Result<BankOperatorGrantView>.Failure(
+            return Result<bool>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.BankOperatorGrantNotFound);
         }
 
         grant.Revoke(clock.Now());
         unitOfWork.BankOperatorGrants.Update(grant);
 
-        return Result<BankOperatorGrantView>.Success(
-            new BankOperatorGrantView(
-                grant.Id,
-                command.InstitutionCode,
-                command.TargetDiscordUserId,
-                grant.Status.ToToken()));
+        return Result<bool>.Success(true);
     }
 
     private static Result<Bank> ResolveBank(

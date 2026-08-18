@@ -205,7 +205,7 @@ public sealed class PaymentManagementTests
         (CustomerAccountId owner, _) = await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId target) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<BeneficiaryItem> result = await harness.Payments.SaveBeneficiaryAsync(
+        Result<SavedBeneficiaryView> result = await harness.Payments.SaveBeneficiaryAsync(
             new SaveBeneficiaryCommand(owner, target, "次郎"), CancellationToken.None);
 
         Assert.IsTrue(result.IsSuccess);
@@ -225,7 +225,7 @@ public sealed class PaymentManagementTests
         Assert.IsTrue((await harness.Payments.SaveBeneficiaryAsync(
             new SaveBeneficiaryCommand(owner, target, "次郎"), CancellationToken.None)).IsSuccess);
 
-        Result<BeneficiaryItem> second = await harness.Payments.SaveBeneficiaryAsync(
+        Result<SavedBeneficiaryView> second = await harness.Payments.SaveBeneficiaryAsync(
             new SaveBeneficiaryCommand(owner, target, "次郎2"), CancellationToken.None);
 
         Assert.IsFalse(second.IsSuccess);
@@ -240,16 +240,16 @@ public sealed class PaymentManagementTests
         (CustomerAccountId owner, _) = await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId target) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<BeneficiaryItem> saved = await harness.Payments.SaveBeneficiaryAsync(
+        Result<SavedBeneficiaryView> saved = await harness.Payments.SaveBeneficiaryAsync(
             new SaveBeneficiaryCommand(owner, target, "次郎"), CancellationToken.None);
 
-        Result<BeneficiaryItem> hidden = await harness.Payments.HideBeneficiaryAsync(
+        Result hidden = await harness.Payments.HideBeneficiaryAsync(
             new HideBeneficiaryCommand(owner, saved.Value.Id), CancellationToken.None);
 
         Assert.IsTrue(hidden.IsSuccess);
-        Assert.AreEqual(SavedBeneficiaryStatus.Hidden, hidden.Value.Status);
+        Assert.AreEqual("HIDDEN", harness.ReadText("SELECT status FROM saved_beneficiaries;"));
 
-        Result<BeneficiaryItem> resaved = await harness.Payments.SaveBeneficiaryAsync(
+        Result<SavedBeneficiaryView> resaved = await harness.Payments.SaveBeneficiaryAsync(
             new SaveBeneficiaryCommand(owner, target, "次郎"), CancellationToken.None);
 
         Assert.IsTrue(resaved.IsSuccess);
@@ -263,10 +263,10 @@ public sealed class PaymentManagementTests
         (CustomerAccountId owner, _) = await harness.OpenAsync(FirstUser, "taro");
         (CustomerAccountId intruder, DepositAccountId target) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<BeneficiaryItem> saved = await harness.Payments.SaveBeneficiaryAsync(
+        Result<SavedBeneficiaryView> saved = await harness.Payments.SaveBeneficiaryAsync(
             new SaveBeneficiaryCommand(owner, target, "次郎"), CancellationToken.None);
 
-        Result<BeneficiaryItem> result = await harness.Payments.HideBeneficiaryAsync(
+        Result result = await harness.Payments.HideBeneficiaryAsync(
             new HideBeneficiaryCommand(intruder, saved.Value.Id), CancellationToken.None);
 
         Assert.IsFalse(result.IsSuccess);
@@ -287,7 +287,7 @@ public sealed class PaymentManagementTests
         await harness.Payments.SaveBeneficiaryAsync(
             new SaveBeneficiaryCommand(owner, third, "三郎"), CancellationToken.None);
 
-        Result<BeneficiaryPageView> result = await harness.Payments.ListBeneficiariesAsync(
+        Result<SavedBeneficiaryPageView> result = await harness.Payments.ListBeneficiariesAsync(
             new ListBeneficiariesQuery(owner, null), CancellationToken.None);
 
         Assert.IsTrue(result.IsSuccess);
@@ -302,7 +302,7 @@ public sealed class PaymentManagementTests
         (CustomerAccountId owner, DepositAccountId source) = await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId destination) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<ScheduledPaymentItem> result = await harness.Payments.CreateScheduledPaymentAsync(
+        Result<ScheduledPaymentPlanView> result = await harness.Payments.CreateScheduledPaymentAsync(
             new CreateScheduledPaymentCommand(
                 GuildId, owner, source, destination, ScheduledPaymentKind.Monthly, 1_000, 540, 15),
             CancellationToken.None);
@@ -324,7 +324,7 @@ public sealed class PaymentManagementTests
         (CustomerAccountId owner, DepositAccountId source) = await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId destination) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<ScheduledPaymentItem> result = await harness.Payments.CreateScheduledPaymentAsync(
+        Result<ScheduledPaymentPlanView> result = await harness.Payments.CreateScheduledPaymentAsync(
             new CreateScheduledPaymentCommand(
                 GuildId, owner, source, destination, ScheduledPaymentKind.Monthly, 1_000, 540, null),
             CancellationToken.None);
@@ -341,7 +341,7 @@ public sealed class PaymentManagementTests
         await using Harness harness = Harness.Create();
         (CustomerAccountId owner, DepositAccountId source) = await harness.OpenAsync(FirstUser, "taro");
 
-        Result<ScheduledPaymentItem> result = await harness.Payments.CreateScheduledPaymentAsync(
+        Result<ScheduledPaymentPlanView> result = await harness.Payments.CreateScheduledPaymentAsync(
             new CreateScheduledPaymentCommand(
                 GuildId, owner, source, source, ScheduledPaymentKind.Weekly, 1_000, 540, null),
             CancellationToken.None);
@@ -357,12 +357,12 @@ public sealed class PaymentManagementTests
         (CustomerAccountId owner, DepositAccountId source) = await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId destination) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<ScheduledPaymentItem> created = await harness.Payments.CreateScheduledPaymentAsync(
+        Result<ScheduledPaymentPlanView> created = await harness.Payments.CreateScheduledPaymentAsync(
             new CreateScheduledPaymentCommand(
                 GuildId, owner, source, destination, ScheduledPaymentKind.Weekly, 1_000, 540, null),
             CancellationToken.None);
 
-        Result<ScheduledPaymentItem> paused = await harness.Payments.SetScheduledPaymentStateAsync(
+        Result<ScheduledPaymentPlanView> paused = await harness.Payments.SetScheduledPaymentStateAsync(
             new SetScheduledPaymentStateCommand(
                 owner, created.Value.Id, ScheduledPaymentPlanStatus.Paused),
             CancellationToken.None);
@@ -370,7 +370,7 @@ public sealed class PaymentManagementTests
         Assert.IsTrue(paused.IsSuccess);
         Assert.AreEqual(ScheduledPaymentPlanStatus.Paused, paused.Value.Status);
 
-        Result<ScheduledPaymentItem> resumed = await harness.Payments.SetScheduledPaymentStateAsync(
+        Result<ScheduledPaymentPlanView> resumed = await harness.Payments.SetScheduledPaymentStateAsync(
             new SetScheduledPaymentStateCommand(
                 owner, created.Value.Id, ScheduledPaymentPlanStatus.Active),
             CancellationToken.None);
@@ -387,12 +387,12 @@ public sealed class PaymentManagementTests
         (CustomerAccountId owner, DepositAccountId source) = await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId destination) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<ScheduledPaymentItem> created = await harness.Payments.CreateScheduledPaymentAsync(
+        Result<ScheduledPaymentPlanView> created = await harness.Payments.CreateScheduledPaymentAsync(
             new CreateScheduledPaymentCommand(
                 GuildId, owner, source, destination, ScheduledPaymentKind.Once, 1_000, 540, null),
             CancellationToken.None);
 
-        Result<ScheduledPaymentItem> cancelled = await harness.Payments.SetScheduledPaymentStateAsync(
+        Result<ScheduledPaymentPlanView> cancelled = await harness.Payments.SetScheduledPaymentStateAsync(
             new SetScheduledPaymentStateCommand(
                 owner, created.Value.Id, ScheduledPaymentPlanStatus.Cancelled),
             CancellationToken.None);
@@ -411,14 +411,14 @@ public sealed class PaymentManagementTests
             await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId creditorAccount) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<DirectDebitMandateItem> created = await harness.Payments.CreateDirectDebitMandateAsync(
+        Result<DirectDebitMandateView> created = await harness.Payments.CreateDirectDebitMandateAsync(
             new CreateDirectDebitMandateCommand(debtor, debtorAccount, creditorAccount, 5_000, null),
             CancellationToken.None);
 
         Assert.IsTrue(created.IsSuccess);
         Assert.AreEqual(DirectDebitMandateStatus.Pending, created.Value.Status);
 
-        Result<DirectDebitMandateItem> activated = await harness.Payments.SetDirectDebitMandateStateAsync(
+        Result<DirectDebitMandateView> activated = await harness.Payments.SetDirectDebitMandateStateAsync(
             new SetDirectDebitMandateStateCommand(
                 debtor, created.Value.Id, DirectDebitMandateStatus.Active),
             CancellationToken.None);
@@ -436,7 +436,7 @@ public sealed class PaymentManagementTests
             await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId creditorAccount) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<DirectDebitMandateItem> created = await harness.Payments.CreateDirectDebitMandateAsync(
+        Result<DirectDebitMandateView> created = await harness.Payments.CreateDirectDebitMandateAsync(
             new CreateDirectDebitMandateCommand(debtor, debtorAccount, creditorAccount, 5_000, null),
             CancellationToken.None);
 
@@ -445,7 +445,7 @@ public sealed class PaymentManagementTests
                 debtor, created.Value.Id, DirectDebitMandateStatus.Active),
             CancellationToken.None);
 
-        Result<DirectDebitMandateItem> revoked = await harness.Payments.SetDirectDebitMandateStateAsync(
+        Result<DirectDebitMandateView> revoked = await harness.Payments.SetDirectDebitMandateStateAsync(
             new SetDirectDebitMandateStateCommand(
                 debtor, created.Value.Id, DirectDebitMandateStatus.Revoked),
             CancellationToken.None);
@@ -464,7 +464,7 @@ public sealed class PaymentManagementTests
             await harness.OpenAsync(FirstUser, "taro");
         (_, DepositAccountId creditorAccount) = await harness.OpenAsync(SecondUser, "jiro");
 
-        Result<DirectDebitMandateItem> created = await harness.Payments.CreateDirectDebitMandateAsync(
+        Result<DirectDebitMandateView> created = await harness.Payments.CreateDirectDebitMandateAsync(
             new CreateDirectDebitMandateCommand(debtor, debtorAccount, creditorAccount, 5_000, null),
             CancellationToken.None);
 
@@ -473,7 +473,7 @@ public sealed class PaymentManagementTests
                 debtor, created.Value.Id, DirectDebitMandateStatus.Revoked),
             CancellationToken.None);
 
-        Result<DirectDebitMandateItem> result = await harness.Payments.SetDirectDebitMandateStateAsync(
+        Result<DirectDebitMandateView> result = await harness.Payments.SetDirectDebitMandateStateAsync(
             new SetDirectDebitMandateStateCommand(
                 debtor, created.Value.Id, DirectDebitMandateStatus.Active),
             CancellationToken.None);
@@ -490,7 +490,7 @@ public sealed class PaymentManagementTests
         (CustomerAccountId debtor, DepositAccountId debtorAccount) =
             await harness.OpenAsync(FirstUser, "taro");
 
-        Result<DirectDebitMandateItem> result = await harness.Payments.CreateDirectDebitMandateAsync(
+        Result<DirectDebitMandateView> result = await harness.Payments.CreateDirectDebitMandateAsync(
             new CreateDirectDebitMandateCommand(debtor, debtorAccount, debtorAccount, 5_000, null),
             CancellationToken.None);
 

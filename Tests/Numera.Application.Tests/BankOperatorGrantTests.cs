@@ -223,12 +223,11 @@ public sealed class BankOperatorGrantTests
 
         Assert.IsTrue((await GrantAsync(harness, GuildOperator())).IsSuccess);
 
-        Result<BankOperatorGrantView> result = await harness.Grants.RevokeAsync(
+        Result result = await harness.Grants.RevokeAsync(
             new RevokeBankOperatorCommand(GuildOperator(), Institution, TargetDiscordUserId),
             CancellationToken.None);
 
         Assert.IsTrue(result.IsSuccess);
-        Assert.AreEqual("REVOKED", result.Value.Status);
         Assert.AreEqual("REVOKED", harness.ReadText("SELECT status FROM bank_operator_grants;"));
         Assert.AreEqual(
             0L, harness.Count("SELECT COUNT(*) FROM bank_operator_grants WHERE revoked_at IS NULL;"));
@@ -239,7 +238,7 @@ public sealed class BankOperatorGrantTests
     {
         await using Harness harness = Harness.Create();
 
-        Result<BankOperatorGrantView> result = await harness.Grants.RevokeAsync(
+        Result result = await harness.Grants.RevokeAsync(
             new RevokeBankOperatorCommand(GuildOperator(), Institution, TargetDiscordUserId),
             CancellationToken.None);
 

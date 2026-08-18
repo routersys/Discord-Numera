@@ -102,13 +102,15 @@ public sealed class ManageBankEndpoints : IEconomyEndpoint
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        Result<BankView> result = await banks
+        Result result = await banks
             .RetireBankAsync(
                 new RetireBankCommand(EndpointAuthorization.ToActor(context), bank), cancellationToken)
             .ConfigureAwait(false);
 
         return result.IsSuccess
-            ? DiscordEndpointResponse.Message(ViewKeys.ManageBankRetired, Describe(result.Value))
+            ? DiscordEndpointResponse.Message(
+                ViewKeys.ManageBankRetired,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["institutionCode"] = bank })
             : EndpointFailures.From(result.Error!);
     }
 

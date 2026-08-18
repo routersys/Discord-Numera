@@ -420,6 +420,14 @@ public interface IEconomyCalendarRepository
     string? FindCanonicalTimezone(EconomyScopeId economyScopeId);
 
     BusinessDayClass? FindDayClassOverride(EconomyScopeId economyScopeId, BusinessDate localDate);
+
+    void UpsertDayClassOverride(
+        EconomyScopeId economyScopeId,
+        BusinessDate localDate,
+        BusinessDayClass dayClass,
+        string? description);
+
+    bool DeleteDayClassOverride(EconomyScopeId economyScopeId, BusinessDate localDate);
 }
 
 public interface IFeeScheduleRepository

@@ -1,21 +1,19 @@
+using System.Globalization;
+using Numera.Application.Abstractions;
 using Numera.Application.Banking;
 using Numera.Domain.Banking;
 
 namespace Numera.Discord.Rendering;
 
-public interface IBankCardImageService
+internal sealed class SkiaBankCardImageRenderer : IBankCardImageRenderer
 {
-    byte[]? TryRender(BankCardRenderView view, string customerDisplayName);
-}
-
-internal sealed class BankCardImageService : IBankCardImageService
-{
+    internal const string FileName = "bank-card.png";
     internal const int DefaultBackgroundRgb = 0x102A54;
 
     private readonly IBankCardRenderer renderer;
     private readonly ICardRenderDiagnostics diagnostics;
 
-    public BankCardImageService(IBankCardRenderer renderer, ICardRenderDiagnostics diagnostics)
+    public SkiaBankCardImageRenderer(IBankCardRenderer renderer, ICardRenderDiagnostics diagnostics)
     {
         ArgumentNullException.ThrowIfNull(renderer);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -24,21 +22,23 @@ internal sealed class BankCardImageService : IBankCardImageService
         this.diagnostics = diagnostics;
     }
 
-    public byte[]? TryRender(BankCardRenderView view, string customerDisplayName)
+    public BankCardImage? TryRender(BankCardRenderModel model)
     {
-        ArgumentNullException.ThrowIfNull(view);
+        ArgumentNullException.ThrowIfNull(model);
 
         try
         {
-            return renderer.Render(new BankCardRenderRequest(
-                view.BankName,
-                CapabilityLabel(view.Form),
-                customerDisplayName,
-                Identifier(view),
-                Expiry(view.ExpiresAt),
+            byte[] content = renderer.Render(new BankCardRenderRequest(
+                model.BankName,
+                CapabilityLabel(model.Form),
+                model.CustomerDisplayName,
+                Identifier(model),
+                Expiry(model.ExpiresAt),
                 DefaultBackgroundRgb,
                 BackgroundImage: null,
-                view.DebitDisplayNumber is null ? CardFaceMode.Numberless : CardFaceMode.Numbered));
+                model.DebitDisplayNumber is null ? CardFaceMode.Numberless : CardFaceMode.Numbered));
+
+            return new BankCardImage(FileName, CardCanvas.Width, CardCanvas.Height, content);
         }
         catch (CardFontManifestException failure)
         {
@@ -60,18 +60,18 @@ internal sealed class BankCardImageService : IBankCardImageService
         _ => throw new ArgumentOutOfRangeException(nameof(form)),
     };
 
-    internal static string Identifier(BankCardRenderView view)
+    internal static string Identifier(BankCardRenderModel model)
     {
-        ArgumentNullException.ThrowIfNull(view);
+        ArgumentNullException.ThrowIfNull(model);
 
-        return view.DebitDisplayNumber is { Length: > 0 } number
+        return model.DebitDisplayNumber is { Length: > 0 } number
             ? BankCardRenderer.GroupDigits(number.Replace("*", string.Empty, StringComparison.Ordinal))
-            : view.DisplayIdentifier;
+            : model.DisplayIdentifier;
     }
 
     internal static string? Expiry(long? expiresAt) =>
         expiresAt is { } value
             ? DateTimeOffset.FromUnixTimeMilliseconds(value).ToString(
-                "MM/yy", System.Globalization.CultureInfo.InvariantCulture)
+                "MM/yy", CultureInfo.InvariantCulture)
             : null;
 }

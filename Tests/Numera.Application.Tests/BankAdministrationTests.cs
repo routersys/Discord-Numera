@@ -727,7 +727,7 @@ public sealed class BankAdministrationTests
         await using Harness harness = Harness.Create();
         await harness.CreateOperatingBankAsync(harness.CreateCommand());
 
-        Result<BankView> result = await harness.Administration.RetireBankAsync(
+        Result result = await harness.Administration.RetireBankAsync(
             new RetireBankCommand(harness.Actor, Institution), CancellationToken.None);
 
         Assert.IsFalse(result.IsSuccess);
@@ -746,11 +746,10 @@ public sealed class BankAdministrationTests
             WHERE bank_id = x'{Convert.ToHexString(bank.Id.Value.ToByteArray())}';
             """);
 
-        Result<BankView> result = await harness.Administration.RetireBankAsync(
+        Result result = await harness.Administration.RetireBankAsync(
             new RetireBankCommand(harness.Actor, Institution), CancellationToken.None);
 
         Assert.IsTrue(result.IsSuccess);
-        Assert.AreEqual(BankStatus.Closing, result.Value.Status);
         Assert.AreEqual("CLOSING", harness.ReadText("SELECT status FROM banks;"));
     }
 

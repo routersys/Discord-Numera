@@ -36,6 +36,43 @@ public sealed class SqliteEconomyCalendarRepository : IEconomyCalendarRepository
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? BusinessDayClassCatalog.ParseToken(reader.GetString(0)) : null;
     }
+
+    public void UpsertDayClassOverride(
+        EconomyScopeId economyScopeId,
+        BusinessDate localDate,
+        BusinessDayClass dayClass,
+        string? description)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO economy_calendar_overrides(
+                economy_scope_id, local_date, day_class, description, version)
+            VALUES($scope, $date, $class, $description, 1)
+            ON CONFLICT(economy_scope_id, local_date) DO UPDATE
+            SET day_class = excluded.day_class,
+                description = excluded.description,
+                version = economy_calendar_overrides.version + 1;
+            """);
+
+        command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
+        command.Parameters.AddWithValue("$date", localDate.ToString());
+        command.Parameters.AddWithValue("$class", dayClass.ToToken());
+        command.Parameters.AddWithValue("$description", (object?)description ?? DBNull.Value);
+
+        command.ExecuteNonQuery();
+    }
+
+    public bool DeleteDayClassOverride(EconomyScopeId economyScopeId, BusinessDate localDate)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            DELETE FROM economy_calendar_overrides
+            WHERE economy_scope_id = $scope AND local_date = $date;
+            """);
+
+        command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
+        command.Parameters.AddWithValue("$date", localDate.ToString());
+
+        return command.ExecuteNonQuery() == 1;
+    }
 }
 
 public sealed class SqliteBankPolicyRepository : IBankPolicyRepository

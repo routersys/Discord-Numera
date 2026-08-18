@@ -12,4 +12,7 @@ public static partial class BankingErrorCodes
 
     public static string BankCardDisplayIdentifierTaken { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 81);
+
+    public static string BankCardRendererUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 80);
 }

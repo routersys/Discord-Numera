@@ -25,28 +25,22 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
     private const string ActionUnlockDebit = "unlock-debit";
     private const string ActionReplace = "replace";
 
-    internal const string CardImageFileName = "bank-card.png";
-
     private readonly IBankCardApplicationService cards;
     private readonly ICustomerAccountApplicationService customers;
     private readonly ITextCatalog catalog;
-    private readonly IBankCardImageService images;
 
     public BankCardEndpoints(
         IBankCardApplicationService cards,
         ICustomerAccountApplicationService customers,
-        ITextCatalog catalog,
-        IBankCardImageService images)
+        ITextCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(cards);
         ArgumentNullException.ThrowIfNull(customers);
         ArgumentNullException.ThrowIfNull(catalog);
-        ArgumentNullException.ThrowIfNull(images);
 
         this.cards = cards;
         this.customers = customers;
         this.catalog = catalog;
-        this.images = images;
     }
 
     [EconomySlashCommand("card", "銀行カードを確認します。")]
@@ -87,8 +81,17 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
                 ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
         }
 
-        Result<BankCardView> result = await ExecuteAsync(
+        Result mutation = await ExecuteAsync(
             action ?? ActionShow, customer.Value.Id, id, context, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!mutation.IsSuccess)
+        {
+            return EndpointFailures.From(mutation.Error!);
+        }
+
+        Result<BankCardView> result = await cards
+            .GetBankCardAsync(new GetBankCardQuery(customer.Value.Id, id), cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.IsSuccess)
@@ -96,50 +99,46 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
             return EndpointFailures.From(result.Error!);
         }
 
-        Result<BankCardRenderView> render = await cards
-            .RenderBankCardAsync(new RenderBankCardQuery(customer.Value.Id, id), cancellationToken)
-            .ConfigureAwait(false);
-
         Dictionary<string, string> data = Describe(result.Value);
 
-        if (!render.IsSuccess
-            || images.TryRender(render.Value, customer.Value.DisplayName) is not { } png)
-        {
-            return DiscordEndpointResponse.Message(ViewKeys.BankCard, data);
-        }
+        Result<BankCardImage> render = await cards
+            .RenderBankCardAsync(new RenderBankCardCommand(customer.Value.Id, id), cancellationToken)
+            .ConfigureAwait(false);
 
-        return DiscordEndpointResponse.Message(
-            ViewKeys.BankCard,
-            data,
-            DiscordResponseBody.WithAttachment(
-                new DiscordResponseAttachment(CardImageFileName, png)));
+        return render.IsSuccess
+            ? DiscordEndpointResponse.Message(
+                ViewKeys.BankCard,
+                data,
+                DiscordResponseBody.WithAttachment(
+                    new DiscordResponseAttachment(render.Value.FileName, render.Value.Content)))
+            : DiscordEndpointResponse.Message(ViewKeys.BankCard, data);
     }
 
-    private Task<Result<BankCardView>> ExecuteAsync(
+    private Task<Result> ExecuteAsync(
         string action,
         CustomerAccountId customerAccountId,
         DepositAccountId depositAccountId,
         DiscordEndpointContext context,
         CancellationToken cancellationToken) => action switch
         {
-            ActionIssueCash => cards.IssueBankCardAsync(
+            ActionIssueCash => Discard(cards.IssueBankCardAsync(
                 new IssueBankCardCommand(
                     customerAccountId, depositAccountId, BankCardForm.CashOnly, Key(context)),
-                cancellationToken),
-            ActionIssueDebit => cards.IssueBankCardAsync(
+                cancellationToken)),
+            ActionIssueDebit => Discard(cards.IssueBankCardAsync(
                 new IssueBankCardCommand(
                     customerAccountId, depositAccountId, BankCardForm.DebitOnly, Key(context)),
-                cancellationToken),
-            ActionIssueIntegrated => cards.IssueBankCardAsync(
+                cancellationToken)),
+            ActionIssueIntegrated => Discard(cards.IssueBankCardAsync(
                 new IssueBankCardCommand(
                     customerAccountId,
                     depositAccountId,
                     BankCardForm.IntegratedCashDebit,
                     Key(context)),
-                cancellationToken),
-            ActionReplace => cards.ReplaceBankCardAsync(
+                cancellationToken)),
+            ActionReplace => Discard(cards.ReplaceBankCardAsync(
                 new ReplaceBankCardCommand(customerAccountId, depositAccountId, Key(context)),
-                cancellationToken),
+                cancellationToken)),
             ActionLock => cards.SetBankCardLockAsync(
                 new SetBankCardLockCommand(customerAccountId, depositAccountId, Locked: true),
                 cancellationToken),
@@ -158,9 +157,15 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
             ActionUnlockDebit => cards.SetDebitCardLockAsync(
                 new SetDebitCardLockCommand(customerAccountId, depositAccountId, Locked: false),
                 cancellationToken),
-            _ => cards.GetBankCardAsync(
-                new GetBankCardQuery(customerAccountId, depositAccountId), cancellationToken),
+            _ => Task.FromResult(Result.Success()),
         };
+
+    private static async Task<Result> Discard(Task<Result<BankCardView>> pending)
+    {
+        Result<BankCardView> outcome = await pending.ConfigureAwait(false);
+
+        return outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
+    }
 
     private static IdempotencyKey Key(DiscordEndpointContext context) =>
         IdempotencyKey.Create(

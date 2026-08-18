@@ -88,7 +88,7 @@ public interface IBankAdministrationApplicationService
         UpdateBankPolicyCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<BankView>> RetireBankAsync(
+    Task<Result> RetireBankAsync(
         RetireBankCommand command,
         CancellationToken cancellationToken);
 
@@ -189,13 +189,13 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
         return writeGateway.ExecuteAsync(unitOfWork => UpdateBankPolicy(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<BankView>> RetireBankAsync(
+    public Task<Result> RetireBankAsync(
         RetireBankCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(unitOfWork => RetireBank(unitOfWork, command), cancellationToken);
+        return RetireAsync(command, cancellationToken);
     }
 
     private static Result<BankDraftView> StartCreateBank(
@@ -299,35 +299,42 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
         return Result<BankView>.Success(ToView(bank));
     }
 
-    private static Result<BankView> RetireBank(
-        IBankingUnitOfWork unitOfWork,
-        RetireBankCommand command)
+    private async Task<Result> RetireAsync(
+        RetireBankCommand command,
+        CancellationToken cancellationToken)
+    {
+        Result<bool> outcome = await writeGateway
+            .ExecuteAsync(unitOfWork => RetireBank(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false);
+
+        return outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
+    }
+
+    private static Result<bool> RetireBank(IBankingUnitOfWork unitOfWork, RetireBankCommand command)
     {
         Result<Bank> resolved = ResolveManagedBank(unitOfWork, command.Actor, command.InstitutionCode);
 
         if (!resolved.IsSuccess)
         {
-            return Result<BankView>.Failure(resolved.Error!);
+            return Result<bool>.Failure(resolved.Error!);
         }
 
         Bank bank = resolved.Value;
 
         if (bank.Status is not (BankStatus.Restricted or BankStatus.Resolution))
         {
-            return Result<BankView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.BankNotRetirable);
+            return Result<bool>.Failure(ErrorCategory.Conflict, BankingErrorCodes.BankNotRetirable);
         }
 
         if (unitOfWork.Relationships.CountByBank(bank.Id) > 0)
         {
-            return Result<BankView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.BankHasCustomers);
+            return Result<bool>.Failure(ErrorCategory.Conflict, BankingErrorCodes.BankHasCustomers);
         }
 
         bank.BeginClosing();
         unitOfWork.BankAdministration.UpdateBank(bank);
 
-        return Result<BankView>.Success(ToView(bank));
+        return Result<bool>.Success(true);
     }
 
     private static Result<Bank> ResolveManagedBank(

@@ -49,16 +49,16 @@ public sealed record SetDirectDebitMandateStateCommand(
     DirectDebitMandateId DirectDebitMandateId,
     DirectDebitMandateStatus DesiredStatus);
 
-public sealed record BeneficiaryItem(
+public sealed record SavedBeneficiaryView(
     SavedBeneficiaryId Id,
     string DisplayName,
     string InstitutionCode,
     string AccountNumberSuffix,
     SavedBeneficiaryStatus Status);
 
-public sealed record BeneficiaryPageView(IReadOnlyList<BeneficiaryItem> Items, string? NextCursor);
+public sealed record SavedBeneficiaryPageView(IReadOnlyList<SavedBeneficiaryView> Items, string? NextCursor);
 
-public sealed record ScheduledPaymentItem(
+public sealed record ScheduledPaymentPlanView(
     ScheduledPaymentPlanId Id,
     ScheduledPaymentKind Kind,
     ScheduledPaymentPlanStatus Status,
@@ -66,10 +66,10 @@ public sealed record ScheduledPaymentItem(
     long? NextDueAt);
 
 public sealed record ScheduledPaymentPageView(
-    IReadOnlyList<ScheduledPaymentItem> Items,
+    IReadOnlyList<ScheduledPaymentPlanView> Items,
     string? NextCursor);
 
-public sealed record DirectDebitMandateItem(
+public sealed record DirectDebitMandateView(
     DirectDebitMandateId Id,
     DirectDebitMandateStatus Status,
     MoneyMinor SingleCollectionLimit,
@@ -77,12 +77,12 @@ public sealed record DirectDebitMandateItem(
     long? ValidUntil);
 
 public sealed record DirectDebitMandatePageView(
-    IReadOnlyList<DirectDebitMandateItem> Items,
+    IReadOnlyList<DirectDebitMandateView> Items,
     string? NextCursor);
 
 public interface IPaymentManagementApplicationService
 {
-    Task<Result<BeneficiaryPageView>> ListBeneficiariesAsync(
+    Task<Result<SavedBeneficiaryPageView>> ListBeneficiariesAsync(
         ListBeneficiariesQuery query,
         CancellationToken cancellationToken);
 
@@ -94,27 +94,27 @@ public interface IPaymentManagementApplicationService
         ListDirectDebitMandatesQuery query,
         CancellationToken cancellationToken);
 
-    Task<Result<BeneficiaryItem>> SaveBeneficiaryAsync(
+    Task<Result<SavedBeneficiaryView>> SaveBeneficiaryAsync(
         SaveBeneficiaryCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<BeneficiaryItem>> HideBeneficiaryAsync(
+    Task<Result> HideBeneficiaryAsync(
         HideBeneficiaryCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<ScheduledPaymentItem>> CreateScheduledPaymentAsync(
+    Task<Result<ScheduledPaymentPlanView>> CreateScheduledPaymentAsync(
         CreateScheduledPaymentCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<ScheduledPaymentItem>> SetScheduledPaymentStateAsync(
+    Task<Result<ScheduledPaymentPlanView>> SetScheduledPaymentStateAsync(
         SetScheduledPaymentStateCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<DirectDebitMandateItem>> CreateDirectDebitMandateAsync(
+    Task<Result<DirectDebitMandateView>> CreateDirectDebitMandateAsync(
         CreateDirectDebitMandateCommand command,
         CancellationToken cancellationToken);
 
-    Task<Result<DirectDebitMandateItem>> SetDirectDebitMandateStateAsync(
+    Task<Result<DirectDebitMandateView>> SetDirectDebitMandateStateAsync(
         SetDirectDebitMandateStateCommand command,
         CancellationToken cancellationToken);
 }
@@ -139,7 +139,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         this.idGenerator = idGenerator;
     }
 
-    public Task<Result<BeneficiaryPageView>> ListBeneficiariesAsync(
+    public Task<Result<SavedBeneficiaryPageView>> ListBeneficiariesAsync(
         ListBeneficiariesQuery query,
         CancellationToken cancellationToken)
     {
@@ -153,7 +153,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
                     Cursor(query.Cursor),
                     PaginationBudget.ListPageSize + PaginationBudget.QueryLookAhead);
 
-                return Result<BeneficiaryPageView>.Success(new BeneficiaryPageView(
+                return Result<SavedBeneficiaryPageView>.Success(new SavedBeneficiaryPageView(
                     [.. Page(fetched, PaginationBudget.ListPageSize).Select(ToItem)],
                     NextCursor(
                         fetched,
@@ -212,7 +212,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
             cancellationToken);
     }
 
-    public Task<Result<BeneficiaryItem>> SaveBeneficiaryAsync(
+    public Task<Result<SavedBeneficiaryView>> SaveBeneficiaryAsync(
         SaveBeneficiaryCommand command,
         CancellationToken cancellationToken)
     {
@@ -221,16 +221,16 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         return writeGateway.ExecuteAsync(unitOfWork => SaveBeneficiary(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<BeneficiaryItem>> HideBeneficiaryAsync(
+    public Task<Result> HideBeneficiaryAsync(
         HideBeneficiaryCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(unitOfWork => HideBeneficiary(unitOfWork, command), cancellationToken);
+        return HideAsync(command, cancellationToken);
     }
 
-    public Task<Result<ScheduledPaymentItem>> CreateScheduledPaymentAsync(
+    public Task<Result<ScheduledPaymentPlanView>> CreateScheduledPaymentAsync(
         CreateScheduledPaymentCommand command,
         CancellationToken cancellationToken)
     {
@@ -239,7 +239,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         return writeGateway.ExecuteAsync(unitOfWork => CreatePlan(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<ScheduledPaymentItem>> SetScheduledPaymentStateAsync(
+    public Task<Result<ScheduledPaymentPlanView>> SetScheduledPaymentStateAsync(
         SetScheduledPaymentStateCommand command,
         CancellationToken cancellationToken)
     {
@@ -248,7 +248,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         return writeGateway.ExecuteAsync(unitOfWork => SetPlanState(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<DirectDebitMandateItem>> CreateDirectDebitMandateAsync(
+    public Task<Result<DirectDebitMandateView>> CreateDirectDebitMandateAsync(
         CreateDirectDebitMandateCommand command,
         CancellationToken cancellationToken)
     {
@@ -257,7 +257,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         return writeGateway.ExecuteAsync(unitOfWork => CreateMandate(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<DirectDebitMandateItem>> SetDirectDebitMandateStateAsync(
+    public Task<Result<DirectDebitMandateView>> SetDirectDebitMandateStateAsync(
         SetDirectDebitMandateStateCommand command,
         CancellationToken cancellationToken)
     {
@@ -266,38 +266,38 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         return writeGateway.ExecuteAsync(unitOfWork => SetMandateState(unitOfWork, command), cancellationToken);
     }
 
-    private Result<BeneficiaryItem> SaveBeneficiary(
+    private Result<SavedBeneficiaryView> SaveBeneficiary(
         IBankingUnitOfWork unitOfWork,
         SaveBeneficiaryCommand command)
     {
         if (unitOfWork.DepositAccounts.Find(command.DestinationDepositAccountId) is not { } destination)
         {
-            return Result<BeneficiaryItem>.Failure(
+            return Result<SavedBeneficiaryView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         if (destination.IsClosed || destination.Status != DepositAccountStatus.Active)
         {
-            return Result<BeneficiaryItem>.Failure(
+            return Result<SavedBeneficiaryView>.Failure(
                 ErrorCategory.AccountRestricted, BankingErrorCodes.BeneficiaryNotReceivable);
         }
 
         if (unitOfWork.PaymentManagement.FindActiveBeneficiary(
                 command.CustomerAccountId, command.DestinationDepositAccountId) is not null)
         {
-            return Result<BeneficiaryItem>.Failure(
+            return Result<SavedBeneficiaryView>.Failure(
                 ErrorCategory.Conflict, BankingErrorCodes.BeneficiaryAlreadySaved);
         }
 
         if (unitOfWork.Banks.Find(destination.BankId) is not { } bank)
         {
-            return Result<BeneficiaryItem>.Failure(
+            return Result<SavedBeneficiaryView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
         }
 
         if (unitOfWork.Branches.FindCodeById(destination.BranchId) is not { } branchCode)
         {
-            return Result<BeneficiaryItem>.Failure(
+            return Result<SavedBeneficiaryView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.BranchNotFound);
         }
 
@@ -317,70 +317,78 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         }
         catch (InvariantViolationException)
         {
-            return Result<BeneficiaryItem>.Failure(
+            return Result<SavedBeneficiaryView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.BeneficiaryNameInvalid);
         }
 
         unitOfWork.PaymentManagement.AddBeneficiary(beneficiary);
 
-        return Result<BeneficiaryItem>.Success(ToItem(beneficiary));
+        return Result<SavedBeneficiaryView>.Success(ToItem(beneficiary));
     }
 
-    private static Result<BeneficiaryItem> HideBeneficiary(
+    private async Task<Result> HideAsync(
+        HideBeneficiaryCommand command,
+        CancellationToken cancellationToken) =>
+        Void(await writeGateway
+            .ExecuteAsync(unitOfWork => HideBeneficiary(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false));
+
+    private static Result Void(Result<bool> outcome) =>
+        outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
+
+    private static Result<bool> HideBeneficiary(
         IBankingUnitOfWork unitOfWork,
         HideBeneficiaryCommand command)
     {
         if (unitOfWork.PaymentManagement.FindBeneficiary(command.SavedBeneficiaryId) is not { } beneficiary
             || beneficiary.CustomerAccountId != command.CustomerAccountId)
         {
-            return Result<BeneficiaryItem>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.BeneficiaryNotFound);
+            return Result<bool>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BeneficiaryNotFound);
         }
 
         if (beneficiary.Status != SavedBeneficiaryStatus.Active)
         {
-            return Result<BeneficiaryItem>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.BeneficiaryNotActive);
+            return Result<bool>.Failure(ErrorCategory.Conflict, BankingErrorCodes.BeneficiaryNotActive);
         }
 
         beneficiary.Hide();
         unitOfWork.PaymentManagement.UpdateBeneficiary(beneficiary);
 
-        return Result<BeneficiaryItem>.Success(ToItem(beneficiary));
+        return Result<bool>.Success(true);
     }
 
-    private Result<ScheduledPaymentItem> CreatePlan(
+    private Result<ScheduledPaymentPlanView> CreatePlan(
         IBankingUnitOfWork unitOfWork,
         CreateScheduledPaymentCommand command)
     {
         if (unitOfWork.GuildEconomies.FindEconomyScope(command.GuildId) is not { } scope)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
         }
 
         if (unitOfWork.DepositAccounts.Find(command.SourceDepositAccountId) is not { } source
             || source.CustomerAccountId != command.CustomerAccountId)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         if (unitOfWork.DepositAccounts.Find(command.DestinationDepositAccountId) is not { } destination)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         if (source.CurrencyId != destination.CurrencyId)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.ScheduledPaymentCurrencyMismatch);
         }
 
         if (unitOfWork.EconomyCalendars.FindCanonicalTimezone(scope) is not { } timezone)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
         }
 
@@ -392,7 +400,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
                 clock.Now(),
                 out UtcTimestamp dueAt))
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.ScheduledPaymentScheduleInvalid);
         }
 
@@ -416,7 +424,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         }
         catch (InvariantViolationException)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.ScheduledPaymentScheduleInvalid);
         }
 
@@ -424,23 +432,23 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         unitOfWork.PaymentManagement.AddOccurrence(ScheduledPaymentOccurrence.Schedule(
             ScheduledPaymentOccurrenceId.FromValue(idGenerator.NextId()), plan.Id, dueAt));
 
-        return Result<ScheduledPaymentItem>.Success(ToItem(plan));
+        return Result<ScheduledPaymentPlanView>.Success(ToItem(plan));
     }
 
-    private Result<ScheduledPaymentItem> SetPlanState(
+    private Result<ScheduledPaymentPlanView> SetPlanState(
         IBankingUnitOfWork unitOfWork,
         SetScheduledPaymentStateCommand command)
     {
         if (unitOfWork.PaymentManagement.FindPlan(command.ScheduledPaymentPlanId) is not { } plan
             || plan.CustomerAccountId != command.CustomerAccountId)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.ScheduledPaymentNotFound);
         }
 
         if (plan.Status == command.DesiredStatus)
         {
-            return Result<ScheduledPaymentItem>.Success(ToItem(plan));
+            return Result<ScheduledPaymentPlanView>.Success(ToItem(plan));
         }
 
         try
@@ -461,54 +469,54 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
                             plan.NextDueAt ?? clock.Now(),
                             out UtcTimestamp resumed))
                     {
-                        return Result<ScheduledPaymentItem>.Failure(
+                        return Result<ScheduledPaymentPlanView>.Failure(
                             ErrorCategory.Conflict, BankingErrorCodes.ScheduledPaymentNotResumable);
                     }
 
                     plan.Resume(resumed);
                     break;
                 default:
-                    return Result<ScheduledPaymentItem>.Failure(
+                    return Result<ScheduledPaymentPlanView>.Failure(
                         ErrorCategory.Validation, BankingErrorCodes.ScheduledPaymentStateInvalid);
             }
         }
         catch (InvariantViolationException)
         {
-            return Result<ScheduledPaymentItem>.Failure(
+            return Result<ScheduledPaymentPlanView>.Failure(
                 ErrorCategory.Conflict, BankingErrorCodes.ScheduledPaymentStateInvalid);
         }
 
         unitOfWork.PaymentManagement.UpdatePlan(plan);
 
-        return Result<ScheduledPaymentItem>.Success(ToItem(plan));
+        return Result<ScheduledPaymentPlanView>.Success(ToItem(plan));
     }
 
-    private Result<DirectDebitMandateItem> CreateMandate(
+    private Result<DirectDebitMandateView> CreateMandate(
         IBankingUnitOfWork unitOfWork,
         CreateDirectDebitMandateCommand command)
     {
         if (unitOfWork.DepositAccounts.Find(command.DebtorDepositAccountId) is not { } debtor
             || debtor.CustomerAccountId != command.DebtorCustomerAccountId)
         {
-            return Result<DirectDebitMandateItem>.Failure(
+            return Result<DirectDebitMandateView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         if (unitOfWork.DepositAccounts.Find(command.CreditorSettlementAccountId) is not { } creditor)
         {
-            return Result<DirectDebitMandateItem>.Failure(
+            return Result<DirectDebitMandateView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         if (debtor.CurrencyId != creditor.CurrencyId)
         {
-            return Result<DirectDebitMandateItem>.Failure(
+            return Result<DirectDebitMandateView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.DirectDebitCurrencyMismatch);
         }
 
         if (unitOfWork.CustomerAccounts.Find(creditor.CustomerAccountId) is not { } creditorCustomer)
         {
-            return Result<DirectDebitMandateItem>.Failure(
+            return Result<DirectDebitMandateView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
         }
 
@@ -529,29 +537,29 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
         }
         catch (InvariantViolationException)
         {
-            return Result<DirectDebitMandateItem>.Failure(
+            return Result<DirectDebitMandateView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.DirectDebitMandateInvalid);
         }
 
         unitOfWork.PaymentManagement.AddMandate(mandate);
 
-        return Result<DirectDebitMandateItem>.Success(ToItem(mandate));
+        return Result<DirectDebitMandateView>.Success(ToItem(mandate));
     }
 
-    private Result<DirectDebitMandateItem> SetMandateState(
+    private Result<DirectDebitMandateView> SetMandateState(
         IBankingUnitOfWork unitOfWork,
         SetDirectDebitMandateStateCommand command)
     {
         if (unitOfWork.PaymentManagement.FindMandate(command.DirectDebitMandateId) is not { } mandate
             || mandate.DebtorCustomerAccountId != command.DebtorCustomerAccountId)
         {
-            return Result<DirectDebitMandateItem>.Failure(
+            return Result<DirectDebitMandateView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.DirectDebitMandateNotFound);
         }
 
         if (mandate.Status == command.DesiredStatus)
         {
-            return Result<DirectDebitMandateItem>.Success(ToItem(mandate));
+            return Result<DirectDebitMandateView>.Success(ToItem(mandate));
         }
 
         UtcTimestamp now = clock.Now();
@@ -570,22 +578,22 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
                     mandate.Revoke(now);
                     break;
                 default:
-                    return Result<DirectDebitMandateItem>.Failure(
+                    return Result<DirectDebitMandateView>.Failure(
                         ErrorCategory.Validation, BankingErrorCodes.DirectDebitMandateStateInvalid);
             }
         }
         catch (InvariantViolationException)
         {
-            return Result<DirectDebitMandateItem>.Failure(
+            return Result<DirectDebitMandateView>.Failure(
                 ErrorCategory.Conflict, BankingErrorCodes.DirectDebitMandateStateInvalid);
         }
 
         unitOfWork.PaymentManagement.UpdateMandate(mandate);
 
-        return Result<DirectDebitMandateItem>.Success(ToItem(mandate));
+        return Result<DirectDebitMandateView>.Success(ToItem(mandate));
     }
 
-    private static BeneficiaryItem ToItem(SavedBeneficiary beneficiary) =>
+    private static SavedBeneficiaryView ToItem(SavedBeneficiary beneficiary) =>
         new(
             beneficiary.Id,
             beneficiary.DisplayName,
@@ -593,10 +601,10 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
             Suffix(beneficiary.AccountNumberSnapshot),
             beneficiary.Status);
 
-    private static ScheduledPaymentItem ToItem(ScheduledPaymentPlan plan) =>
+    private static ScheduledPaymentPlanView ToItem(ScheduledPaymentPlan plan) =>
         new(plan.Id, plan.Kind, plan.Status, plan.Amount, plan.NextDueAt?.UnixMilliseconds);
 
-    private static DirectDebitMandateItem ToItem(DirectDebitMandate mandate) =>
+    private static DirectDebitMandateView ToItem(DirectDebitMandate mandate) =>
         new(
             mandate.Id,
             mandate.Status,
