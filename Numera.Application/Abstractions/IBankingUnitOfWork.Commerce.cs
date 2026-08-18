@@ -277,6 +277,8 @@ public interface ICommerceRepository
 
     void UpdateFulfillmentPolicy(MerchantFulfillmentPolicyRecord policy);
 
+    MerchantFulfillmentPolicyRecord? FindFulfillmentPolicy(MerchantFulfillmentPolicyVersionId id);
+
     MerchantFulfillmentPolicyRecord? FindPublishedFulfillmentPolicy(MerchantProductId merchantProductId);
 
     MerchantFulfillmentPolicyRecord? FindPublishedFulfillmentPolicyByRole(string discordRoleId);

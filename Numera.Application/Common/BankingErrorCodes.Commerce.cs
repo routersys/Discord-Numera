@@ -136,4 +136,10 @@ public static partial class BankingErrorCodes
 
     public static string CommerceCheckoutTokenInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 194);
+
+    public static string CommerceInterbankCaptureUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 184);
+
+    public static string CommerceConfirmedDebitExceeded { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 195);
 }

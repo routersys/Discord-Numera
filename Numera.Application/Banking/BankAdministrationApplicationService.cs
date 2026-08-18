@@ -152,6 +152,7 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
         FeeType.SameBankTransfer,
         FeeType.InterbankTransfer,
         FeeType.DormancyWeekly,
+        FeeType.DebitPurchase,
     ];
 
     private readonly IBankingWriteGateway writeGateway;

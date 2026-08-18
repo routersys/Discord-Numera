@@ -77,7 +77,7 @@ public interface IPaymentApplicationService
         CancellationToken cancellationToken);
 }
 
-public sealed class PaymentApplicationService : IPaymentApplicationService
+public sealed partial class PaymentApplicationService : IPaymentApplicationService
 {
     public const string OperationType = "PAYMENT_TRANSFER";
     public const string CompletedEventType = "PAYMENT_COMPLETED";
@@ -669,7 +669,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             bank,
             source,
             FeeTypeOf(order),
-            TransferChannel,
+            ChannelOf(order),
             destination.BankId,
             order.Amount,
             point);
@@ -793,7 +793,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             bank,
             source,
             FeeTypeOf(order),
-            TransferChannel,
+            ChannelOf(order),
             destination.BankId,
             order.Amount,
             point);
@@ -939,7 +939,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             sourceBank,
             source,
             FeeTypeOf(order),
-            TransferChannel,
+            ChannelOf(order),
             destination.BankId,
             order.Amount,
             point);
@@ -1538,9 +1538,16 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     }
 
     private static FeeType FeeTypeOf(PaymentOrder order) =>
-        order.SettlementMode == SettlementMode.Internal
-            ? FeeType.SameBankTransfer
-            : FeeType.InterbankTransfer;
+        string.Equals(order.Method, MerchantPaymentMethod, StringComparison.Ordinal)
+            ? FeeType.DebitPurchase
+            : order.SettlementMode == SettlementMode.Internal
+                ? FeeType.SameBankTransfer
+                : FeeType.InterbankTransfer;
+
+    private static FeeChannel ChannelOf(PaymentOrder order) =>
+        string.Equals(order.Method, MerchantPaymentMethod, StringComparison.Ordinal)
+            ? FeeChannel.Merchant
+            : TransferChannel;
 
     private static Result<PaymentOrderView> Conflict() => Result<PaymentOrderView>.Failure(
         ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);

@@ -484,6 +484,21 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         command.ExecuteNonQuery();
     }
 
+    public MerchantFulfillmentPolicyRecord? FindFulfillmentPolicy(
+        MerchantFulfillmentPolicyVersionId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {FulfillmentPolicyColumns} FROM merchant_fulfillment_policy_versions
+            WHERE merchant_fulfillment_policy_version_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadFulfillmentPolicy(reader) : null;
+    }
+
     public MerchantFulfillmentPolicyRecord? FindPublishedFulfillmentPolicy(
         MerchantProductId merchantProductId)
     {

@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
+using Numera.Application.Abstractions;
 using Numera.Application.Banking;
 using Numera.Application.Common;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 using Numera.Persistence.Sqlite;
@@ -18,6 +20,12 @@ public sealed class CommerceCatalogTests
     private const string Institution = "NUM0060";
     private const ulong MerchantUser = 760_000_000_000_000_001UL;
     private const ulong BuyerUser = 760_000_000_000_000_002UL;
+
+    private sealed class StubCommerceCardImageRenderer : IBankCardImageRenderer
+    {
+        public BankCardImage? TryRender(BankCardRenderModel model) =>
+            new("bank-card.png", 1026, 647, [0x89, 0x50, 0x4E, 0x47, 0x0D]);
+    }
 
     private sealed class Harness : IAsyncDisposable
     {
@@ -45,6 +53,8 @@ public sealed class CommerceCatalogTests
         public CommerceApplicationService Commerce { get; private set; } = null!;
 
         public CommerceMaintenanceService Maintenance { get; private set; } = null!;
+
+        public BankCardApplicationService Cards { get; private set; } = null!;
 
         public static Harness Create()
         {
@@ -76,8 +86,15 @@ public sealed class CommerceCatalogTests
                 harness.Clock,
                 ids);
             harness.Merchants = new MerchantAdministrationApplicationService(gateway, harness.Clock, ids);
-            harness.Commerce = new CommerceApplicationService(gateway, harness.Clock, ids);
+            harness.Commerce = new CommerceApplicationService(
+                gateway,
+                new PaymentApplicationService(
+                    gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
+                harness.Clock,
+                ids);
             harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock);
+            harness.Cards = new BankCardApplicationService(
+                gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
 
             return harness;
         }
@@ -130,6 +147,14 @@ public sealed class CommerceCatalogTests
                 effective_to, version)
             VALUES({Blob(31)}, {Blob(5)}, 1, NULL, 1);
 
+            INSERT INTO fee_rules(fee_rule_id, fee_schedule_version_id, fee_type, priority, channel,
+                account_product_id, atm_network_id, counterparty_bank_id, amount_min_minor,
+                amount_max_minor, day_class, local_start_minute, local_end_minute, fixed_minor,
+                basis_points, minimum_minor, maximum_minor, waiver_counter_key,
+                free_occurrences_per_business_month)
+            VALUES({Blob(32)}, {Blob(31)}, 'DEBIT_PURCHASE', 0, 'ANY', NULL, NULL, NULL, 0, NULL,
+                'ANY', NULL, NULL, 0, 0, 0, NULL, NULL, 0);
+
             UPDATE banks
             SET current_policy_version_id = {Blob(30)},
                 current_fee_schedule_version_id = {Blob(31)},
@@ -139,6 +164,16 @@ public sealed class CommerceCatalogTests
             INSERT INTO account_products(product_id, bank_id, product_code, name, deposit_class,
                 version_application_policy, status, created_at, version)
             VALUES({Blob(8)}, {Blob(5)}, 'DEMAND01', '普通預金', 'DEMAND', 'FOLLOW_LATEST', 'ACTIVE', 1, 1);
+
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            VALUES({Blob(40)}, {Blob(4)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES({Blob(41)}, {Blob(4)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
+                {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
 
             INSERT INTO account_product_versions(product_version_id, product_id, version, effective_from,
                 effective_to, annual_rate_ppt, day_count_basis, minimum_balance_minor,
@@ -164,6 +199,34 @@ public sealed class CommerceCatalogTests
             return (long)(command.ExecuteScalar() ?? 0L);
         }
 
+        public DebitCardId DebitCardOf(DepositAccountId accountId)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT d.debit_card_id FROM debit_cards d
+                INNER JOIN bank_cards c ON c.bank_card_id = d.bank_card_id
+                WHERE c.deposit_account_id = $id;
+                """;
+            command.Parameters.AddWithValue("$id", accountId.Value.ToByteArray());
+
+            return DebitCardId.FromValue(EntityIdValue.FromBytes((byte[])command.ExecuteScalar()!));
+        }
+
+        public long PostedBalance(DepositAccountId accountId)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT posted_balance_minor FROM ledger_balance_projections
+                WHERE ledger_account_id = (
+                    SELECT ledger_account_id FROM deposit_accounts WHERE deposit_account_id = $id);
+                """;
+            command.Parameters.AddWithValue("$id", accountId.Value.ToByteArray());
+
+            return (long)(command.ExecuteScalar() ?? 0L);
+        }
+
         public string ReadText(string sql)
         {
             using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
@@ -183,6 +246,21 @@ public sealed class CommerceCatalogTests
                 CancellationToken.None);
 
             return opened.Value.Id;
+        }
+
+        public void Fund(DepositAccountId accountId, long amount)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE ledger_balance_projections
+                SET posted_balance_minor = $amount, version = version + 1
+                WHERE ledger_account_id = (
+                    SELECT ledger_account_id FROM deposit_accounts WHERE deposit_account_id = $id);
+                """;
+            command.Parameters.AddWithValue("$amount", amount);
+            command.Parameters.AddWithValue("$id", accountId.Value.ToByteArray());
+            command.ExecuteNonQuery();
         }
 
         public async ValueTask DisposeAsync()
@@ -475,6 +553,163 @@ public sealed class CommerceCatalogTests
 
         Assert.AreEqual(0, report.Examined);
         Assert.AreEqual("AWAITING_CONFIRMATION", harness.ReadText("SELECT status FROM commerce_orders;"));
+    }
+
+    private static async Task<(CommerceCheckoutConfirmationId Confirmation, DepositAccountId Buyer)>
+        ConfirmableAsync(
+            Harness harness,
+            string token,
+            long funding = 100_000L,
+            string inventoryMode = "UNLIMITED")
+    {
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProductView product =
+            await CreateActiveProductAsync(harness, profile.Id, inventoryMode);
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, funding);
+
+        Result<CustomerAccountStatusView> customer =
+            await harness.Registration.GetCustomerAccountStatusAsync(
+                new GetCustomerAccountStatusQuery(BuyerUser), CancellationToken.None);
+
+        Assert.IsTrue(customer.IsSuccess, customer.Error?.Code);
+
+        Result<BankCardView> card = await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                customer.Value.Id,
+                buyer,
+                BankCardForm.DebitOnly,
+                IdempotencyKey.Create("BANK_CARD_ISSUE", token)),
+            CancellationToken.None);
+
+        Assert.IsTrue(card.IsSuccess, card.Error?.Code);
+
+        Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, token),
+            CancellationToken.None);
+
+        Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
+
+        Result<CommerceCheckoutConfirmationView> review =
+            await harness.Commerce.ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(
+                    Buyer(), checkout.Value.CommerceOrderId, harness.DebitCardOf(buyer), 0),
+                CancellationToken.None);
+
+        Assert.IsTrue(review.IsSuccess, review.Error?.Code + " " + review.Error?.Field);
+
+        return (review.Value.Id, buyer);
+    }
+
+    [TestMethod]
+    public async Task ConfirmingCapturesTheFullAmountInOneWrite()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, DepositAccountId buyer) =
+            await ConfirmableAsync(harness, "capture-1");
+
+        Result<CommercePaymentView> paid = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsTrue(paid.IsSuccess, paid.Error?.Code);
+        Assert.AreEqual(CommercePaymentStatus.Paid, paid.Value.Status);
+        Assert.AreEqual(1_200L, paid.Value.PresentmentPaid.Value);
+        Assert.AreEqual("PAID", harness.ReadText("SELECT status FROM commerce_orders;"));
+        Assert.AreEqual("PAID", harness.ReadText("SELECT status FROM commerce_payments;"));
+        Assert.AreEqual("CAPTURED", harness.ReadText("SELECT status FROM debit_card_authorizations;"));
+        Assert.AreEqual(1L, harness.Count("debit_card_captures"));
+        Assert.AreEqual(98_800L, harness.PostedBalance(buyer));
+        Assert.AreEqual(
+            "0",
+            harness.ReadText("""
+                SELECT CAST(COALESCE(SUM(held_minor), 0) AS TEXT) FROM ledger_balance_projections;
+                """));
+    }
+
+    [TestMethod]
+    public async Task CapturingSettlesTheMerchantAndConsumesTheConfirmation()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, _) =
+            await ConfirmableAsync(harness, "capture-2", inventoryMode: "FINITE");
+
+        Assert.IsTrue((await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation),
+            CancellationToken.None)).IsSuccess);
+
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM commerce_checkout_confirmations
+                WHERE consumed_at IS NOT NULL;
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM outbox_events
+                WHERE event_type = 'COMMERCE_PAYMENT_CAPTURED';
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM merchant_inventory_movements
+                WHERE movement_kind = 'SALE' AND quantity_delta = -1;
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM commerce_orders
+                WHERE refund_eligible_until IS NOT NULL AND return_request_eligible_until IS NOT NULL;
+                """));
+    }
+
+    [TestMethod]
+    public async Task AConsumedConfirmationCannotBeReplayed()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, _) = await ConfirmableAsync(harness, "capture-3");
+
+        Assert.IsTrue((await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation),
+            CancellationToken.None)).IsSuccess);
+
+        Result<CommercePaymentView> replay = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsFalse(replay.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CommerceConfirmationExpired, replay.Error!.Code);
+        Assert.AreEqual(1L, harness.Count("debit_card_captures"));
+    }
+
+    [TestMethod]
+    public async Task AnUnfundedBuyerConsumesTheConfirmationWithoutMoneyEffect()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, _) =
+            await ConfirmableAsync(harness, "capture-4", funding: 100L);
+
+        Result<CommercePaymentView> rejected = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsFalse(rejected.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.AvailableBalanceInsufficient, rejected.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("debit_card_authorizations"));
+        Assert.AreEqual(0L, harness.Count("holds"));
+        Assert.AreEqual(0L, harness.Count("payment_orders"));
+        Assert.AreEqual("AWAITING_CONFIRMATION", harness.ReadText("SELECT status FROM commerce_orders;"));
+        Assert.AreEqual("PENDING", harness.ReadText("SELECT status FROM commerce_payments;"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM commerce_checkout_confirmations
+                WHERE consumed_at IS NOT NULL;
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM business_operations
+                WHERE operation_type = 'COMMERCE_CAPTURE' AND status = 'FAILED';
+                """));
     }
 
     [TestMethod]

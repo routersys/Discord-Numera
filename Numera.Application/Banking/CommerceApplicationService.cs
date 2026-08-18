@@ -128,7 +128,7 @@ public interface ICommerceApplicationService
         CancellationToken cancellationToken);
 }
 
-public sealed class CommerceApplicationService : ICommerceApplicationService
+public sealed partial class CommerceApplicationService : ICommerceApplicationService
 {
     internal const long CheckoutLifetimeMilliseconds = 24 * 60 * 60 * 1000;
     internal const long ConfirmationLifetimeMilliseconds = 300 * 1000;
@@ -137,19 +137,23 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
     internal const string CheckoutResultKind = "COMMERCE_ORDER";
 
     private readonly IBankingWriteGateway writeGateway;
+    private readonly PaymentApplicationService payments;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public CommerceApplicationService(
         IBankingWriteGateway writeGateway,
+        PaymentApplicationService payments,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(payments);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.payments = payments;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
@@ -190,13 +194,24 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
         return writeGateway.ExecuteAsync(unitOfWork => ReviewCheckout(unitOfWork, command), cancellationToken);
     }
 
-    public Task<Result<CommercePaymentView>> ConfirmCommerceCheckoutAsync(
+    public async Task<Result<CommercePaymentView>> ConfirmCommerceCheckoutAsync(
         ConfirmCommerceCheckoutCommand command,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        return writeGateway.ExecuteAsync(unitOfWork => ConfirmCheckout(unitOfWork, command), cancellationToken);
+        Result<CaptureOutcome> outcome = await writeGateway
+            .ExecuteAsync(unitOfWork => Capture(unitOfWork, command), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!outcome.IsSuccess)
+        {
+            return Result<CommercePaymentView>.Failure(outcome.Error!);
+        }
+
+        return outcome.Value.Rejection is { } rejection
+            ? Result<CommercePaymentView>.Failure(rejection)
+            : Result<CommercePaymentView>.Success(outcome.Value.View!);
     }
 
     public Task<Result<CommerceOrderPageView>> GetCommerceOrdersAsync(
@@ -714,96 +729,6 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
             confirmation.ExpiresAt));
     }
 
-    private Result<CommercePaymentView> ConfirmCheckout(
-        IBankingUnitOfWork unitOfWork,
-        ConfirmCommerceCheckoutCommand command)
-    {
-        if (MerchantAuthorization.ResolveActorCustomer(unitOfWork, command.Actor) is not { } customer)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
-        }
-
-        if (unitOfWork.Commerce.FindCheckoutConfirmation(
-                command.CommerceCheckoutConfirmationId) is not { } confirmation)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.CommerceCheckoutConfirmationNotFound);
-        }
-
-        if (confirmation.CustomerAccountId != customer.Id)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.Forbidden, BankingErrorCodes.CommerceOrderNotOwned);
-        }
-
-        UtcTimestamp now = clock.Now();
-
-        if (confirmation.ConsumedAt is not null || now >= confirmation.ExpiresAt)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceConfirmationExpired);
-        }
-
-        if (unitOfWork.Commerce.FindOrder(confirmation.CommerceOrderId) is not { } order ||
-            order.Status != CommerceOrderStatus.AwaitingConfirmation)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
-        }
-
-        if (now >= order.CheckoutExpiresAt)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceCheckoutExpired);
-        }
-
-        if (unitOfWork.Commerce.FindPaymentByOrder(order.Id) is not { } payment ||
-            payment.Status != CommercePaymentStatus.Pending)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
-        }
-
-        if (unitOfWork.BankCards.FindDebitCard(confirmation.DebitCardId) is not { } debitCard ||
-            debitCard.Status != DebitCardStatus.Active ||
-            debitCard.DepositAccountId != confirmation.SourceDepositAccountId)
-        {
-            return Result<CommercePaymentView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.DebitCardNotOperable);
-        }
-
-        foreach (CommerceOrderLineRecord line in unitOfWork.Commerce.ListOrderLines(order.Id))
-        {
-            if (unitOfWork.Commerce.FindProduct(line.MerchantProductId) is not { } product ||
-                product.Status != MerchantProductStatus.Active)
-            {
-                return Result<CommercePaymentView>.Failure(
-                    ErrorCategory.Conflict, BankingErrorCodes.MerchantProductNotSellable);
-            }
-
-            if (product.InventoryMode != MerchantVocabulary.InventoryFinite)
-            {
-                continue;
-            }
-
-            if (unitOfWork.Commerce.FindInventory(product.Id) is not { } inventory)
-            {
-                return Result<CommercePaymentView>.Failure(
-                    ErrorCategory.NotFound, BankingErrorCodes.MerchantInventoryNotFound);
-            }
-
-            if (inventory.OnHandQuantity < line.Quantity)
-            {
-                return Result<CommercePaymentView>.Failure(
-                    ErrorCategory.Conflict, BankingErrorCodes.MerchantInventoryInsufficient);
-            }
-        }
-
-        return Result<CommercePaymentView>.Failure(
-            ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.CommerceCaptureUnavailable);
-    }
-
     private static Result<CommerceOrderPageView> ListOrders(
         IBankingUnitOfWork unitOfWork,
         GetCommerceOrdersQuery query)
@@ -962,7 +887,7 @@ public sealed class CommerceApplicationService : ICommerceApplicationService
             bank,
             source,
             FeeType.DebitPurchase,
-            FeeChannel.Discord,
+            FeeChannel.Merchant,
             counterpartyBankId: null,
             principal,
             point);
