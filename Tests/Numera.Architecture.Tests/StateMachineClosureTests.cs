@@ -103,6 +103,18 @@ public sealed class StateMachineClosureTests
         ["atm_transactions"] = Tokens<AtmTransactionStatus>(static value => value.ToToken()),
         ["atm_discord_installations"] =
             Tokens<AtmDiscordInstallationStatus>(static value => value.ToToken()),
+        ["deposit_insurance_funds"] =
+            Tokens<DepositInsuranceFundStatus>(static value => value.ToToken()),
+        ["deposit_insurance_schemes"] =
+            Tokens<DepositInsuranceSchemeStatus>(static value => value.ToToken()),
+        ["deposit_insurance_enrollments"] =
+            Tokens<DepositInsuranceEnrollmentStatus>(static value => value.ToToken()),
+        ["deposit_insurance_reservations"] =
+            Tokens<DepositInsuranceReservationStatus>(static value => value.ToToken()),
+        ["insurance_settlement_wallets"] =
+            Tokens<InsuranceSettlementWalletStatus>(static value => value.ToToken()),
+        ["deposit_insurance_claims"] =
+            Tokens<DepositInsuranceClaimStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
