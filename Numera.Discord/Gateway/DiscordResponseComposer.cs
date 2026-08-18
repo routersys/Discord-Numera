@@ -55,7 +55,12 @@ internal sealed class CatalogResponseComposer : IDiscordResponseComposer
             catalog.Format(response.ViewKey + ComposerViewData.TitleSuffix, response.ViewData),
             catalog.Format(response.ViewKey + ComposerViewData.DescriptionSuffix, response.ViewData),
             ComposeFooter(response),
-            PresentationColors.Information);
+            PresentationColors.Information,
+            [
+                .. response.Body.Fields.Select(field => new DiscordEmbedFieldPayload(
+                    catalog.Format(field.LabelKey, response.ViewData),
+                    catalog.Format(field.ValueKey, response.ViewData))),
+            ]);
     }
 
     public DiscordEmbedPayload Compose(RenderedError error)
@@ -69,12 +74,12 @@ internal sealed class CatalogResponseComposer : IDiscordResponseComposer
     {
         ArgumentNullException.ThrowIfNull(response);
 
-        if (response.Components.IsEmpty)
+        if (response.Body.Components.IsEmpty)
         {
             return DiscordComponentPayload.None;
         }
 
-        DiscordSelectPayload? select = response.Components.Select is { } declared
+        DiscordSelectPayload? select = response.Body.Components.Select is { } declared
             ? new DiscordSelectPayload(
                 declared.CustomId,
                 catalog.Format(declared.PlaceholderKey, response.ViewData),
@@ -87,7 +92,7 @@ internal sealed class CatalogResponseComposer : IDiscordResponseComposer
         return new DiscordComponentPayload(
             select,
             [
-                .. response.Components.Buttons.Select(button => new DiscordButtonPayload(
+                .. response.Body.Components.Buttons.Select(button => new DiscordButtonPayload(
                     button.CustomId,
                     catalog.Format(button.LabelKey, response.ViewData),
                     button.Style,

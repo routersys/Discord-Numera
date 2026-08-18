@@ -96,6 +96,8 @@ public sealed class DiscordEndpointExecutorTests
     {
         [ViewKey + ".title"] = "Transfer accepted",
         [ButtonLabelKey] = "Execute",
+        [FieldLabelKey] = "Amount",
+        [FieldValueKey] = "{amount}",
         [SelectPlaceholderKey] = "Choose an account",
         [ViewKey + ".description"] = "The transfer is being processed.",
         [TextCatalogKeys.OperationFooter] = "Operation: {operationPublicId}",
@@ -114,6 +116,8 @@ public sealed class DiscordEndpointExecutorTests
     }
 
     private const string ButtonLabelKey = "bank.transfer.execute";
+    private const string FieldLabelKey = "bank.transfer.field.amount.label";
+    private const string FieldValueKey = "bank.transfer.field.amount.value";
     private const string SelectPlaceholderKey = "bank.transfer.source";
 
     private static DiscordEndpointResponse Message() => DiscordEndpointResponse.Message(ViewKey, ViewData);
@@ -454,7 +458,7 @@ public sealed class DiscordEndpointExecutorTests
 
         ResponsePlanFailure failure = await executor.ExecuteAsync(
             exchange,
-            DiscordEndpointResponse.Message(ViewKey, ViewData, components),
+            DiscordEndpointResponse.Message(ViewKey, ViewData, DiscordResponseBody.WithComponents(components)),
             CancellationToken.None);
 
         Assert.AreEqual(ResponsePlanFailure.None, failure);
@@ -498,4 +502,33 @@ public sealed class DiscordEndpointExecutorTests
     public void AnEmptySelectIsRejected() =>
         Assert.ThrowsExactly<ArgumentException>(static () =>
             _ = new DiscordResponseSelect("id", SelectPlaceholderKey, []));
+
+    [TestMethod]
+    public async Task EmbedFieldsAreResolvedInDeclarationOrder()
+    {
+        (DiscordEndpointExecutor executor, DiscordInteractionExchange exchange, RecordingResponseSink sink) =
+            Create(DiscordInteractionKind.SlashCommand);
+
+        Dictionary<string, string> viewData = new(StringComparer.Ordinal)
+        {
+            ["operationPublicId"] = "OP-1",
+            ["amount"] = "1000",
+        };
+
+        await executor.ExecuteAsync(
+            exchange,
+            DiscordEndpointResponse.Message(
+                ViewKey,
+                viewData,
+                DiscordResponseBody.WithFields([new DiscordResponseField(FieldLabelKey, FieldValueKey)])),
+            CancellationToken.None);
+
+        Assert.AreEqual("Amount", sink.Embeds[0].Fields![0].Name);
+        Assert.AreEqual("1000", sink.Embeds[0].Fields![0].Value);
+    }
+
+    [TestMethod]
+    public void AnOverfullFieldListIsRejected() =>
+        Assert.ThrowsExactly<ArgumentException>(static () => _ = DiscordResponseBody.WithFields(
+            [.. Enumerable.Range(0, 11).Select(static _ => new DiscordResponseField(FieldLabelKey, FieldValueKey))]));
 }

@@ -2,7 +2,14 @@ using Numera.Discord.Abstractions;
 
 namespace Numera.Discord.Gateway;
 
-internal sealed record DiscordEmbedPayload(string Title, string Description, string? Footer, uint Color);
+internal sealed record DiscordEmbedFieldPayload(string Name, string Value);
+
+internal sealed record DiscordEmbedPayload(
+    string Title,
+    string Description,
+    string? Footer,
+    uint Color,
+    IReadOnlyList<DiscordEmbedFieldPayload>? Fields = null);
 
 internal sealed record DiscordButtonPayload(
     string CustomId,

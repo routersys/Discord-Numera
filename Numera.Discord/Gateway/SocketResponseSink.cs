@@ -96,6 +96,11 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
             builder.WithFooter(payload.Footer);
         }
 
+        foreach (DiscordEmbedFieldPayload field in payload.Fields ?? [])
+        {
+            builder.AddField(field.Name, field.Value, inline: false);
+        }
+
         return builder.Build();
     }
 
