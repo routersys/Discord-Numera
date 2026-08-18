@@ -36,6 +36,25 @@ public sealed class StateMachineClosureTests
         ["payment_networks"] = Tokens<PaymentNetworkStatus>(static value => value.ToToken()),
         ["bank_operator_grants"] = Tokens<BankOperatorGrantStatus>(static value => value.ToToken()),
         ["bank_cards"] = Tokens<BankCardStatus>(static value => value.ToToken()),
+        ["presentation_profile_versions"] =
+            Tokens<PresentationProfileVersionStatus>(static value => value.ToToken()),
+        ["currency_trust_policy_versions"] =
+            Tokens<CurrencyTrustPolicyVersionStatus>(static value => value.ToToken()),
+        ["currency_trust_designations"] =
+            Tokens<CurrencyTrustDesignationStatus>(static value => value.ToToken()),
+        ["monetary_authorities"] = Tokens<MonetaryAuthorityStatus>(static value => value.ToToken()),
+        ["official_reserve_portfolios"] =
+            Tokens<OfficialReservePortfolioStatus>(static value => value.ToToken()),
+        ["official_reserve_positions"] =
+            Tokens<OfficialReservePositionStatus>(static value => value.ToToken()),
+        ["fx_intervention_mandates"] =
+            Tokens<FxInterventionMandateStatus>(static value => value.ToToken()),
+        ["resolution_cases"] = Tokens<ResolutionCaseStatus>(static value => value.ToToken()),
+        ["merchant_profiles"] = Tokens<MerchantProfileStatus>(static value => value.ToToken()),
+        ["merchant_operator_grants"] =
+            Tokens<MerchantOperatorGrantStatus>(static value => value.ToToken()),
+        ["loan_contracts"] = Tokens<LoanContractStatus>(static value => value.ToToken()),
+        ["loan_schedules"] = Tokens<LoanScheduleStatus>(static value => value.ToToken()),
         ["account_products"] = Tokens<AccountProductStatus>(static value => value.ToToken()),
         ["fx_markets"] = Tokens<FxMarketStatus>(static value => value.ToToken()),
         ["fx_orders"] = Tokens<FxOrderStatus>(static value => value.ToToken()),
