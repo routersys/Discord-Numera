@@ -118,7 +118,7 @@ public sealed class SuggestionTests
             AuthorizationLevel level,
             ulong discordUserId = OtherUser) =>
             Service.SuggestBanksAsync(
-                new SuggestBanksQuery(Scope, new AuthorizationContext(level, discordUserId, 900), string.Empty),
+                new SuggestBanksQuery(new AuthorizationContext(level, discordUserId, 900), string.Empty),
                 CancellationToken.None);
 
         public void Dispose()
@@ -259,7 +259,6 @@ public sealed class SuggestionTests
 
         Result<IReadOnlyList<CurrencySuggestion>> result = await harness.Service.SuggestCurrenciesAsync(
             new SuggestCurrenciesQuery(
-                harness.Scope,
                 new AuthorizationContext(AuthorizationLevel.Customer, OtherUser, 900),
                 string.Empty),
             CancellationToken.None);
@@ -276,7 +275,6 @@ public sealed class SuggestionTests
 
         Result<IReadOnlyList<CurrencySuggestion>> result = await harness.Service.SuggestCurrenciesAsync(
             new SuggestCurrenciesQuery(
-                harness.Scope,
                 new AuthorizationContext(AuthorizationLevel.Unregistered, OtherUser, 900),
                 string.Empty),
             CancellationToken.None);

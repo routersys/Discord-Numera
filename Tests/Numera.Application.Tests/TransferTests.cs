@@ -634,7 +634,7 @@ public sealed class TransferTests
             string institutionCode = Institution)
         {
             Result<AccountOpeningView> result = await Accounts.OpenDepositAccountAsync(
-                new OpenDepositAccountCommand(Scope, customerAccountId, institutionCode),
+                new OpenDepositAccountCommand(GuildId, customerAccountId, institutionCode),
                 CancellationToken.None);
 
             return result.Value;
@@ -651,7 +651,7 @@ public sealed class TransferTests
             string? memo = null) =>
             Payments.CreatePaymentOrderAsync(
                 new CreatePaymentOrderCommand(
-                    Scope, payer, source, institution, branch, destinationAccountNumber, amount, memo, token),
+                    GuildId, payer, source, institution, branch, destinationAccountNumber, amount, memo, token),
                 CancellationToken.None);
 
         public async ValueTask DisposeAsync()

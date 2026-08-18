@@ -146,7 +146,7 @@ public sealed class PaymentNetworkAdministrationTests
         string code = "ZENGIN") =>
         harness.Networks.StartNetworkDraftAsync(
             new StartPaymentNetworkDraftCommand(
-                actor, harness.Scope, code, harness.Operator, harness.Book, harness.LiquidAsset),
+                actor, code, harness.Operator, harness.Book, harness.LiquidAsset),
             CancellationToken.None);
 
     [TestMethod]
@@ -169,11 +169,11 @@ public sealed class PaymentNetworkAdministrationTests
         Result<PaymentNetworkDraftView> result = await harness.Networks.StartNetworkDraftAsync(
             new StartPaymentNetworkDraftCommand(
                 new AuthorizationContext(AuthorizationLevel.SystemOwner, OwnerDiscordUserId, OtherGuildId),
-                harness.Scope,
                 "ZENGIN",
                 harness.Operator,
                 harness.Book,
-                harness.LiquidAsset),
+                harness.LiquidAsset,
+                harness.Scope),
             CancellationToken.None);
 
         Assert.IsTrue(result.IsSuccess);
@@ -184,10 +184,31 @@ public sealed class PaymentNetworkAdministrationTests
     {
         await using Harness harness = Harness.Create();
 
+        Result<PaymentNetworkDraftView> result = await harness.Networks.StartNetworkDraftAsync(
+            new StartPaymentNetworkDraftCommand(
+                GuildOperator(OtherGuildId),
+                "ZENGIN",
+                harness.Operator,
+                harness.Book,
+                harness.LiquidAsset,
+                harness.Scope),
+            CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(ErrorCategory.Forbidden, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.ManagementAuthorityMissing, result.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task AGuildWithoutAnEconomyIsNotFound()
+    {
+        await using Harness harness = Harness.Create();
+
         Result<PaymentNetworkDraftView> result = await DraftAsync(harness, GuildOperator(OtherGuildId));
 
         Assert.IsFalse(result.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.ManagementAuthorityMissing, result.Error!.Code);
+        Assert.AreEqual(ErrorCategory.NotFound, result.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.GuildEconomyNotFound, result.Error.Code);
     }
 
     [TestMethod]
@@ -209,11 +230,11 @@ public sealed class PaymentNetworkAdministrationTests
         Result<PaymentNetworkDraftView> result = await harness.Networks.StartNetworkDraftAsync(
             new StartPaymentNetworkDraftCommand(
                 new AuthorizationContext(AuthorizationLevel.SystemOwner, OutsiderDiscordUserId, OtherGuildId),
-                harness.Scope,
                 "ZENGIN",
                 harness.Operator,
                 harness.Book,
-                harness.LiquidAsset),
+                harness.LiquidAsset,
+                harness.Scope),
             CancellationToken.None);
 
         Assert.IsFalse(result.IsSuccess);

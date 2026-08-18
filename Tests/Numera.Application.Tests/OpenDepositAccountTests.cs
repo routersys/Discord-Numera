@@ -161,7 +161,7 @@ public sealed class OpenDepositAccountTests
             CustomerAccountId customerAccountId,
             string institutionCode = Institution) =>
             Accounts.OpenDepositAccountAsync(
-                new OpenDepositAccountCommand(Scope, customerAccountId, institutionCode),
+                new OpenDepositAccountCommand(GuildId, customerAccountId, institutionCode),
                 CancellationToken.None);
 
         public async ValueTask DisposeAsync()

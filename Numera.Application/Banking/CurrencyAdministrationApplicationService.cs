@@ -8,7 +8,6 @@ namespace Numera.Application.Banking;
 
 public sealed record CreateCurrencyCommand(
     AuthorizationContext Actor,
-    EconomyScopeId EconomyScopeId,
     AccountingBookId IssuanceAccountingBookId,
     string Name,
     string Code,
@@ -18,7 +17,8 @@ public sealed record CreateCurrencyCommand(
     long? BaseMoneySupplyCapMinor,
     long GenesisAmountMinor,
     string ReasonCode,
-    string IdempotencyToken);
+    string IdempotencyToken,
+    EconomyScopeId? TargetEconomyScopeId = null);
 
 public sealed record IssueCurrencyCommand(
     AuthorizationContext Actor,
@@ -195,21 +195,31 @@ public sealed class CurrencyAdministrationApplicationService : ICurrencyAdminist
         CreateCurrencyCommand command,
         IdempotencyKey key)
     {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, command.Actor, command.TargetEconomyScopeId);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<CurrencyView>.Failure(scope.Error!);
+        }
+
+        EconomyScopeId economyScopeId = scope.Value;
+
         Result authorized = ManagementAuthorizationPolicy.Ensure(
-            unitOfWork, command.Actor, command.EconomyScopeId);
+            unitOfWork, command.Actor, economyScopeId);
 
         if (!authorized.IsSuccess)
         {
             return Result<CurrencyView>.Failure(authorized.Error!);
         }
 
-        if (!unitOfWork.Currencies.EconomyIsActive(command.EconomyScopeId))
+        if (!unitOfWork.Currencies.EconomyIsActive(economyScopeId))
         {
             return Result<CurrencyView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.EconomyScopeNotFound);
         }
 
-        if (unitOfWork.Currencies.FindCurrent(command.EconomyScopeId) is { } current)
+        if (unitOfWork.Currencies.FindCurrent(economyScopeId) is { } current)
         {
             return unitOfWork.BusinessOperations.Find(key) is not null
                 ? Result<CurrencyView>.Success(Describe(unitOfWork, current))
@@ -233,7 +243,7 @@ public sealed class CurrencyAdministrationApplicationService : ICurrencyAdminist
 
         Currency currency = Currency.Create(
             CurrencyId.FromValue(idGenerator.NextId()),
-            command.EconomyScopeId,
+            economyScopeId,
             MinorUnitDigits.FromInt32(command.MinorUnitDigits),
             command.BaseMoneySupplyCapMinor is { } cap ? MoneyMinor.FromMinor(cap) : null,
             now);
@@ -262,7 +272,7 @@ public sealed class CurrencyAdministrationApplicationService : ICurrencyAdminist
         BusinessOperation operation = BusinessOperation.Start(
             BusinessOperationId.FromValue(idGenerator.NextId()),
             CreateOperationType,
-            command.EconomyScopeId,
+            economyScopeId,
             actorPartyId: null,
             idGenerator.NextId(),
             key,

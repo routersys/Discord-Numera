@@ -148,7 +148,6 @@ public sealed class BankAdministrationTests
             string? agentInstitutionCode = null) =>
             new(
                 Actor,
-                Scope,
                 institutionCode,
                 "ヌメラ銀行",
                 "001",
@@ -197,7 +196,7 @@ public sealed class BankAdministrationTests
             CustomerAccountId customerAccountId,
             string institutionCode = Institution) =>
             Accounts.OpenDepositAccountAsync(
-                new OpenDepositAccountCommand(Scope, customerAccountId, institutionCode),
+                new OpenDepositAccountCommand(Guild, customerAccountId, institutionCode),
                 CancellationToken.None);
 
         public AccountOpeningApplicationId PendingApplicationId()

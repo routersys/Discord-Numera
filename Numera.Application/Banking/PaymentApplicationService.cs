@@ -9,7 +9,7 @@ using Numera.Domain.Identity;
 namespace Numera.Application.Banking;
 
 public sealed record CreatePaymentOrderCommand(
-    EconomyScopeId EconomyScopeId,
+    ulong GuildId,
     CustomerAccountId PayerCustomerAccountId,
     DepositAccountId SourceDepositAccountId,
     string DestinationInstitutionCode,
@@ -30,7 +30,7 @@ public sealed record PaymentOrderView(
     MoneyMinor SourceAvailableBalance);
 
 public sealed record PrepareTransferToCustomerQuery(
-    EconomyScopeId EconomyScopeId,
+    ulong GuildId,
     CustomerAccountId PayerCustomerAccountId,
     DepositAccountId SourceDepositAccountId,
     ulong BeneficiaryDiscordUserId);
@@ -202,6 +202,12 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     {
         ITransferPreparationReadRepository repository = context.TransferPreparation;
 
+        if (context.EconomyScopes.FindByGuild(query.GuildId) is not { } economyScopeId)
+        {
+            return Result<TransferPreparationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
         if (repository.FindOwnedSource(query.PayerCustomerAccountId, query.SourceDepositAccountId)
             is not { } source)
         {
@@ -214,7 +220,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         }
 
         CustomerAccountId? beneficiary = repository.FindCustomerByDiscordUser(
-            query.EconomyScopeId,
+            economyScopeId,
             query.BeneficiaryDiscordUserId.ToString(CultureInfo.InvariantCulture));
 
         if (beneficiary is not { } beneficiaryCustomerAccountId)
@@ -386,6 +392,12 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                     ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
         }
 
+        if (unitOfWork.GuildEconomies.FindEconomyScope(command.GuildId) is not { } economyScopeId)
+        {
+            return Result<ReservedTransfer>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
         CustomerAccount? payer = unitOfWork.CustomerAccounts.Find(command.PayerCustomerAccountId);
         if (payer is null)
         {
@@ -413,7 +425,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         }
 
         Bank? destinationBank = unitOfWork.Banks.FindByInstitutionCode(
-            command.EconomyScopeId, request.InstitutionCode.Value);
+            economyScopeId, request.InstitutionCode.Value);
         if (destinationBank is null)
         {
             return Result<ReservedTransfer>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
@@ -453,7 +465,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         }
 
         Result<PaymentRoute> routed = PaymentRoutePolicy.Resolve(
-            unitOfWork, command.EconomyScopeId, interbank, request.Amount);
+            unitOfWork, economyScopeId, interbank, request.Amount);
 
         if (!routed.IsSuccess)
         {
@@ -535,7 +547,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         BusinessOperation operation = BusinessOperation.Start(
             BusinessOperationId.FromValue(idGenerator.NextId()),
             OperationType,
-            command.EconomyScopeId,
+            economyScopeId,
             payer.PartyId,
             idGenerator.NextId(),
             idempotencyKey,

@@ -17,11 +17,11 @@ public sealed record PaymentNetworkPolicyInput(
 
 public sealed record StartPaymentNetworkDraftCommand(
     AuthorizationContext Actor,
-    EconomyScopeId EconomyScopeId,
     string NetworkCode,
     PartyId OperatorPartyId,
     AccountingBookId AccountingBookId,
-    LedgerAccountId LiquidAssetLedgerAccountId);
+    LedgerAccountId LiquidAssetLedgerAccountId,
+    EconomyScopeId? TargetEconomyScopeId = null);
 
 public sealed record PublishPaymentNetworkCommand(
     AuthorizationContext Actor,
@@ -171,15 +171,25 @@ public sealed class PaymentNetworkAdministrationApplicationService
         IBankingUnitOfWork unitOfWork,
         StartPaymentNetworkDraftCommand command)
     {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, command.Actor, command.TargetEconomyScopeId);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<PaymentNetworkDraftView>.Failure(scope.Error!);
+        }
+
+        EconomyScopeId economyScopeId = scope.Value;
+
         Result authorized = ManagementAuthorizationPolicy.Ensure(
-            unitOfWork, command.Actor, command.EconomyScopeId);
+            unitOfWork, command.Actor, economyScopeId);
 
         if (!authorized.IsSuccess)
         {
             return Result<PaymentNetworkDraftView>.Failure(authorized.Error!);
         }
 
-        if (unitOfWork.PaymentNetworks.FindByCode(command.EconomyScopeId, command.NetworkCode) is not null)
+        if (unitOfWork.PaymentNetworks.FindByCode(economyScopeId, command.NetworkCode) is not null)
         {
             return Result<PaymentNetworkDraftView>.Failure(
                 ErrorCategory.Conflict, BankingErrorCodes.PaymentNetworkAlreadyExists);
@@ -193,7 +203,7 @@ public sealed class PaymentNetworkAdministrationApplicationService
 
         PaymentNetwork network = PaymentNetwork.Draft(
             PaymentNetworkId.FromValue(idGenerator.NextId()),
-            command.EconomyScopeId,
+            economyScopeId,
             command.NetworkCode,
             command.OperatorPartyId,
             command.AccountingBookId,

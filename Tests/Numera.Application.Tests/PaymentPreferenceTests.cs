@@ -169,7 +169,7 @@ public sealed class PaymentPreferenceApplicationTests
             string institutionCode = Institution)
         {
             Result<AccountOpeningView> result = await Accounts.OpenDepositAccountAsync(
-                new OpenDepositAccountCommand(Scope, customerAccountId, institutionCode),
+                new OpenDepositAccountCommand(GuildId, customerAccountId, institutionCode),
                 CancellationToken.None);
 
             return result.Value;
@@ -180,7 +180,7 @@ public sealed class PaymentPreferenceApplicationTests
             DepositAccountId source,
             ulong beneficiaryDiscordUserId) =>
             Payments.PrepareTransferToCustomerAsync(
-                new PrepareTransferToCustomerQuery(Scope, payer, source, beneficiaryDiscordUserId),
+                new PrepareTransferToCustomerQuery(GuildId, payer, source, beneficiaryDiscordUserId),
                 CancellationToken.None);
 
         public Task<Result<PaymentPreferenceView>> SetAsync(

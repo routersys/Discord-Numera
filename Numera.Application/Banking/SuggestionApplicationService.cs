@@ -10,12 +10,10 @@ public sealed record BankSuggestion(string InstitutionCode, string Name, BankSta
 public sealed record CurrencySuggestion(string Code, string Name);
 
 public sealed record SuggestBanksQuery(
-    EconomyScopeId EconomyScopeId,
     AuthorizationContext Authorization,
     string Input);
 
 public sealed record SuggestCurrenciesQuery(
-    EconomyScopeId EconomyScopeId,
     AuthorizationContext Authorization,
     string Input);
 
@@ -55,13 +53,15 @@ public sealed class SuggestionApplicationService : ISuggestionApplicationService
         }
 
         IReadOnlyList<BankSuggestion> suggestions = readGateway.Execute(context =>
-            context.Banks.ListSuggestible(
-                query.EconomyScopeId,
-                SelectableStatuses(query.Authorization.Level),
-                query.Authorization.Level == AuthorizationLevel.BankOperator
-                    ? query.Authorization.DiscordUserId
-                    : null,
-                CandidateFetchLimit));
+            context.EconomyScopes.FindByGuild(query.Authorization.GuildId) is { } scope
+                ? context.Banks.ListSuggestible(
+                    scope,
+                    SelectableStatuses(query.Authorization.Level),
+                    query.Authorization.Level == AuthorizationLevel.BankOperator
+                        ? query.Authorization.DiscordUserId
+                        : null,
+                    CandidateFetchLimit)
+                : []);
 
         return Task.FromResult(Result<IReadOnlyList<BankSuggestion>>.Success(suggestions));
     }
@@ -79,7 +79,9 @@ public sealed class SuggestionApplicationService : ISuggestionApplicationService
         }
 
         IReadOnlyList<CurrencySuggestion> suggestions = readGateway.Execute(context =>
-            context.Currencies.ListSuggestible(query.EconomyScopeId, CandidateFetchLimit));
+            context.EconomyScopes.FindByGuild(query.Authorization.GuildId) is { } scope
+                ? context.Currencies.ListSuggestible(scope, CandidateFetchLimit)
+                : []);
 
         return Task.FromResult(Result<IReadOnlyList<CurrencySuggestion>>.Success(suggestions));
     }

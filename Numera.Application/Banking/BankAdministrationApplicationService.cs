@@ -10,7 +10,6 @@ namespace Numera.Application.Banking;
 
 public sealed record CommitCreateBankCommand(
     AuthorizationContext Actor,
-    EconomyScopeId EconomyScopeId,
     string InstitutionCode,
     string BankName,
     string BranchCode,
@@ -25,7 +24,8 @@ public sealed record CommitCreateBankCommand(
     bool PublicReceivingEnabledDefault,
     SettlementParticipationMode SettlementMode,
     string? SettlementAgentInstitutionCode,
-    AccountingBookId? CentralBankAccountingBookId);
+    AccountingBookId? CentralBankAccountingBookId,
+    EconomyScopeId? TargetEconomyScopeId = null);
 
 public sealed record ApproveAccountOpeningCommand(
     AuthorizationContext Actor,
@@ -146,8 +146,18 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
 
     private Result<BankView> CommitCreate(IBankingUnitOfWork unitOfWork, CommitCreateBankCommand command)
     {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, command.Actor, command.TargetEconomyScopeId);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<BankView>.Failure(scope.Error!);
+        }
+
+        EconomyScopeId economyScopeId = scope.Value;
+
         Result authorized = ManagementAuthorizationPolicy.Ensure(
-            unitOfWork, command.Actor, command.EconomyScopeId);
+            unitOfWork, command.Actor, economyScopeId);
 
         if (!authorized.IsSuccess)
         {
@@ -172,20 +182,20 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
             return Result<BankView>.Failure(ErrorCategory.Conflict, BankingErrorCodes.BankAlreadyExists);
         }
 
-        if (unitOfWork.BankAdministration.FindActiveCurrency(command.EconomyScopeId) is not { } currencyId)
+        if (unitOfWork.BankAdministration.FindActiveCurrency(economyScopeId) is not { } currencyId)
         {
             return Result<BankView>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.CurrencyUnavailable);
         }
 
-        if (unitOfWork.BankAdministration.FindPublishedPrudentialPolicy(command.EconomyScopeId) is null)
+        if (unitOfWork.BankAdministration.FindPublishedPrudentialPolicy(economyScopeId) is null)
         {
             return Result<BankView>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.PrudentialPolicyUnavailable);
         }
 
         if (command.MinimumInitialFundingMinor > 0 &&
-            !unitOfWork.BankAdministration.HasOperatingBank(command.EconomyScopeId))
+            !unitOfWork.BankAdministration.HasOperatingBank(economyScopeId))
         {
             return Result<BankView>.Failure(
                 ErrorCategory.AccountRestricted, BankingErrorCodes.OpeningFundingSourceUnavailable);
@@ -196,7 +206,7 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
         BusinessOperation operation = BusinessOperation.Start(
             BusinessOperationId.FromValue(idGenerator.NextId()),
             CreateOperationType,
-            command.EconomyScopeId,
+            economyScopeId,
             actorPartyId: null,
             idGenerator.NextId(),
             IdempotencyKey.Create(CreateOperationType, institutionCode.Value),
@@ -209,7 +219,7 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
 
         Bank bank = Bank.Establish(
             BankId.FromValue(idGenerator.NextId()),
-            command.EconomyScopeId,
+            economyScopeId,
             party.Id,
             institutionCode,
             bankName,

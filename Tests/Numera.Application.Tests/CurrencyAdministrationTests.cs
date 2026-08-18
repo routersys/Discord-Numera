@@ -148,7 +148,6 @@ public sealed class CurrencyAdministrationTests
         harness.Currencies.CreateCurrencyAsync(
             new CreateCurrencyCommand(
                 actor,
-                harness.Scope,
                 harness.Book,
                 "ヌメラ",
                 code,
@@ -158,7 +157,8 @@ public sealed class CurrencyAdministrationTests
                 capMinor,
                 genesisMinor,
                 "GENESIS_MINT",
-                token),
+                token,
+                harness.Scope),
             CancellationToken.None);
 
     private static LedgerAccountId TreasuryAccountOf(Harness harness, string code = "NUM") =>
@@ -308,7 +308,6 @@ public sealed class CurrencyAdministrationTests
         Result<CurrencyView> created = await harness.Currencies.CreateCurrencyAsync(
             new CreateCurrencyCommand(
                 SystemOwner(),
-                harness.Scope,
                 harness.Book,
                 "ヌメラ",
                 new string('X', 17),
@@ -318,7 +317,8 @@ public sealed class CurrencyAdministrationTests
                 null,
                 0,
                 "GENESIS_MINT",
-                "create-1"),
+                "create-1",
+                harness.Scope),
             CancellationToken.None);
 
         Assert.IsFalse(created.IsSuccess);

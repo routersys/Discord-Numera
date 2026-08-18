@@ -8,7 +8,7 @@ using Numera.Domain.Identity;
 namespace Numera.Application.Banking;
 
 public sealed record OpenDepositAccountCommand(
-    EconomyScopeId EconomyScopeId,
+    ulong GuildId,
     CustomerAccountId CustomerAccountId,
     string InstitutionCode);
 
@@ -80,7 +80,12 @@ public sealed class BankAccountApplicationService : IBankAccountApplicationServi
         InstitutionCode institutionCode,
         IdempotencyKey idempotencyKey)
     {
-        Bank? bank = unitOfWork.Banks.FindByInstitutionCode(command.EconomyScopeId, institutionCode.Value);
+        if (unitOfWork.GuildEconomies.FindEconomyScope(command.GuildId) is not { } economyScopeId)
+        {
+            return Failure(ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
+        Bank? bank = unitOfWork.Banks.FindByInstitutionCode(economyScopeId, institutionCode.Value);
         if (bank is null)
         {
             return Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
@@ -126,7 +131,7 @@ public sealed class BankAccountApplicationService : IBankAccountApplicationServi
         UtcTimestamp now = clock.Now();
 
         Result<AccountOpeningContract?> resolved = AccountOpeningWorkflow.ResolveContract(
-            unitOfWork, command.EconomyScopeId, bank, product, control.CurrencyId, now);
+            unitOfWork, economyScopeId, bank, product, control.CurrencyId, now);
 
         if (!resolved.IsSuccess)
         {
@@ -136,7 +141,7 @@ public sealed class BankAccountApplicationService : IBankAccountApplicationServi
         BusinessOperation operation = BusinessOperation.Start(
             BusinessOperationId.FromValue(idGenerator.NextId()),
             OperationType,
-            command.EconomyScopeId,
+            economyScopeId,
             customer.PartyId,
             idGenerator.NextId(),
             idempotencyKey,
