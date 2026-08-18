@@ -379,3 +379,30 @@ public readonly record struct BankOperatorGrantId(EntityIdValue Value) : IEntity
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct BankCardId(EntityIdValue Value) : IEntityId<BankCardId>
+{
+    public static string EntityName => "bank_card";
+
+    public static BankCardId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct CashCardId(EntityIdValue Value) : IEntityId<CashCardId>
+{
+    public static string EntityName => "cash_card";
+
+    public static CashCardId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct DebitCardId(EntityIdValue Value) : IEntityId<DebitCardId>
+{
+    public static string EntityName => "debit_card";
+
+    public static DebitCardId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

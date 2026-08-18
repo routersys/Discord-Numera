@@ -5,8 +5,8 @@ namespace Numera.Architecture.Tests;
 [TestClass]
 public sealed class SurfaceTests
 {
-    private const int DomainBudget = 178;
-    private const int ApplicationBudget = 170;
+    private const int DomainBudget = 191;
+    private const int ApplicationBudget = 179;
     private const int PersistenceBudget = 76;
     private const int DiscordBudget = 44;
 

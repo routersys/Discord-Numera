@@ -35,6 +35,9 @@ public sealed class StateMachineClosureTests
         ["clearing_instructions"] = Tokens<ClearingInstructionStatus>(static value => value.ToToken()),
         ["payment_networks"] = Tokens<PaymentNetworkStatus>(static value => value.ToToken()),
         ["bank_operator_grants"] = Tokens<BankOperatorGrantStatus>(static value => value.ToToken()),
+        ["bank_cards"] = Tokens<BankCardStatus>(static value => value.ToToken()),
+        ["cash_cards"] = Tokens<CashCardStatus>(static value => value.ToToken()),
+        ["debit_cards"] = Tokens<DebitCardStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
