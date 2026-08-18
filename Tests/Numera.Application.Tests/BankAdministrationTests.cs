@@ -706,6 +706,31 @@ public sealed class BankAdministrationTests
     }
 
     [TestMethod]
+    public async Task UpdatingThePolicyRecordsAnAuditTrail()
+    {
+        await using Harness harness = Harness.Create();
+        BankView bank = await harness.CreateOperatingBankAsync(harness.CreateCommand());
+
+        Result<BankView> result = await harness.Administration.UpdateBankPolicyAsync(
+            new UpdateBankPolicyCommand(
+                harness.Actor, Institution, ExpectedBankVersion(harness, bank),
+                OpeningEnabled: false, 30, 1_000, true, true, false),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM audit_records a
+                INNER JOIN business_operations o
+                    ON o.business_operation_id = a.business_operation_id
+                WHERE a.action = 'BANK_POLICY_UPDATE'
+                  AND a.target_type = 'bank_policy_version'
+                  AND o.status = 'COMMITTED';
+                """));
+    }
+
+    [TestMethod]
     public async Task UpdatingThePolicyWithAStaleVersionConflicts()
     {
         await using Harness harness = Harness.Create();

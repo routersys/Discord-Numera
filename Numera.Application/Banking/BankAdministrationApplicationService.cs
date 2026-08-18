@@ -108,6 +108,7 @@ public interface IBankAdministrationApplicationService
 public sealed class BankAdministrationApplicationService : IBankAdministrationApplicationService
 {
     public const string CreateOperationType = "BANK_CREATE";
+    public const string PolicyUpdateOperationType = "BANK_POLICY_UPDATE";
     public const string ApproveOperationType = "ACCOUNT_OPENING_APPROVE";
     public const string RejectOperationType = "ACCOUNT_OPENING_REJECT";
     public const string BankCreatedEventType = "BANK_CREATED";
@@ -259,6 +260,8 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
                 ErrorCategory.NotFound, BankingErrorCodes.BankPolicyVersionNotFound);
         }
 
+        UtcTimestamp now = clock.Now();
+
         BankPolicyVersion replacement;
 
         try
@@ -282,7 +285,7 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
                 current.PerTransferLimit,
                 current.DailyOutgoingLimit,
                 current.MaximumActiveHolds,
-                clock.Now(),
+                now,
                 effectiveTo: null,
                 current.Version + 1);
         }
@@ -292,9 +295,37 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
                 ErrorCategory.Validation, BankingErrorCodes.BankPolicyInputInvalid);
         }
 
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            PolicyUpdateOperationType,
+            bank.EconomyScopeId,
+            actorPartyId: null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(
+                PolicyUpdateOperationType,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{bank.Id.Value}:{command.ExpectedBankVersion}")),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
         unitOfWork.BankAdministration.AddBankPolicyVersion(replacement);
         bank.ApplyPolicyVersion(replacement.Id);
         unitOfWork.BankAdministration.UpdateBank(bank);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.BankAdministration.AddAuditRecord(
+            AuditRecordId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            PolicyUpdateOperationType,
+            "bank_policy_version",
+            replacement.Id.Value,
+            reason: null,
+            now);
 
         return Result<BankView>.Success(ToView(bank));
     }
