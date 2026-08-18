@@ -38,6 +38,13 @@ public sealed class StateMachineClosureTests
         ["bank_cards"] = Tokens<BankCardStatus>(static value => value.ToToken()),
         ["cash_cards"] = Tokens<CashCardStatus>(static value => value.ToToken()),
         ["debit_cards"] = Tokens<DebitCardStatus>(static value => value.ToToken()),
+        ["saved_beneficiaries"] = Tokens<SavedBeneficiaryStatus>(static value => value.ToToken()),
+        ["scheduled_payment_plans"] = Tokens<ScheduledPaymentPlanStatus>(static value => value.ToToken()),
+        ["scheduled_payment_occurrences"] =
+            Tokens<ScheduledPaymentOccurrenceStatus>(static value => value.ToToken()),
+        ["direct_debit_mandates"] = Tokens<DirectDebitMandateStatus>(static value => value.ToToken()),
+        ["direct_debit_collections"] =
+            Tokens<DirectDebitCollectionStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =

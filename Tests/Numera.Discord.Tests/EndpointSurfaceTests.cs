@@ -28,6 +28,7 @@ public sealed class EndpointSurfaceTests
                 "bank close",
                 "bank list",
                 "bank open",
+                "bank payments",
                 "bank statement",
                 "bank transfer",
                 "help",

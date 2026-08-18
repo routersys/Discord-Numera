@@ -60,8 +60,6 @@ public sealed class SchemaConformanceTests
         "deposit_insurance_reservations",
         "deposit_insurance_scheme_versions",
         "deposit_insurance_schemes",
-        "direct_debit_collections",
-        "direct_debit_mandates",
         "fx_funding_endpoints",
         "fx_intervention_mandates",
         "fx_market_policy_versions",
@@ -99,9 +97,6 @@ public sealed class SchemaConformanceTests
         "resolution_cases",
         "resolution_transfers",
         "routing_aliases",
-        "saved_beneficiaries",
-        "scheduled_payment_occurrences",
-        "scheduled_payment_plans",
     ];
 
     [TestMethod]

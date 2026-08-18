@@ -406,3 +406,50 @@ public readonly record struct DebitCardId(EntityIdValue Value) : IEntityId<Debit
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct SavedBeneficiaryId(EntityIdValue Value) : IEntityId<SavedBeneficiaryId>
+{
+    public static string EntityName => "saved_beneficiary";
+
+    public static SavedBeneficiaryId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ScheduledPaymentPlanId(EntityIdValue Value) : IEntityId<ScheduledPaymentPlanId>
+{
+    public static string EntityName => "scheduled_payment_plan";
+
+    public static ScheduledPaymentPlanId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct ScheduledPaymentOccurrenceId(EntityIdValue Value)
+    : IEntityId<ScheduledPaymentOccurrenceId>
+{
+    public static string EntityName => "scheduled_payment_occurrence";
+
+    public static ScheduledPaymentOccurrenceId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct DirectDebitMandateId(EntityIdValue Value) : IEntityId<DirectDebitMandateId>
+{
+    public static string EntityName => "direct_debit_mandate";
+
+    public static DirectDebitMandateId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct DirectDebitCollectionId(EntityIdValue Value)
+    : IEntityId<DirectDebitCollectionId>
+{
+    public static string EntityName => "direct_debit_collection";
+
+    public static DirectDebitCollectionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

@@ -47,6 +47,18 @@ internal static class ViewKeys
 
     public const string BankCard = "view.bank.card";
 
+    public const string PaymentsBeneficiaries = "view.bank.payments_beneficiaries";
+    public const string PaymentsBeneficiariesEmpty = "view.bank.payments_beneficiaries_empty";
+    public const string PaymentsScheduled = "view.bank.payments_scheduled";
+    public const string PaymentsScheduledEmpty = "view.bank.payments_scheduled_empty";
+    public const string PaymentsMandates = "view.bank.payments_mandates";
+    public const string PaymentsMandatesEmpty = "view.bank.payments_mandates_empty";
+
+    public const string ScheduledPaymentKindPrefix = "scheduled_payment_kind.";
+
+    public static string ScheduledPaymentKindOf(string internalToken) =>
+        ScheduledPaymentKindPrefix + internalToken;
+
     public const string CardFormPrefix = "card_form.";
 
     public const string CardCapabilityAbsent = "card_capability.absent";
@@ -190,6 +202,32 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.BankCard + ".title"] = "銀行カード",
             [ViewKeys.BankCard + ".description"] =
                 "{institutionCode} の{form}です。カード状態は{status}、キャッシュカード機能は{cashCard}、デビット機能は{debitCard}、識別番号は {displayIdentifier} です。",
+            [ViewKeys.StatusOf("HIDDEN")] = "非表示",
+            [ViewKeys.StatusOf("INVALID")] = "無効",
+            [ViewKeys.StatusOf("PAUSED")] = "一時停止中",
+            [ViewKeys.StatusOf("CANCELLED")] = "取消済み",
+            [ViewKeys.StatusOf("EXECUTING")] = "実行中",
+            [ViewKeys.StatusOf("SUCCEEDED")] = "完了",
+            [ViewKeys.StatusOf("FAILED_FUNDS")] = "残高不足で失敗",
+            [ViewKeys.StatusOf("FAILED_RESTRICTED")] = "制限により失敗",
+            [ViewKeys.StatusOf("FAILED_DESTINATION")] = "送金先の事由で失敗",
+            [ViewKeys.StatusOf("FAILED_MANDATE")] = "承認の事由で失敗",
+            [ViewKeys.StatusOf("FAILED_ACCOUNT")] = "口座の事由で失敗",
+            [ViewKeys.ScheduledPaymentKindOf("ONCE")] = "一回",
+            [ViewKeys.ScheduledPaymentKindOf("WEEKLY")] = "毎週",
+            [ViewKeys.ScheduledPaymentKindOf("MONTHLY")] = "毎月",
+            [ViewKeys.PaymentsBeneficiaries + ".title"] = "登録した振込先",
+            [ViewKeys.PaymentsBeneficiaries + ".description"] = "{count}件の振込先があります。{items}",
+            [ViewKeys.PaymentsBeneficiariesEmpty + ".title"] = "振込先がありません",
+            [ViewKeys.PaymentsBeneficiariesEmpty + ".description"] = "まだ振込先を登録していません。",
+            [ViewKeys.PaymentsScheduled + ".title"] = "予約振込",
+            [ViewKeys.PaymentsScheduled + ".description"] = "{count}件の予約振込があります。{items}",
+            [ViewKeys.PaymentsScheduledEmpty + ".title"] = "予約振込がありません",
+            [ViewKeys.PaymentsScheduledEmpty + ".description"] = "まだ予約振込を登録していません。",
+            [ViewKeys.PaymentsMandates + ".title"] = "口座振替",
+            [ViewKeys.PaymentsMandates + ".description"] = "{count}件の口座振替があります。{items}",
+            [ViewKeys.PaymentsMandatesEmpty + ".title"] = "口座振替がありません",
+            [ViewKeys.PaymentsMandatesEmpty + ".description"] = "まだ口座振替を承認していません。",
             [ViewKeys.StatusUnknown] = "状態を表示できません",
         };
 }
