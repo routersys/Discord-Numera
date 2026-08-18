@@ -74,7 +74,8 @@ public sealed class TransferTests
             SqliteBankingWriteGateway gateway = new(new FinancialWriteCoordinator(harness.Coordinator));
             SequentialIdGenerator ids = new(9_000);
 
-            harness.Registration = new CustomerAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Registration = new CustomerAccountApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
             harness.Payments = new PaymentApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);

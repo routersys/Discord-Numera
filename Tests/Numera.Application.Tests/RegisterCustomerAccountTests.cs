@@ -5,6 +5,7 @@ using Numera.Domain.Common;
 using Numera.Domain.Identity;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Migrations;
+using Numera.Persistence.Sqlite.Repositories;
 using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Application.Tests;
@@ -87,6 +88,7 @@ public sealed class RegisterCustomerAccountTests
 
             Service = new CustomerAccountApplicationService(
                 new SqliteBankingWriteGateway(new FinancialWriteCoordinator(Coordinator)),
+                new SqliteBankingReadGateway(ConnectionFactory),
                 Clock,
                 IdGenerator);
         }
@@ -125,6 +127,11 @@ public sealed class RegisterCustomerAccountTests
             string displayName = "山田太郎") =>
             Service.RegisterCustomerAccountAsync(
                 new RegisterCustomerAccountCommand(Scope, discordUserId, handle, displayName),
+                CancellationToken.None);
+
+        public Task<Result<CustomerAccountStatusView>> StatusAsync(ulong discordUserId = DiscordUser) =>
+            Service.GetCustomerAccountStatusAsync(
+                new GetCustomerAccountStatusQuery(Scope, discordUserId),
                 CancellationToken.None);
 
         public async ValueTask DisposeAsync()
@@ -201,6 +208,46 @@ public sealed class RegisterCustomerAccountTests
         Assert.AreEqual(
             CustomerAccountApplicationService.RegisteredEventType,
             harness.ReadSingleText("SELECT event_type FROM outbox_events;"));
+    }
+
+    [TestMethod]
+    public async Task StatusResolvesTheRegisteredAccountFromTheDiscordUser()
+    {
+        await using Harness harness = Harness.Create();
+        Result<CustomerAccountView> registered = await harness.RegisterAsync();
+
+        Result<CustomerAccountStatusView> status = await harness.StatusAsync();
+
+        Assert.IsTrue(status.IsSuccess);
+        Assert.AreEqual(registered.Value.Id, status.Value.Id);
+        Assert.AreEqual("taro", status.Value.PublicHandle);
+        Assert.AreEqual("山田太郎", status.Value.DisplayName);
+        Assert.AreEqual(CustomerAccountStatus.Active, status.Value.Status);
+        Assert.AreEqual(registered.Value.CreatedAt, status.Value.RegisteredAt);
+    }
+
+    [TestMethod]
+    public async Task StatusIsNotFoundForAnUnregisteredDiscordUser()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result<CustomerAccountStatusView> status = await harness.StatusAsync(discordUserId: 999);
+
+        Assert.IsFalse(status.IsSuccess);
+        Assert.AreEqual(ErrorCategory.NotFound, status.Error!.Category);
+        Assert.AreEqual(BankingErrorCodes.CustomerAccountNotFound, status.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task StatusIsNotFoundForTheZeroDiscordUser()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<CustomerAccountStatusView> status = await harness.StatusAsync(discordUserId: 0);
+
+        Assert.IsFalse(status.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CustomerAccountNotFound, status.Error!.Code);
     }
 
     [TestMethod]

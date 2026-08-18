@@ -20,7 +20,6 @@ public sealed class CommandApiClosureTests
         "IBankAdministrationApplicationService.UpdateBankPolicyAsync",
         "ICustomerAccountApplicationService.ConsumeLinkGrantAsync",
         "ICustomerAccountApplicationService.CreateLinkGrantAsync",
-        "ICustomerAccountApplicationService.GetCustomerAccountStatusAsync",
         "ICustomerAccountApplicationService.UnlinkDiscordIdentityAsync",
     ];
 

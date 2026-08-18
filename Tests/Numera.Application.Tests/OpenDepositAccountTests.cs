@@ -5,6 +5,7 @@ using Numera.Domain.Banking;
 using Numera.Domain.Common;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Migrations;
+using Numera.Persistence.Sqlite.Repositories;
 using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Application.Tests;
@@ -61,7 +62,8 @@ public sealed class OpenDepositAccountTests
                 new(new FinancialWriteCoordinator(harness.Coordinator));
             SequentialIdGenerator ids = new(9_000);
 
-            harness.Registration = new CustomerAccountApplicationService(gateway, harness.Clock, ids);
+            harness.Registration = new CustomerAccountApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Accounts = new BankAccountApplicationService(gateway, harness.Clock, ids);
 
             return harness;

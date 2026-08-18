@@ -19,10 +19,25 @@ public sealed record CustomerAccountView(
     CustomerAccountStatus Status,
     UtcTimestamp CreatedAt);
 
+public sealed record GetCustomerAccountStatusQuery(
+    EconomyScopeId EconomyScopeId,
+    ulong DiscordUserId);
+
+public sealed record CustomerAccountStatusView(
+    CustomerAccountId Id,
+    string PublicHandle,
+    string DisplayName,
+    CustomerAccountStatus Status,
+    UtcTimestamp RegisteredAt);
+
 public interface ICustomerAccountApplicationService
 {
     Task<Result<CustomerAccountView>> RegisterCustomerAccountAsync(
         RegisterCustomerAccountCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<CustomerAccountStatusView>> GetCustomerAccountStatusAsync(
+        GetCustomerAccountStatusQuery query,
         CancellationToken cancellationToken);
 }
 
@@ -32,21 +47,49 @@ public sealed class CustomerAccountApplicationService : ICustomerAccountApplicat
     public const string RegisteredEventType = "CUSTOMER_ACCOUNT_REGISTERED";
 
     private readonly IBankingWriteGateway writeGateway;
+    private readonly IBankingReadGateway readGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public CustomerAccountApplicationService(
         IBankingWriteGateway writeGateway,
+        IBankingReadGateway readGateway,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(readGateway);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.readGateway = readGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<CustomerAccountStatusView>> GetCustomerAccountStatusAsync(
+        GetCustomerAccountStatusQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (query.DiscordUserId == 0)
+        {
+            return Task.FromResult(Result<CustomerAccountStatusView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound));
+        }
+
+        DiscordUserId discordUserId = DiscordUserId.FromUInt64(query.DiscordUserId);
+
+        CustomerAccountStatusView? view = readGateway.Execute(
+            context => context.CustomerIdentities.FindByDiscordUser(discordUserId));
+
+        return Task.FromResult(view is null
+            ? Result<CustomerAccountStatusView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound)
+            : Result<CustomerAccountStatusView>.Success(view));
     }
 
     public Task<Result<CustomerAccountView>> RegisterCustomerAccountAsync(

@@ -166,7 +166,7 @@ public interface ITransferPreparationReadRepository
         int limit);
 }
 
-public interface IBankingReadContext
+public partial interface IBankingReadContext
 {
     IBankReadRepository Banks { get; }
 
