@@ -90,6 +90,19 @@ public sealed class StateMachineClosureTests
             Tokens<CommerceFulfillmentReversalStatus>(static value => value.ToToken()),
         ["debit_card_authorizations"] =
             Tokens<DebitCardAuthorizationStatus>(static value => value.ToToken()),
+        ["currency_denominations"] =
+            Tokens<CurrencyDenominationStatus>(static value => value.ToToken()),
+        ["bank_cash_vaults"] = Tokens<BankCashVaultStatus>(static value => value.ToToken()),
+        ["atm_networks"] = Tokens<AtmNetworkStatus>(static value => value.ToToken()),
+        ["atm_terminals"] = Tokens<AtmTerminalStatus>(static value => value.ToToken()),
+        ["atm_terminal_currency_services"] =
+            Tokens<AtmTerminalCurrencyServiceStatus>(static value => value.ToToken()),
+        ["atm_cash_cassettes"] = Tokens<AtmCashCassetteStatus>(static value => value.ToToken()),
+        ["atm_placement_agreements"] =
+            Tokens<AtmPlacementAgreementStatus>(static value => value.ToToken()),
+        ["atm_transactions"] = Tokens<AtmTransactionStatus>(static value => value.ToToken()),
+        ["atm_discord_installations"] =
+            Tokens<AtmDiscordInstallationStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
