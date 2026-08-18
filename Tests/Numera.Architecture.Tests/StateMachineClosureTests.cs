@@ -115,6 +115,8 @@ public sealed class StateMachineClosureTests
             Tokens<InsuranceSettlementWalletStatus>(static value => value.ToToken()),
         ["deposit_insurance_claims"] =
             Tokens<DepositInsuranceClaimStatus>(static value => value.ToToken()),
+        ["bank_treasury_fx_accounts"] =
+            Tokens<BankTreasuryFxAccountStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =

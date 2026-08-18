@@ -22,7 +22,6 @@ public sealed class SchemaConformanceTests
         "account_restrictions",
         "authorization_decisions",
         "bank_assets",
-        "bank_treasury_fx_accounts",
         "inbox_events",
         "interest_accruals",
         "interest_posting_batches",

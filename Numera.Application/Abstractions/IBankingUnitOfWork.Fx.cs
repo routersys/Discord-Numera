@@ -35,6 +35,14 @@ public sealed record FxOhlcBucket(
 
 public sealed record FxDepthLevel(long PriceUnits, long BaseMinor);
 
+public sealed record BankTreasuryFxAccountRecord(
+    BankTreasuryFxAccountId Id,
+    BankId BankId,
+    CurrencyId CurrencyId,
+    LedgerAccountId AssetLedgerAccountId,
+    BankTreasuryFxAccountStatus Status,
+    long Version);
+
 public interface IFxRepository
 {
     void AddMarket(FxMarket market);
@@ -58,6 +66,12 @@ public interface IFxRepository
     void UpdateOrder(FxOrder order);
 
     FxOrder? FindOrder(FxOrderId id);
+
+    void AddTreasuryAccount(BankTreasuryFxAccountRecord account);
+
+    void UpdateTreasuryAccount(BankTreasuryFxAccountRecord account);
+
+    BankTreasuryFxAccountRecord? FindTreasuryAccount(BankId bankId, CurrencyId currencyId);
 
     IReadOnlyList<FxOrder> ListRestingOrders(FxMarketId marketId, FxOrderSide side, int limit);
 

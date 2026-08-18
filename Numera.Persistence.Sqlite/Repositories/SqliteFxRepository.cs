@@ -508,4 +508,68 @@ internal sealed class SqliteFxRepository : IFxRepository
             UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(18)),
             reader.IsDBNull(19) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(19)),
             reader.GetInt64(20));
+
+    public void AddTreasuryAccount(BankTreasuryFxAccountRecord account)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO bank_treasury_fx_accounts(bank_treasury_fx_account_id, bank_id, currency_id,
+                asset_ledger_account_id, status, version)
+            VALUES($id, $bank, $currency, $ledger, $status, $version);
+            """);
+
+        BindTreasuryAccount(command, account);
+        command.ExecuteNonQuery();
+    }
+
+    public void UpdateTreasuryAccount(BankTreasuryFxAccountRecord account)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE bank_treasury_fx_accounts SET status = $status, version = $version
+            WHERE bank_treasury_fx_account_id = $id;
+            """);
+
+        BindTreasuryAccount(command, account);
+        command.ExecuteNonQuery();
+    }
+
+    public BankTreasuryFxAccountRecord? FindTreasuryAccount(BankId bankId, CurrencyId currencyId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT bank_treasury_fx_account_id, bank_id, currency_id, asset_ledger_account_id,
+                status, version
+            FROM bank_treasury_fx_accounts WHERE bank_id = $bank AND currency_id = $currency;
+            """);
+
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(currencyId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new BankTreasuryFxAccountRecord(
+                BankTreasuryFxAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+                LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                BankTreasuryFxAccountStatusCatalog.ParseToken(reader.GetString(4)),
+                reader.GetInt64(5))
+            : null;
+    }
+
+    private static void BindTreasuryAccount(
+        SqliteCommand command,
+        BankTreasuryFxAccountRecord account)
+    {
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(account.Id.Value));
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(account.BankId.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(account.CurrencyId.Value));
+        command.Parameters.AddWithValue(
+            "$ledger", SqliteValueMapper.ToBlob(account.AssetLedgerAccountId.Value));
+        command.Parameters.AddWithValue("$status", account.Status.ToToken());
+        command.Parameters.AddWithValue("$version", account.Version);
+    }
 }

@@ -109,4 +109,13 @@ public static partial class BankingErrorCodes
 
     public static string AtmInstallationDeliveryUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 202);
+
+    public static string BankTreasuryFxAccountInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 240);
+
+    public static string BankTreasuryFxAccountStateInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 241);
+
+    public static string FxOrderNotCancellable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 242);
 }
