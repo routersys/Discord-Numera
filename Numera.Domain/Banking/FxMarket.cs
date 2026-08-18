@@ -35,6 +35,10 @@ public static class FxPricing
 {
     public const int MaximumFokMakerOrders = 256;
 
+    public const int BasisPointScale = 10000;
+
+    public const int MaximumFeeBps = 9999;
+
     public static bool IsExactSettlementCapable(long lotSizeBaseMinor, long tickSizePriceUnits, long priceScale)
     {
         if (lotSizeBaseMinor <= 0 || tickSizePriceUnits <= 0 || priceScale <= 0)

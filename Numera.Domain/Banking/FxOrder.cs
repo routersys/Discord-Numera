@@ -58,6 +58,10 @@ public sealed class FxOrder : VersionedEntity
         FxSettlementEndpointId destinationSettlementEndpointId,
         HoldId sourceHoldId,
         FxMarketPolicyVersionId feePolicyVersionId,
+        long makerReceivedGrossMinor,
+        long makerFeeChargedMinor,
+        long takerReceivedGrossMinor,
+        long takerFeeChargedMinor,
         UtcTimestamp createdAt,
         UtcTimestamp? terminalAt,
         long version)
@@ -81,6 +85,10 @@ public sealed class FxOrder : VersionedEntity
         DestinationSettlementEndpointId = destinationSettlementEndpointId;
         SourceHoldId = sourceHoldId;
         FeePolicyVersionId = feePolicyVersionId;
+        MakerReceivedGrossMinor = makerReceivedGrossMinor;
+        MakerFeeChargedMinor = makerFeeChargedMinor;
+        TakerReceivedGrossMinor = takerReceivedGrossMinor;
+        TakerFeeChargedMinor = takerFeeChargedMinor;
         CreatedAt = createdAt;
         TerminalAt = terminalAt;
     }
@@ -120,6 +128,14 @@ public sealed class FxOrder : VersionedEntity
     public HoldId SourceHoldId { get; }
 
     public FxMarketPolicyVersionId FeePolicyVersionId { get; }
+
+    public long MakerReceivedGrossMinor { get; private set; }
+
+    public long MakerFeeChargedMinor { get; private set; }
+
+    public long TakerReceivedGrossMinor { get; private set; }
+
+    public long TakerFeeChargedMinor { get; private set; }
 
     public UtcTimestamp CreatedAt { get; }
 
@@ -196,6 +212,10 @@ public sealed class FxOrder : VersionedEntity
             destinationSettlementEndpointId,
             sourceHoldId,
             feePolicyVersionId,
+            makerReceivedGrossMinor: 0,
+            makerFeeChargedMinor: 0,
+            takerReceivedGrossMinor: 0,
+            takerFeeChargedMinor: 0,
             createdAt,
             terminalAt: null,
             InitialVersion);
@@ -220,6 +240,10 @@ public sealed class FxOrder : VersionedEntity
         FxSettlementEndpointId destinationSettlementEndpointId,
         HoldId sourceHoldId,
         FxMarketPolicyVersionId feePolicyVersionId,
+        long makerReceivedGrossMinor,
+        long makerFeeChargedMinor,
+        long takerReceivedGrossMinor,
+        long takerFeeChargedMinor,
         UtcTimestamp createdAt,
         UtcTimestamp? terminalAt,
         long version) =>
@@ -242,6 +266,10 @@ public sealed class FxOrder : VersionedEntity
             destinationSettlementEndpointId,
             sourceHoldId,
             feePolicyVersionId,
+            makerReceivedGrossMinor,
+            makerFeeChargedMinor,
+            takerReceivedGrossMinor,
+            takerFeeChargedMinor,
             createdAt,
             terminalAt,
             version);
@@ -271,6 +299,41 @@ public sealed class FxOrder : VersionedEntity
         }
 
         AdvanceVersion();
+    }
+
+    public long AccrueFee(bool asMaker, long receivedGrossMinor, int feeBps)
+    {
+        if (receivedGrossMinor <= 0 || feeBps is < 0 or > FxPricing.MaximumFeeBps)
+        {
+            throw InvariantViolationException.Create(InvariantViolationCode.FxOrderFeeInvalid);
+        }
+
+        long beforeReceived = asMaker ? MakerReceivedGrossMinor : TakerReceivedGrossMinor;
+        long beforeFee = asMaker ? MakerFeeChargedMinor : TakerFeeChargedMinor;
+
+        long afterReceived = checked(beforeReceived + receivedGrossMinor);
+        long afterFee = (long)(checked((Int128)afterReceived * feeBps) / FxPricing.BasisPointScale);
+        long delta = checked(afterFee - beforeFee);
+
+        if (delta < 0)
+        {
+            throw InvariantViolationException.Create(InvariantViolationCode.FxOrderFeeInvalid);
+        }
+
+        if (asMaker)
+        {
+            MakerReceivedGrossMinor = afterReceived;
+            MakerFeeChargedMinor = afterFee;
+        }
+        else
+        {
+            TakerReceivedGrossMinor = afterReceived;
+            TakerFeeChargedMinor = afterFee;
+        }
+
+        AdvanceVersion();
+
+        return delta;
     }
 
     public void Cancel(UtcTimestamp now) => Terminate(FxOrderStatus.Cancelled, now);

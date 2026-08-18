@@ -17,8 +17,9 @@ internal sealed class SqliteFxRepository : IFxRepository
         "fx_order_id, market_id, participant_kind, participant_party_id, customer_account_id, side, " +
         "order_type, time_in_force, price_units, maximum_slippage_bps, original_base_minor, " +
         "filled_base_minor, sequence_no, status, source_funding_endpoint_id, " +
-        "destination_settlement_endpoint_id, source_hold_id, fee_policy_version_id, created_at, " +
-        "terminal_at, version";
+        "destination_settlement_endpoint_id, source_hold_id, fee_policy_version_id, " +
+        "maker_received_gross_minor, maker_fee_charged_minor, taker_received_gross_minor, " +
+        "taker_fee_charged_minor, created_at, terminal_at, version";
 
     private const string PolicyColumns =
         "fx_market_policy_version_id, market_id, maker_fee_bps, taker_fee_bps, " +
@@ -191,7 +192,8 @@ internal sealed class SqliteFxRepository : IFxRepository
             INSERT INTO fx_orders({OrderColumns})
             VALUES($id, $market, $participantKind, $participantParty, $customer, $side, $type, $tif,
                 $price, $slippage, $original, $filled, $sequence, $status, $funding, $settlement,
-                $hold, $policy, $created, NULL, $version);
+                $hold, $policy, $makerGross, $makerFee, $takerGross, $takerFee, $created, NULL,
+                $version);
             """);
 
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(order.Id.Value));
@@ -220,6 +222,10 @@ internal sealed class SqliteFxRepository : IFxRepository
         command.Parameters.AddWithValue("$hold", SqliteValueMapper.ToBlob(order.SourceHoldId.Value));
         command.Parameters.AddWithValue(
             "$policy", SqliteValueMapper.ToBlob(order.FeePolicyVersionId.Value));
+        command.Parameters.AddWithValue("$makerGross", order.MakerReceivedGrossMinor);
+        command.Parameters.AddWithValue("$makerFee", order.MakerFeeChargedMinor);
+        command.Parameters.AddWithValue("$takerGross", order.TakerReceivedGrossMinor);
+        command.Parameters.AddWithValue("$takerFee", order.TakerFeeChargedMinor);
         command.Parameters.AddWithValue("$created", order.CreatedAt.UnixMilliseconds);
         command.Parameters.AddWithValue("$version", order.Version);
 
@@ -234,12 +240,20 @@ internal sealed class SqliteFxRepository : IFxRepository
             UPDATE fx_orders
             SET filled_base_minor = $filled,
                 status = $status,
+                maker_received_gross_minor = $makerGross,
+                maker_fee_charged_minor = $makerFee,
+                taker_received_gross_minor = $takerGross,
+                taker_fee_charged_minor = $takerFee,
                 terminal_at = $terminal,
                 version = $version
             WHERE fx_order_id = $id AND version = $expected;
             """);
 
         command.Parameters.AddWithValue("$filled", order.FilledBaseMinor);
+        command.Parameters.AddWithValue("$makerGross", order.MakerReceivedGrossMinor);
+        command.Parameters.AddWithValue("$makerFee", order.MakerFeeChargedMinor);
+        command.Parameters.AddWithValue("$takerGross", order.TakerReceivedGrossMinor);
+        command.Parameters.AddWithValue("$takerFee", order.TakerFeeChargedMinor);
         command.Parameters.AddWithValue("$status", order.Status.ToToken());
         command.Parameters.AddWithValue(
             "$terminal", (object?)order.TerminalAt?.UnixMilliseconds ?? DBNull.Value);
@@ -505,9 +519,13 @@ internal sealed class SqliteFxRepository : IFxRepository
             FxSettlementEndpointId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(15))),
             HoldId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(16))),
             FxMarketPolicyVersionId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(17))),
-            UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(18)),
-            reader.IsDBNull(19) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(19)),
-            reader.GetInt64(20));
+            reader.GetInt64(18),
+            reader.GetInt64(19),
+            reader.GetInt64(20),
+            reader.GetInt64(21),
+            UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(22)),
+            reader.IsDBNull(23) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(23)),
+            reader.GetInt64(24));
 
     public void AddTreasuryAccount(BankTreasuryFxAccountRecord account)
     {

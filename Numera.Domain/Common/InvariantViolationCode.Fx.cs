@@ -19,6 +19,7 @@ public static partial class InvariantViolationCode
     public const string FxOrderParticipantInvalid = "FX_ORDER_PARTICIPANT_INVALID";
     public const string FxOrderFillInvalid = "FX_ORDER_FILL_INVALID";
     public const string FxOrderRejectInvalid = "FX_ORDER_REJECT_INVALID";
+    public const string FxOrderFeeInvalid = "FX_ORDER_FEE_INVALID";
     public const string FxSettlementLegTransitionInvalid = "FX_SETTLEMENT_LEG_TRANSITION_INVALID";
     public const string FxSettlementLegStatusUnknown = "FX_SETTLEMENT_LEG_STATUS_UNKNOWN";
     public const string FxSettlementLegAmountInvalid = "FX_SETTLEMENT_LEG_AMOUNT_INVALID";

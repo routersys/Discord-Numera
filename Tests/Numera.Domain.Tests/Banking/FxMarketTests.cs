@@ -308,6 +308,63 @@ public sealed class FxOrderTests
             FxMarketPolicyVersionId.FromValue(EntityIdValue.FromBits(8)),
             UtcTimestamp.FromUnixMilliseconds(1)));
     }
+
+    [TestMethod]
+    public void TheFeeTotalDoesNotDependOnHowTheFillsAreSplit()
+    {
+        FxOrder single = Limit();
+        FxOrder split = Limit();
+
+        long once = single.AccrueFee(asMaker: false, 1_000, 125);
+        long first = split.AccrueFee(asMaker: false, 333, 125);
+        long second = split.AccrueFee(asMaker: false, 333, 125);
+        long third = split.AccrueFee(asMaker: false, 334, 125);
+
+        Assert.AreEqual(12L, once);
+        Assert.AreEqual(once, first + second + third);
+        Assert.AreEqual(single.TakerFeeChargedMinor, split.TakerFeeChargedMinor);
+        Assert.AreEqual(1_000L, split.TakerReceivedGrossMinor);
+    }
+
+    [TestMethod]
+    public void MakerAndTakerAccumulateSeparately()
+    {
+        FxOrder order = Limit();
+
+        order.AccrueFee(asMaker: false, 1_000, 200);
+        order.AccrueFee(asMaker: true, 4_000, 100);
+
+        Assert.AreEqual(1_000L, order.TakerReceivedGrossMinor);
+        Assert.AreEqual(20L, order.TakerFeeChargedMinor);
+        Assert.AreEqual(4_000L, order.MakerReceivedGrossMinor);
+        Assert.AreEqual(40L, order.MakerFeeChargedMinor);
+    }
+
+    [TestMethod]
+    public void AZeroRateChargesNothing()
+    {
+        FxOrder order = Limit();
+
+        Assert.AreEqual(0L, order.AccrueFee(asMaker: true, 9_999, 0));
+        Assert.AreEqual(0L, order.MakerFeeChargedMinor);
+    }
+
+    [TestMethod]
+    public void ANonPositiveReceiptIsRejected()
+    {
+        FxOrder order = Limit();
+
+        Assert.ThrowsExactly<InvariantViolationException>(() => order.AccrueFee(asMaker: true, 0, 100));
+    }
+
+    [TestMethod]
+    public void ARateBeyondTheAllowedRangeIsRejected()
+    {
+        FxOrder order = Limit();
+
+        Assert.ThrowsExactly<InvariantViolationException>(
+            () => order.AccrueFee(asMaker: true, 1_000, FxPricing.BasisPointScale));
+    }
 }
 
 [TestClass]
