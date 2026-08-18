@@ -25,13 +25,31 @@ public sealed class BootstrapShellTests
 
         public BackupSummary Summarize() => BackupSummary.Empty;
 
+        public string? FindLatestVerified() => null;
+
         public int PruneAutomatic() => 0;
+    }
+
+    private sealed class UnusedRestores : IDatabaseRestoreService
+    {
+        public RestoreResult Restore(string backupDatabasePath, long restoredAtUnixMilliseconds) =>
+            RestoreResult.Failed("UNUSED");
+    }
+
+    private sealed class OpenGate : IMaintenanceGate
+    {
+        public bool IsQuiesced => false;
     }
 
     private static (ShellSession Session, string Output) Run(string script, CancellationToken cancellationToken)
     {
         ConsoleCommandExecutor executor = new(
-            new HealthyProbe(), new SilentBackups(), static () => PreviousStartupClassification.Clean);
+            new HealthyProbe(),
+            new SilentBackups(),
+            new UnusedRestores(),
+            new OpenGate(),
+            TimeProvider.System,
+            static () => PreviousStartupClassification.Clean);
 
         using StringReader input = new(script);
         using StringWriter output = new();

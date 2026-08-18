@@ -67,6 +67,8 @@ public interface IDatabaseBackupService
 
     BackupSummary Summarize();
 
+    string? FindLatestVerified();
+
     int PruneAutomatic();
 }
 
@@ -299,6 +301,21 @@ public sealed class SqliteDatabaseBackupService : IDatabaseBackupService
             Path.GetFullPath(candidate.DatabasePath), fullPath, StringComparison.OrdinalIgnoreCase));
 
         return entry is null ? BackupVerificationResult.Failed(BackupFailure.ManifestMissing) : Verify(entry);
+    }
+
+    public string? FindLatestVerified()
+    {
+        foreach (BackupEntry entry in List()
+            .OrderByDescending(static candidate => candidate.Manifest.CreatedAtUtc, StringComparer.Ordinal)
+            .ThenByDescending(static candidate => candidate.Manifest.BackupId, StringComparer.Ordinal))
+        {
+            if (Verify(entry).IsSuccess)
+            {
+                return entry.DatabasePath;
+            }
+        }
+
+        return null;
     }
 
     public BackupSummary Summarize()

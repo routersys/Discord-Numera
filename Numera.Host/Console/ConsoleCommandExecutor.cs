@@ -24,6 +24,9 @@ public static class ConsoleText
     public const string UnknownCommand = "Unknown command. Type help for the command list.";
     public const string NotImplemented = "This command is not available in this build.";
     public const string BackupCreated = "Backup created:";
+    public const string Restored = "Database restored. Recovery copy:";
+    public const string NoVerifiedBackup = "NO_VERIFIED_BACKUP";
+    public const string MaintenanceRequired = "MAINTENANCE_REQUIRED";
     public const string BackupVerified = "Backup verified.";
     public const string DatabaseVerified = "Database verified.";
 }
@@ -32,19 +35,31 @@ internal sealed class ConsoleCommandExecutor
 {
     private readonly IDatabaseIntegrityProbe probe;
     private readonly IDatabaseBackupService backups;
+    private readonly IDatabaseRestoreService restores;
+    private readonly IMaintenanceGate maintenance;
+    private readonly TimeProvider timeProvider;
     private readonly Func<PreviousStartupClassification> runtimeState;
 
     internal ConsoleCommandExecutor(
         IDatabaseIntegrityProbe probe,
         IDatabaseBackupService backups,
+        IDatabaseRestoreService restores,
+        IMaintenanceGate maintenance,
+        TimeProvider timeProvider,
         Func<PreviousStartupClassification> runtimeState)
     {
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(backups);
+        ArgumentNullException.ThrowIfNull(restores);
+        ArgumentNullException.ThrowIfNull(maintenance);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(runtimeState);
 
         this.probe = probe;
         this.backups = backups;
+        this.restores = restores;
+        this.maintenance = maintenance;
+        this.timeProvider = timeProvider;
         this.runtimeState = runtimeState;
     }
 
@@ -58,6 +73,8 @@ internal sealed class ConsoleCommandExecutor
             ConsoleCommandKind.DatabaseBackup => CreateBackup(),
             ConsoleCommandKind.DatabaseBackupList => ListBackups(),
             ConsoleCommandKind.DatabaseBackupVerify => VerifyBackup(command.Argument),
+            ConsoleCommandKind.DatabaseRestore => Restore(command.Argument),
+            ConsoleCommandKind.DatabaseRestoreLatest => RestoreLatest(),
             ConsoleCommandKind.DatabaseRecoveryStatus or ConsoleCommandKind.Health => ReportHealth(),
             ConsoleCommandKind.Help => Help(),
             ConsoleCommandKind.Unknown => ConsoleCommandResult.Failed(ConsoleText.UnknownCommand),
@@ -127,6 +144,27 @@ internal sealed class ConsoleCommandExecutor
         return verified.IsSuccess
             ? ConsoleCommandResult.Ok(ConsoleText.BackupVerified)
             : ConsoleCommandResult.Failed(verified.Detail);
+    }
+
+    private ConsoleCommandResult RestoreLatest()
+    {
+        string? latest = backups.FindLatestVerified();
+
+        return latest is null ? ConsoleCommandResult.Failed(ConsoleText.NoVerifiedBackup) : Restore(latest);
+    }
+
+    private ConsoleCommandResult Restore(string path)
+    {
+        if (!maintenance.IsQuiesced)
+        {
+            return ConsoleCommandResult.Failed(ConsoleText.MaintenanceRequired);
+        }
+
+        RestoreResult result = restores.Restore(path, timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+
+        return result.IsSuccess
+            ? ConsoleCommandResult.Ok(ConsoleText.Restored + " " + result.RecoveryCopyPath)
+            : ConsoleCommandResult.Failed(result.Detail);
     }
 
     private ConsoleCommandResult ReportHealth()

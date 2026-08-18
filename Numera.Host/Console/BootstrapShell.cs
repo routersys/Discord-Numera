@@ -64,3 +64,21 @@ internal sealed class BootstrapShell
         return new ShellSession(ShellExitReason.Cancelled, executed, failed);
     }
 }
+
+internal interface IMaintenanceGate
+{
+    bool IsQuiesced { get; }
+}
+
+internal sealed class WriteAdmissionMaintenanceGate : IMaintenanceGate
+{
+    private readonly Func<bool> admissionOpen;
+
+    internal WriteAdmissionMaintenanceGate(Func<bool> admissionOpen)
+    {
+        ArgumentNullException.ThrowIfNull(admissionOpen);
+        this.admissionOpen = admissionOpen;
+    }
+
+    public bool IsQuiesced => !admissionOpen();
+}

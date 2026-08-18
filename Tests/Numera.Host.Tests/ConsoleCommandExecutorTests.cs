@@ -46,22 +46,47 @@ public sealed class ConsoleCommandExecutorTests
 
         public BackupSummary Summarize() => Inventory;
 
+        internal string? Latest { get; set; }
+
+        public string? FindLatestVerified() => Latest;
+
         public int PruneAutomatic() => 0;
     }
 
-    private static ConsoleCommandExecutor Create(
-        StubProbe probe,
-        StubBackups backups,
-        PreviousStartupClassification previous = PreviousStartupClassification.Clean) =>
-        new(probe, backups, () => previous);
+    private sealed class StubRestores : IDatabaseRestoreService
+    {
+        internal RestoreResult Outcome { get; set; } = new(true, string.Empty, "economy.db.recovery");
+
+        internal string LastPath { get; private set; } = string.Empty;
+
+        public RestoreResult Restore(string backupDatabasePath, long restoredAtUnixMilliseconds)
+        {
+            LastPath = backupDatabasePath;
+            return Outcome;
+        }
+    }
+
+    private sealed class StubGate : IMaintenanceGate
+    {
+        internal StubGate(bool quiesced) => IsQuiesced = quiesced;
+
+        public bool IsQuiesced { get; }
+    }
 
     private static ConsoleCommandResult Run(
         string line,
         StubProbe? probe = null,
         StubBackups? backups = null,
+        StubRestores? restores = null,
+        bool quiesced = true,
         PreviousStartupClassification previous = PreviousStartupClassification.Clean) =>
-        Create(probe ?? new StubProbe(), backups ?? new StubBackups(), previous)
-            .Execute(ConsoleCommandLine.Parse(line));
+        new ConsoleCommandExecutor(
+            probe ?? new StubProbe(),
+            backups ?? new StubBackups(),
+            restores ?? new StubRestores(),
+            new StubGate(quiesced),
+            TimeProvider.System,
+            () => previous).Execute(ConsoleCommandLine.Parse(line));
 
     [TestMethod]
     public void AHealthyDatabaseVerifies()
@@ -175,6 +200,59 @@ public sealed class ConsoleCommandExecutorTests
 
         Assert.IsTrue(result.IsSuccess);
         CollectionAssert.Contains(result.Lines.ToArray(), "database restore latest");
+    }
+
+    [TestMethod]
+    public void RestoringRequiresAQuiescedHost()
+    {
+        ConsoleCommandResult result = Run("database restore backups/economy.db", quiesced: false);
+
+        Assert.IsFalse(result.IsSuccess);
+        CollectionAssert.Contains(result.Lines.ToArray(), ConsoleText.MaintenanceRequired);
+    }
+
+    [TestMethod]
+    public void RestoringUsesTheGivenBackupPath()
+    {
+        StubRestores restores = new();
+
+        ConsoleCommandResult result = Run("database restore backups/economy.db", restores: restores);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual("backups/economy.db", restores.LastPath);
+        CollectionAssert.Contains(result.Lines.ToArray(), ConsoleText.Restored + " economy.db.recovery");
+    }
+
+    [TestMethod]
+    public void RestoringLatestRequiresAVerifiedBackup()
+    {
+        ConsoleCommandResult result = Run("database restore latest");
+
+        Assert.IsFalse(result.IsSuccess);
+        CollectionAssert.Contains(result.Lines.ToArray(), ConsoleText.NoVerifiedBackup);
+    }
+
+    [TestMethod]
+    public void RestoringLatestPicksTheVerifiedBackup()
+    {
+        StubBackups backups = new() { Latest = "backups/newest.db" };
+        StubRestores restores = new();
+
+        ConsoleCommandResult result = Run("database restore latest", backups: backups, restores: restores);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual("backups/newest.db", restores.LastPath);
+    }
+
+    [TestMethod]
+    public void AFailedRestoreReportsItsDetail()
+    {
+        StubRestores restores = new() { Outcome = RestoreResult.Failed("TEMP_QUICK_CHECK_FAILED") };
+
+        ConsoleCommandResult result = Run("database restore backups/economy.db", restores: restores);
+
+        Assert.IsFalse(result.IsSuccess);
+        CollectionAssert.Contains(result.Lines.ToArray(), "TEMP_QUICK_CHECK_FAILED");
     }
 
     [TestMethod]
