@@ -34,6 +34,7 @@ public sealed class StateMachineClosureTests
         ["clearing_cycles"] = Tokens<ClearingCycleStatus>(static value => value.ToToken()),
         ["clearing_instructions"] = Tokens<ClearingInstructionStatus>(static value => value.ToToken()),
         ["payment_networks"] = Tokens<PaymentNetworkStatus>(static value => value.ToToken()),
+        ["bank_operator_grants"] = Tokens<BankOperatorGrantStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
@@ -42,7 +43,6 @@ public sealed class StateMachineClosureTests
         "accounting_books",
         "accounting_periods",
         "accounting_transactions",
-        "bank_operator_grants",
         "branches",
         "guild_economies",
         "idempotency_records",

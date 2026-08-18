@@ -370,3 +370,12 @@ public readonly record struct PaymentNetworkPrefundId(EntityIdValue Value) : IEn
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct BankOperatorGrantId(EntityIdValue Value) : IEntityId<BankOperatorGrantId>
+{
+    public static string EntityName => "bank_operator_grant";
+
+    public static BankOperatorGrantId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

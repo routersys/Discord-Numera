@@ -1,0 +1,171 @@
+using Numera.Application.Abstractions;
+using Numera.Application.Common;
+using Numera.Domain.Banking;
+using Numera.Domain.Common;
+using Numera.Domain.Identity;
+
+namespace Numera.Application.Banking;
+
+public sealed record GrantBankOperatorCommand(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    ulong TargetDiscordUserId);
+
+public sealed record RevokeBankOperatorCommand(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    ulong TargetDiscordUserId);
+
+public sealed record BankOperatorGrantView(
+    BankOperatorGrantId Id,
+    string InstitutionCode,
+    ulong DiscordUserId,
+    string Status);
+
+public interface IBankOperatorGrantApplicationService
+{
+    Task<Result<BankOperatorGrantView>> GrantAsync(
+        GrantBankOperatorCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<BankOperatorGrantView>> RevokeAsync(
+        RevokeBankOperatorCommand command,
+        CancellationToken cancellationToken);
+}
+
+public sealed class BankOperatorGrantApplicationService : IBankOperatorGrantApplicationService
+{
+    private readonly IBankingWriteGateway writeGateway;
+    private readonly IClock clock;
+    private readonly IIdGenerator idGenerator;
+
+    public BankOperatorGrantApplicationService(
+        IBankingWriteGateway writeGateway,
+        IClock clock,
+        IIdGenerator idGenerator)
+    {
+        ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(idGenerator);
+
+        this.writeGateway = writeGateway;
+        this.clock = clock;
+        this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<BankOperatorGrantView>> GrantAsync(
+        GrantBankOperatorCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => Grant(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<BankOperatorGrantView>> RevokeAsync(
+        RevokeBankOperatorCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => Revoke(unitOfWork, command), cancellationToken);
+    }
+
+    private Result<BankOperatorGrantView> Grant(
+        IBankingUnitOfWork unitOfWork,
+        GrantBankOperatorCommand command)
+    {
+        Result<Bank> resolved = ResolveBank(unitOfWork, command.Actor, command.InstitutionCode);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<BankOperatorGrantView>.Failure(resolved.Error!);
+        }
+
+        Bank bank = resolved.Value;
+        DiscordUserId target = DiscordUserId.FromUInt64(command.TargetDiscordUserId);
+
+        if (unitOfWork.BankOperatorGrants.FindActive(bank.Id, target) is not null)
+        {
+            return Result<BankOperatorGrantView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.BankOperatorGrantAlreadyActive);
+        }
+
+        if (command.TargetDiscordUserId == command.Actor.DiscordUserId)
+        {
+            return Result<BankOperatorGrantView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.BankOperatorGrantSelfService);
+        }
+
+        BankOperatorGrant grant = BankOperatorGrant.Grant(
+            BankOperatorGrantId.FromValue(idGenerator.NextId()),
+            bank.Id,
+            target,
+            DiscordUserId.FromUInt64(command.Actor.DiscordUserId),
+            clock.Now());
+
+        unitOfWork.BankOperatorGrants.Add(grant);
+
+        return Result<BankOperatorGrantView>.Success(
+            new BankOperatorGrantView(
+                grant.Id,
+                command.InstitutionCode,
+                command.TargetDiscordUserId,
+                grant.Status.ToToken()));
+    }
+
+    private Result<BankOperatorGrantView> Revoke(
+        IBankingUnitOfWork unitOfWork,
+        RevokeBankOperatorCommand command)
+    {
+        Result<Bank> resolved = ResolveBank(unitOfWork, command.Actor, command.InstitutionCode);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<BankOperatorGrantView>.Failure(resolved.Error!);
+        }
+
+        Bank bank = resolved.Value;
+        DiscordUserId target = DiscordUserId.FromUInt64(command.TargetDiscordUserId);
+
+        if (unitOfWork.BankOperatorGrants.FindActive(bank.Id, target) is not { } grant)
+        {
+            return Result<BankOperatorGrantView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankOperatorGrantNotFound);
+        }
+
+        grant.Revoke(clock.Now());
+        unitOfWork.BankOperatorGrants.Update(grant);
+
+        return Result<BankOperatorGrantView>.Success(
+            new BankOperatorGrantView(
+                grant.Id,
+                command.InstitutionCode,
+                command.TargetDiscordUserId,
+                grant.Status.ToToken()));
+    }
+
+    private static Result<Bank> ResolveBank(
+        IBankingUnitOfWork unitOfWork,
+        AuthorizationContext actor,
+        string institutionCode)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(unitOfWork, actor, requested: null);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<Bank>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Banks.FindByInstitutionCode(scope.Value, institutionCode) is not { } bank)
+        {
+            return Result<Bank>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(unitOfWork, actor, bank.EconomyScopeId);
+
+        return authorized.IsSuccess
+            ? Result<Bank>.Success(bank)
+            : Result<Bank>.Failure(authorized.Error!);
+    }
+}
