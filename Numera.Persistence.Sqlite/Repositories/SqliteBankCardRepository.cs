@@ -250,6 +250,30 @@ internal sealed class SqliteBankCardRepository : IBankCardRepository
             : null;
     }
 
+    public DebitCard? FindDebitCard(DebitCardId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {DebitColumns} FROM debit_cards WHERE debit_card_id = $card;
+            """);
+
+        command.Parameters.AddWithValue("$card", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? DebitCard.Rehydrate(
+                DebitCardId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),
+                BankCardId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(1))),
+                DepositAccountId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(2))),
+                DebitCardCatalog.ParseToken(reader.GetString(3)),
+                reader.GetString(4),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(6)),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(5)),
+                reader.IsDBNull(7) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(7)),
+                reader.GetInt64(8))
+            : null;
+    }
+
     private static BankCard ReadCard(SqliteDataReader reader) =>
         BankCard.Rehydrate(
             BankCardId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),

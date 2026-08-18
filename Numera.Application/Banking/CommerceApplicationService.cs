@@ -1,0 +1,880 @@
+using System.Globalization;
+using Numera.Application.Abstractions;
+using Numera.Application.Common;
+using Numera.Domain.Banking;
+using Numera.Domain.Common;
+using Numera.Domain.Identity;
+
+namespace Numera.Application.Banking;
+
+public sealed record BrowseMerchantStoresQuery(ulong GuildId, string? Cursor);
+
+public sealed record ListMerchantProductsQuery(
+    ulong GuildId,
+    MerchantProfileId MerchantProfileId,
+    string? Cursor);
+
+public sealed record CreateCommerceCheckoutCommand(
+    AuthorizationContext Actor,
+    MerchantProductId MerchantProductId,
+    int Quantity);
+
+public sealed record ReviewCommerceCheckoutCommand(
+    AuthorizationContext Actor,
+    CommerceOrderId CommerceOrderId,
+    DebitCardId DebitCardId,
+    int MaximumSlippageBps);
+
+public sealed record ConfirmCommerceCheckoutCommand(
+    AuthorizationContext Actor,
+    CommerceCheckoutConfirmationId CommerceCheckoutConfirmationId);
+
+public sealed record GetCommerceOrdersQuery(AuthorizationContext Actor, string? Cursor);
+
+public sealed record RequestCommerceReturnCommand(
+    AuthorizationContext Actor,
+    CommerceOrderId CommerceOrderId,
+    CommerceOrderLineId CommerceOrderLineId,
+    int Quantity,
+    string ReasonCode);
+
+public sealed record MerchantStoreItem(
+    MerchantProfileId Id,
+    string DisplayName,
+    string HomeGuildId,
+    int ActiveProductCount);
+
+public sealed record MerchantStorePageView(IReadOnlyList<MerchantStoreItem> Items, string? NextCursor);
+
+public sealed record MerchantProductItem(
+    MerchantProductId Id,
+    string Sku,
+    string DisplayName,
+    MoneyMinor UnitPrice,
+    CurrencyId CurrencyId,
+    long? OnHandQuantity);
+
+public sealed record MerchantProductPageView(IReadOnlyList<MerchantProductItem> Items, string? NextCursor);
+
+public sealed record CommerceCheckoutLineView(
+    CommerceOrderLineId Id,
+    MerchantProductId MerchantProductId,
+    string ProductName,
+    MoneyMinor UnitPrice,
+    int Quantity,
+    MoneyMinor LineSubtotal);
+
+public sealed record CommerceCheckoutView(
+    CommerceOrderId CommerceOrderId,
+    MerchantProfileId MerchantProfileId,
+    CurrencyId PresentmentCurrencyId,
+    MoneyMinor OrderTotalPresentment,
+    CommerceOrderStatus Status,
+    UtcTimestamp CheckoutExpiresAt,
+    IReadOnlyList<CommerceCheckoutLineView> Lines);
+
+public sealed record CommerceCheckoutConfirmationView(
+    CommerceCheckoutConfirmationId Id,
+    CommerceOrderId CommerceOrderId,
+    CurrencyId SourceCurrencyId,
+    CurrencyId PresentmentCurrencyId,
+    MoneyMinor EstimatedSourcePrincipal,
+    MoneyMinor EstimatedFxFee,
+    MoneyMinor EstimatedPurchaseFee,
+    MoneyMinor ConfirmedMaxSourceDebit,
+    int ConfirmedMaximumSlippageBps,
+    UtcTimestamp ExpiresAt);
+
+public sealed record CommerceOrderItem(
+    CommerceOrderId Id,
+    MerchantProfileId MerchantProfileId,
+    CurrencyId PresentmentCurrencyId,
+    MoneyMinor OrderTotalPresentment,
+    CommerceOrderStatus Status,
+    UtcTimestamp CreatedAt);
+
+public sealed record CommerceOrderPageView(IReadOnlyList<CommerceOrderItem> Items, string? NextCursor);
+
+public interface ICommerceApplicationService
+{
+    Task<Result<MerchantStorePageView>> BrowseMerchantStoresAsync(
+        BrowseMerchantStoresQuery query,
+        CancellationToken cancellationToken);
+
+    Task<Result<MerchantProductPageView>> ListMerchantProductsAsync(
+        ListMerchantProductsQuery query,
+        CancellationToken cancellationToken);
+
+    Task<Result<CommerceCheckoutView>> CreateCommerceCheckoutAsync(
+        CreateCommerceCheckoutCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<CommerceCheckoutConfirmationView>> ReviewCommerceCheckoutAsync(
+        ReviewCommerceCheckoutCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<CommercePaymentView>> ConfirmCommerceCheckoutAsync(
+        ConfirmCommerceCheckoutCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<CommerceOrderPageView>> GetCommerceOrdersAsync(
+        GetCommerceOrdersQuery query,
+        CancellationToken cancellationToken);
+
+    Task<Result<CommerceReturnView>> RequestCommerceReturnAsync(
+        RequestCommerceReturnCommand command,
+        CancellationToken cancellationToken);
+}
+
+public sealed class CommerceApplicationService : ICommerceApplicationService
+{
+    internal const long CheckoutLifetimeMilliseconds = 24 * 60 * 60 * 1000;
+    internal const long ConfirmationLifetimeMilliseconds = 300 * 1000;
+
+    private readonly IBankingWriteGateway writeGateway;
+    private readonly IClock clock;
+    private readonly IIdGenerator idGenerator;
+
+    public CommerceApplicationService(
+        IBankingWriteGateway writeGateway,
+        IClock clock,
+        IIdGenerator idGenerator)
+    {
+        ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(idGenerator);
+
+        this.writeGateway = writeGateway;
+        this.clock = clock;
+        this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<MerchantStorePageView>> BrowseMerchantStoresAsync(
+        BrowseMerchantStoresQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(unitOfWork => BrowseStores(unitOfWork, query), cancellationToken);
+    }
+
+    public Task<Result<MerchantProductPageView>> ListMerchantProductsAsync(
+        ListMerchantProductsQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(unitOfWork => ListProducts(unitOfWork, query), cancellationToken);
+    }
+
+    public Task<Result<CommerceCheckoutView>> CreateCommerceCheckoutAsync(
+        CreateCommerceCheckoutCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => CreateCheckout(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<CommerceCheckoutConfirmationView>> ReviewCommerceCheckoutAsync(
+        ReviewCommerceCheckoutCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => ReviewCheckout(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<CommercePaymentView>> ConfirmCommerceCheckoutAsync(
+        ConfirmCommerceCheckoutCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => ConfirmCheckout(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<CommerceOrderPageView>> GetCommerceOrdersAsync(
+        GetCommerceOrdersQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(unitOfWork => ListOrders(unitOfWork, query), cancellationToken);
+    }
+
+    public Task<Result<CommerceReturnView>> RequestCommerceReturnAsync(
+        RequestCommerceReturnCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return writeGateway.ExecuteAsync(unitOfWork => RequestReturn(unitOfWork, command), cancellationToken);
+    }
+
+    private static Result<MerchantStorePageView> BrowseStores(
+        IBankingUnitOfWork unitOfWork,
+        BrowseMerchantStoresQuery query)
+    {
+        string guildId = query.GuildId.ToString(CultureInfo.InvariantCulture);
+
+        if (!TryParseCursor<MerchantProfileId>(query.Cursor, out MerchantProfileId? after))
+        {
+            return Result<MerchantStorePageView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.PageCursorInvalid, nameof(query.Cursor));
+        }
+
+        IReadOnlyList<MerchantStoreSummary> stores = unitOfWork.Commerce.ListMerchantStores(
+            guildId, after, PaginationBudget.Fetch(PaginationBudget.ListPageSize));
+
+        bool hasMore = stores.Count > PaginationBudget.ListPageSize;
+        IEnumerable<MerchantStoreSummary> page = hasMore
+            ? stores.Take(PaginationBudget.ListPageSize)
+            : stores;
+
+        List<MerchantStoreItem> items =
+        [
+            .. page.Select(static store => new MerchantStoreItem(
+                store.Id, store.DisplayName, store.HomeGuildId, store.ActiveProductCount)),
+        ];
+
+        return Result<MerchantStorePageView>.Success(new MerchantStorePageView(
+            items,
+            hasMore && items.Count > 0 ? items[^1].Id.Value.ToString() : null));
+    }
+
+    private static Result<MerchantProductPageView> ListProducts(
+        IBankingUnitOfWork unitOfWork,
+        ListMerchantProductsQuery query)
+    {
+        if (unitOfWork.Commerce.FindMerchantProfile(query.MerchantProfileId) is not { } profile)
+        {
+            return Result<MerchantProductPageView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.MerchantProfileNotFound);
+        }
+
+        if (!IsVisibleIn(profile, query.GuildId))
+        {
+            return Result<MerchantProductPageView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.MerchantProfileNotFound);
+        }
+
+        if (!TryParseCursor<MerchantProductId>(query.Cursor, out MerchantProductId? after))
+        {
+            return Result<MerchantProductPageView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.PageCursorInvalid, nameof(query.Cursor));
+        }
+
+        IReadOnlyList<MerchantProductRecord> products = unitOfWork.Commerce.ListProducts(
+            profile.Id,
+            MerchantProductStatus.Active,
+            after,
+            PaginationBudget.Fetch(PaginationBudget.ListPageSize));
+
+        bool hasMore = products.Count > PaginationBudget.ListPageSize;
+        List<MerchantProductItem> items = [];
+
+        foreach (MerchantProductRecord product in hasMore
+            ? products.Take(PaginationBudget.ListPageSize)
+            : products)
+        {
+            if (unitOfWork.Commerce.FindPublishedPrice(product.Id) is not { } price)
+            {
+                continue;
+            }
+
+            items.Add(new MerchantProductItem(
+                product.Id,
+                product.Sku,
+                product.DisplayName,
+                price.UnitPrice,
+                price.CurrencyId,
+                product.InventoryMode == MerchantVocabulary.InventoryFinite
+                    ? unitOfWork.Commerce.FindInventory(product.Id)?.OnHandQuantity
+                    : null));
+        }
+
+        return Result<MerchantProductPageView>.Success(new MerchantProductPageView(
+            items,
+            hasMore && items.Count > 0 ? items[^1].Id.Value.ToString() : null));
+    }
+
+    private Result<CommerceCheckoutView> CreateCheckout(
+        IBankingUnitOfWork unitOfWork,
+        CreateCommerceCheckoutCommand command)
+    {
+        if (command.Quantity <= 0)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CommerceQuantityInvalid, nameof(command.Quantity));
+        }
+
+        if (MerchantAuthorization.ResolveActorCustomer(unitOfWork, command.Actor) is not { } customer)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        if (unitOfWork.Commerce.FindProduct(command.MerchantProductId) is not { } product ||
+            product.Status != MerchantProductStatus.Active)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.MerchantProductNotFound);
+        }
+
+        if (unitOfWork.Commerce.FindMerchantProfile(product.MerchantProfileId) is not { } profile ||
+            profile.Status != MerchantProfileStatus.Active)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.MerchantProductNotSellable);
+        }
+
+        string originGuildId = command.Actor.GuildId.ToString(CultureInfo.InvariantCulture);
+
+        if (!IsVisibleIn(profile, command.Actor.GuildId) ||
+            !IsPayableIn(profile, product, originGuildId))
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.MerchantProductNotSellable);
+        }
+
+        if (unitOfWork.Commerce.FindPublishedPrice(product.Id) is not { } price)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.MerchantProductPriceNotFound);
+        }
+
+        if (profile.CurrentAftercarePolicyVersionId is not { } aftercareId)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.MerchantAftercarePolicyNotFound);
+        }
+
+        MerchantPurchasePolicyRecord? purchasePolicy =
+            unitOfWork.Commerce.FindPublishedPurchasePolicy(product.Id);
+
+        MerchantFulfillmentPolicyRecord? fulfillmentPolicy =
+            unitOfWork.Commerce.FindPublishedFulfillmentPolicy(product.Id);
+
+        UtcTimestamp now = clock.Now();
+
+        if (purchasePolicy is { } policy)
+        {
+            if (policy.PerOrderQuantityLimit is { } perOrder && command.Quantity > perOrder)
+            {
+                return Result<CommerceCheckoutView>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommercePurchaseLimitExceeded);
+            }
+
+            if (policy.AvailableFrom is { } from && now < from)
+            {
+                return Result<CommerceCheckoutView>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.MerchantProductNotSellable);
+            }
+
+            if (policy.AvailableUntil is { } until && now >= until)
+            {
+                return Result<CommerceCheckoutView>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.MerchantProductNotSellable);
+            }
+        }
+
+        if (fulfillmentPolicy is { FulfillmentKind: MerchantVocabulary.FulfillmentDiscordRole } &&
+            command.Quantity != 1)
+        {
+            return Result<CommerceCheckoutView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceQuantityInvalid);
+        }
+
+        MoneyMinor subtotal = MoneyMinor.FromIntermediate(
+            checked(price.UnitPrice.Intermediate * command.Quantity));
+
+        CommerceOrderRecord order = new(
+            CommerceOrderId.FromValue(idGenerator.NextId()),
+            profile.Id,
+            customer.Id,
+            originGuildId,
+            profile.HomeGuildId,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            aftercareId,
+            profile.CurrencyId,
+            subtotal,
+            CommerceOrderStatus.Created,
+            now,
+            now.AddMilliseconds(CheckoutLifetimeMilliseconds),
+            null,
+            null,
+            null,
+            null,
+            VersionedEntity.InitialVersion);
+
+        CommerceOrderStatusCatalog.EnsureCreatable(order.Status);
+        CommerceOrderStatusCatalog.EnsureTransition(
+            order.Status, CommerceOrderStatus.AwaitingConfirmation);
+
+        unitOfWork.Commerce.AddOrder(order);
+
+        CommerceOrderLineRecord line = new(
+            CommerceOrderLineId.FromValue(idGenerator.NextId()),
+            order.Id,
+            product.Id,
+            price.Id,
+            purchasePolicy?.Id,
+            fulfillmentPolicy?.Id,
+            product.DisplayName,
+            price.UnitPrice,
+            command.Quantity,
+            subtotal);
+
+        unitOfWork.Commerce.AddOrderLine(line);
+
+        CommercePaymentRecord payment = new(
+            CommercePaymentId.FromValue(idGenerator.NextId()),
+            order.Id,
+            null,
+            null,
+            MoneyMinor.Zero,
+            profile.CurrencyId,
+            MoneyMinor.Zero,
+            MoneyMinor.Zero,
+            null,
+            CommercePaymentStatus.Pending,
+            now,
+            VersionedEntity.InitialVersion);
+
+        CommercePaymentStatusCatalog.EnsureCreatable(payment.Status);
+        unitOfWork.Commerce.AddPayment(payment);
+
+        CommerceOrderRecord awaiting = order with
+        {
+            Status = CommerceOrderStatus.AwaitingConfirmation,
+            Version = order.Version + 1,
+        };
+
+        unitOfWork.Commerce.UpdateOrder(awaiting);
+
+        return Result<CommerceCheckoutView>.Success(new CommerceCheckoutView(
+            awaiting.Id,
+            awaiting.MerchantProfileId,
+            awaiting.PresentmentCurrencyId,
+            awaiting.OrderTotalPresentment,
+            awaiting.Status,
+            awaiting.CheckoutExpiresAt,
+            [
+                new CommerceCheckoutLineView(
+                    line.Id,
+                    line.MerchantProductId,
+                    line.ProductNameSnapshot,
+                    line.UnitPrice,
+                    line.Quantity,
+                    line.LineSubtotal),
+            ]));
+    }
+
+    private Result<CommerceCheckoutConfirmationView> ReviewCheckout(
+        IBankingUnitOfWork unitOfWork,
+        ReviewCommerceCheckoutCommand command)
+    {
+        if (MerchantAuthorization.ResolveActorCustomer(unitOfWork, command.Actor) is not { } customer)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        if (unitOfWork.Commerce.FindOrder(command.CommerceOrderId) is not { } order)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CommerceOrderNotFound);
+        }
+
+        if (order.CustomerAccountId != customer.Id)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.CommerceOrderNotOwned);
+        }
+
+        if (order.Status != CommerceOrderStatus.AwaitingConfirmation)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        if (now >= order.CheckoutExpiresAt)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceCheckoutExpired);
+        }
+
+        if (unitOfWork.Commerce.FindMerchantProfile(order.MerchantProfileId) is not { } profile)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.MerchantProfileNotFound);
+        }
+
+        if (command.MaximumSlippageBps < 0 ||
+            command.MaximumSlippageBps > profile.MaximumCheckoutSlippageBps)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CommerceSlippageInvalid);
+        }
+
+        if (unitOfWork.BankCards.FindDebitCard(command.DebitCardId) is not { } debitCard ||
+            debitCard.Status != DebitCardStatus.Active)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.DebitCardNotFound);
+        }
+
+        if (unitOfWork.DepositAccounts.Find(debitCard.DepositAccountId) is not { } source ||
+            source.CustomerAccountId != customer.Id)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.CommerceOrderNotOwned);
+        }
+
+        if (source.CurrencyId != order.PresentmentCurrencyId)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.InfrastructureUnavailable,
+                BankingErrorCodes.CommerceCrossCurrencyUnavailable);
+        }
+
+        Result<MoneyMinor> fee = EstimatePurchaseFee(unitOfWork, source, order.OrderTotalPresentment, now);
+
+        if (!fee.IsSuccess)
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(fee.Error!);
+        }
+
+        MoneyMinor maximumSourceDebit = order.OrderTotalPresentment.Add(fee.Value);
+
+        CommerceCheckoutConfirmationRecord confirmation = new(
+            CommerceCheckoutConfirmationId.FromValue(idGenerator.NextId()),
+            order.Id,
+            customer.Id,
+            debitCard.Id,
+            source.Id,
+            source.CurrencyId,
+            order.PresentmentCurrencyId,
+            null,
+            null,
+            null,
+            order.OrderTotalPresentment,
+            MoneyMinor.Zero,
+            fee.Value,
+            command.MaximumSlippageBps,
+            maximumSourceDebit,
+            now,
+            now.AddMilliseconds(ConfirmationLifetimeMilliseconds),
+            null,
+            VersionedEntity.InitialVersion);
+
+        unitOfWork.Commerce.AddCheckoutConfirmation(confirmation);
+
+        return Result<CommerceCheckoutConfirmationView>.Success(new CommerceCheckoutConfirmationView(
+            confirmation.Id,
+            confirmation.CommerceOrderId,
+            confirmation.SourceCurrencyId,
+            confirmation.PresentmentCurrencyId,
+            confirmation.EstimatedSourcePrincipal,
+            confirmation.EstimatedFxFee,
+            confirmation.EstimatedPurchaseFee,
+            confirmation.ConfirmedMaxSourceDebit,
+            confirmation.ConfirmedMaximumSlippageBps,
+            confirmation.ExpiresAt));
+    }
+
+    private Result<CommercePaymentView> ConfirmCheckout(
+        IBankingUnitOfWork unitOfWork,
+        ConfirmCommerceCheckoutCommand command)
+    {
+        if (MerchantAuthorization.ResolveActorCustomer(unitOfWork, command.Actor) is not { } customer)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        if (unitOfWork.Commerce.FindCheckoutConfirmation(
+                command.CommerceCheckoutConfirmationId) is not { } confirmation)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CommerceCheckoutConfirmationNotFound);
+        }
+
+        if (confirmation.CustomerAccountId != customer.Id)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.CommerceOrderNotOwned);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        if (confirmation.ConsumedAt is not null || now >= confirmation.ExpiresAt)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceConfirmationExpired);
+        }
+
+        if (unitOfWork.Commerce.FindOrder(confirmation.CommerceOrderId) is not { } order ||
+            order.Status != CommerceOrderStatus.AwaitingConfirmation)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
+        }
+
+        if (now >= order.CheckoutExpiresAt)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceCheckoutExpired);
+        }
+
+        if (unitOfWork.Commerce.FindPaymentByOrder(order.Id) is not { } payment ||
+            payment.Status != CommercePaymentStatus.Pending)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
+        }
+
+        if (unitOfWork.BankCards.FindDebitCard(confirmation.DebitCardId) is not { } debitCard ||
+            debitCard.Status != DebitCardStatus.Active ||
+            debitCard.DepositAccountId != confirmation.SourceDepositAccountId)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.DebitCardNotOperable);
+        }
+
+        foreach (CommerceOrderLineRecord line in unitOfWork.Commerce.ListOrderLines(order.Id))
+        {
+            if (unitOfWork.Commerce.FindProduct(line.MerchantProductId) is not { } product ||
+                product.Status != MerchantProductStatus.Active)
+            {
+                return Result<CommercePaymentView>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.MerchantProductNotSellable);
+            }
+
+            if (product.InventoryMode != MerchantVocabulary.InventoryFinite)
+            {
+                continue;
+            }
+
+            if (unitOfWork.Commerce.FindInventory(product.Id) is not { } inventory)
+            {
+                return Result<CommercePaymentView>.Failure(
+                    ErrorCategory.NotFound, BankingErrorCodes.MerchantInventoryNotFound);
+            }
+
+            if (inventory.OnHandQuantity < line.Quantity)
+            {
+                return Result<CommercePaymentView>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.MerchantInventoryInsufficient);
+            }
+        }
+
+        return Result<CommercePaymentView>.Failure(
+            ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.CommerceCaptureUnavailable);
+    }
+
+    private static Result<CommerceOrderPageView> ListOrders(
+        IBankingUnitOfWork unitOfWork,
+        GetCommerceOrdersQuery query)
+    {
+        if (MerchantAuthorization.ResolveActorCustomer(unitOfWork, query.Actor) is not { } customer)
+        {
+            return Result<CommerceOrderPageView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        if (!TryParseCursor<CommerceOrderId>(query.Cursor, out CommerceOrderId? after))
+        {
+            return Result<CommerceOrderPageView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.PageCursorInvalid, nameof(query.Cursor));
+        }
+
+        IReadOnlyList<CommerceOrderRecord> orders = unitOfWork.Commerce.ListOrdersForCustomer(
+            customer.Id, after, PaginationBudget.Fetch(PaginationBudget.HistoryPageSize));
+
+        bool hasMore = orders.Count > PaginationBudget.HistoryPageSize;
+        List<CommerceOrderItem> items =
+        [
+            .. (hasMore ? orders.Take(PaginationBudget.HistoryPageSize) : orders)
+                .Select(static order => new CommerceOrderItem(
+                    order.Id,
+                    order.MerchantProfileId,
+                    order.PresentmentCurrencyId,
+                    order.OrderTotalPresentment,
+                    order.Status,
+                    order.CreatedAt)),
+        ];
+
+        return Result<CommerceOrderPageView>.Success(new CommerceOrderPageView(
+            items,
+            hasMore && items.Count > 0 ? items[^1].Id.Value.ToString() : null));
+    }
+
+    private Result<CommerceReturnView> RequestReturn(
+        IBankingUnitOfWork unitOfWork,
+        RequestCommerceReturnCommand command)
+    {
+        if (command.Quantity <= 0)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CommerceQuantityInvalid, nameof(command.Quantity));
+        }
+
+        if (string.IsNullOrWhiteSpace(command.ReasonCode) || command.ReasonCode.Length > 64)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Validation,
+                BankingErrorCodes.CommerceReturnReasonInvalid,
+                nameof(command.ReasonCode));
+        }
+
+        if (MerchantAuthorization.ResolveActorCustomer(unitOfWork, command.Actor) is not { } customer)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        if (unitOfWork.Commerce.FindOrder(command.CommerceOrderId) is not { } order)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CommerceOrderNotFound);
+        }
+
+        if (order.CustomerAccountId != customer.Id)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.CommerceOrderNotOwned);
+        }
+
+        if (order.Status is not (CommerceOrderStatus.Paid or CommerceOrderStatus.PartiallyRefunded))
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        if (order.ReturnRequestEligibleUntil is not { } deadline || now >= deadline)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.CommerceReturnNotAllowed);
+        }
+
+        if (unitOfWork.Commerce.FindAftercarePolicy(order.AftercarePolicyVersionId) is not { } aftercare ||
+            !aftercare.CustomerReturnRequestEnabled)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.CommerceReturnNotAllowed);
+        }
+
+        if (unitOfWork.Commerce.FindOrderLine(command.CommerceOrderLineId) is not { } line ||
+            line.CommerceOrderId != order.Id)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CommerceOrderNotFound);
+        }
+
+        long alreadyReturned = unitOfWork.Commerce.SumReturnedQuantity(line.Id);
+
+        if (alreadyReturned + command.Quantity > line.Quantity)
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceReturnQuantityExceeded);
+        }
+
+        CommerceReturnRecord commerceReturn = new(
+            CommerceReturnId.FromValue(idGenerator.NextId()),
+            order.Id,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            null,
+            CommerceReturnStatus.Pending,
+            command.ReasonCode,
+            null,
+            now,
+            VersionedEntity.InitialVersion);
+
+        CommerceReturnStatusCatalog.EnsureCreatable(commerceReturn.Status);
+        unitOfWork.Commerce.AddReturn(commerceReturn);
+
+        CommerceReturnLineRecord returnLine = new(
+            CommerceReturnLineId.FromValue(idGenerator.NextId()),
+            commerceReturn.Id,
+            line.Id,
+            command.Quantity);
+
+        unitOfWork.Commerce.AddReturnLine(returnLine);
+
+        return Result<CommerceReturnView>.Success(
+            MerchantAdministrationApplicationService.ToView(commerceReturn, [returnLine]));
+    }
+
+    private static Result<MoneyMinor> EstimatePurchaseFee(
+        IBankingUnitOfWork unitOfWork,
+        Numera.Domain.Banking.DepositAccount source,
+        MoneyMinor principal,
+        UtcTimestamp now)
+    {
+        if (unitOfWork.Banks.Find(source.BankId) is not { } bank)
+        {
+            return Result<MoneyMinor>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        if (EconomyBusinessCalendar.Resolve(
+                unitOfWork.EconomyCalendars, bank.EconomyScopeId, now) is not { } point)
+        {
+            return Result<MoneyMinor>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
+        Result<FeeAssessmentPlan> plan = FeeResolver.Resolve(
+            unitOfWork,
+            bank,
+            source,
+            FeeType.DebitPurchase,
+            FeeChannel.Discord,
+            counterpartyBankId: null,
+            principal,
+            point);
+
+        return plan.IsSuccess
+            ? Result<MoneyMinor>.Success(plan.Value.Quote.Amount)
+            : Result<MoneyMinor>.Failure(plan.Error!);
+    }
+
+    private static bool IsVisibleIn(MerchantProfileRecord profile, ulong guildId) =>
+        profile.CatalogVisibilityScope == MerchantVocabulary.ScopeGlobal ||
+        profile.HomeGuildId == guildId.ToString(CultureInfo.InvariantCulture);
+
+    private static bool IsPayableIn(
+        MerchantProfileRecord profile,
+        MerchantProductRecord product,
+        string originGuildId)
+    {
+        bool localOnly = profile.PaymentScope == MerchantVocabulary.ScopeLocalGuild ||
+            product.SaleScopeOverride == MerchantVocabulary.ScopeLocalGuild;
+
+        return !localOnly || profile.HomeGuildId == originGuildId;
+    }
+
+    private static bool TryParseCursor<TId>(string? cursor, out TId? after)
+        where TId : struct, IEntityId<TId>
+    {
+        after = null;
+
+        if (string.IsNullOrEmpty(cursor))
+        {
+            return true;
+        }
+
+        if (!EntityIdValue.TryParse(cursor, out EntityIdValue value))
+        {
+            return false;
+        }
+
+        after = TId.FromValue(value);
+        return true;
+    }
+}

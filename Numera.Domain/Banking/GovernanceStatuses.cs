@@ -546,6 +546,9 @@ public static class MerchantProfileStatusCatalog
                 MerchantProfileStatus.Closed)
             .Build();
 
+    public static bool IsAllowed(MerchantProfileStatus from, MerchantProfileStatus to) =>
+        Transitions.IsAllowed(from, to);
+
     public static void EnsureTransition(MerchantProfileStatus from, MerchantProfileStatus to) =>
         Transitions.EnsureAllowed(from, to);
 

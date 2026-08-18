@@ -26,6 +26,8 @@ public interface IBankCardRepository
     void UpdateDebitCard(DebitCard card);
 
     DebitCard? FindDebitCardByBankCard(BankCardId bankCardId);
+
+    DebitCard? FindDebitCard(DebitCardId id);
 }
 
 public partial interface IBankingUnitOfWork

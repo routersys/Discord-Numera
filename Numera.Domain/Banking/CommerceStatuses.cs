@@ -30,6 +30,8 @@ public static class MerchantProductStatusCatalog
                 MerchantProductStatus.Retired)
             .Build();
 
+    public static bool IsAllowed(MerchantProductStatus from, MerchantProductStatus to) => Transitions.IsAllowed(from, to);
+
     public static void EnsureTransition(MerchantProductStatus from, MerchantProductStatus to) =>
         Transitions.EnsureAllowed(from, to);
 
@@ -94,6 +96,8 @@ public static class MerchantProductPriceVersionStatusCatalog
                 MerchantProductPriceVersionStatus.Retired)
             .Build();
 
+    public static bool IsAllowed(MerchantProductPriceVersionStatus from, MerchantProductPriceVersionStatus to) => Transitions.IsAllowed(from, to);
+
     public static void EnsureTransition(MerchantProductPriceVersionStatus from, MerchantProductPriceVersionStatus to) =>
         Transitions.EnsureAllowed(from, to);
 
@@ -153,6 +157,8 @@ public static class MerchantProductPurchasePolicyVersionStatusCatalog
                 MerchantProductPurchasePolicyVersionStatus.Published,
                 MerchantProductPurchasePolicyVersionStatus.Retired)
             .Build();
+
+    public static bool IsAllowed(MerchantProductPurchasePolicyVersionStatus from, MerchantProductPurchasePolicyVersionStatus to) => Transitions.IsAllowed(from, to);
 
     public static void EnsureTransition(MerchantProductPurchasePolicyVersionStatus from, MerchantProductPurchasePolicyVersionStatus to) =>
         Transitions.EnsureAllowed(from, to);
@@ -214,6 +220,8 @@ public static class MerchantFulfillmentPolicyVersionStatusCatalog
                 MerchantFulfillmentPolicyVersionStatus.Retired)
             .Build();
 
+    public static bool IsAllowed(MerchantFulfillmentPolicyVersionStatus from, MerchantFulfillmentPolicyVersionStatus to) => Transitions.IsAllowed(from, to);
+
     public static void EnsureTransition(MerchantFulfillmentPolicyVersionStatus from, MerchantFulfillmentPolicyVersionStatus to) =>
         Transitions.EnsureAllowed(from, to);
 
@@ -273,6 +281,8 @@ public static class MerchantAftercarePolicyVersionStatusCatalog
                 MerchantAftercarePolicyVersionStatus.Published,
                 MerchantAftercarePolicyVersionStatus.Retired)
             .Build();
+
+    public static bool IsAllowed(MerchantAftercarePolicyVersionStatus from, MerchantAftercarePolicyVersionStatus to) => Transitions.IsAllowed(from, to);
 
     public static void EnsureTransition(MerchantAftercarePolicyVersionStatus from, MerchantAftercarePolicyVersionStatus to) =>
         Transitions.EnsureAllowed(from, to);
@@ -350,6 +360,8 @@ public static class CommerceOrderStatusCatalog
                 CommerceOrderStatus.PartiallyRefunded,
                 CommerceOrderStatus.Refunded)
             .Build();
+
+    public static bool IsAllowed(CommerceOrderStatus from, CommerceOrderStatus to) => Transitions.IsAllowed(from, to);
 
     public static void EnsureTransition(CommerceOrderStatus from, CommerceOrderStatus to) =>
         Transitions.EnsureAllowed(from, to);
@@ -439,6 +451,8 @@ public static class CommercePaymentStatusCatalog
                 CommercePaymentStatus.Refunded)
             .Build();
 
+    public static bool IsAllowed(CommercePaymentStatus from, CommercePaymentStatus to) => Transitions.IsAllowed(from, to);
+
     public static void EnsureTransition(CommercePaymentStatus from, CommercePaymentStatus to) =>
         Transitions.EnsureAllowed(from, to);
 
@@ -515,6 +529,8 @@ public static class CommerceReturnStatusCatalog
                 CommerceReturnStatus.Completed)
             .Build();
 
+    public static bool IsAllowed(CommerceReturnStatus from, CommerceReturnStatus to) => Transitions.IsAllowed(from, to);
+
     public static void EnsureTransition(CommerceReturnStatus from, CommerceReturnStatus to) =>
         Transitions.EnsureAllowed(from, to);
 
@@ -590,6 +606,8 @@ public static class CommerceFulfillmentStatusCatalog
                 CommerceFulfillmentStatus.Pending)
             .Build();
 
+    public static bool IsAllowed(CommerceFulfillmentStatus from, CommerceFulfillmentStatus to) => Transitions.IsAllowed(from, to);
+
     public static void EnsureTransition(CommerceFulfillmentStatus from, CommerceFulfillmentStatus to) =>
         Transitions.EnsureAllowed(from, to);
 
@@ -662,6 +680,8 @@ public static class CommerceFulfillmentReversalStatusCatalog
                 CommerceFulfillmentReversalStatus.FailedManual,
                 CommerceFulfillmentReversalStatus.Pending)
             .Build();
+
+    public static bool IsAllowed(CommerceFulfillmentReversalStatus from, CommerceFulfillmentReversalStatus to) => Transitions.IsAllowed(from, to);
 
     public static void EnsureTransition(CommerceFulfillmentReversalStatus from, CommerceFulfillmentReversalStatus to) =>
         Transitions.EnsureAllowed(from, to);
@@ -742,6 +762,8 @@ public static class DebitCardAuthorizationStatusCatalog
                 DebitCardAuthorizationStatus.PartiallyRefunded,
                 DebitCardAuthorizationStatus.Refunded)
             .Build();
+
+    public static bool IsAllowed(DebitCardAuthorizationStatus from, DebitCardAuthorizationStatus to) => Transitions.IsAllowed(from, to);
 
     public static void EnsureTransition(DebitCardAuthorizationStatus from, DebitCardAuthorizationStatus to) =>
         Transitions.EnsureAllowed(from, to);
