@@ -15,6 +15,7 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
     private readonly IDiscordDiagnostics diagnostics;
     private readonly ITextCatalog catalog;
     private readonly IApplicationCommandSynchronizer synchronizer;
+    private readonly IGeneratedModuleRegistrar modules;
 
     private bool subscribed;
     private int synchronizationStarted;
@@ -26,7 +27,8 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
         IDiscordCredentialProvider credentials,
         IDiscordDiagnostics diagnostics,
         ITextCatalog catalog,
-        IApplicationCommandSynchronizer synchronizer)
+        IApplicationCommandSynchronizer synchronizer,
+        IGeneratedModuleRegistrar modules)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(interactionService);
@@ -35,6 +37,7 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
         ArgumentNullException.ThrowIfNull(diagnostics);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(synchronizer);
+        ArgumentNullException.ThrowIfNull(modules);
 
         this.client = client;
         this.interactionService = interactionService;
@@ -43,10 +46,13 @@ internal sealed class DiscordGatewayConnection : IDiscordGateway
         this.diagnostics = diagnostics;
         this.catalog = catalog;
         this.synchronizer = synchronizer;
+        this.modules = modules;
     }
 
     public async Task LoginAsync(CancellationToken cancellationToken)
     {
+        await modules.RegisterAsync(interactionService, cancellationToken).ConfigureAwait(false);
+
         Subscribe();
 
         string token = await credentials.GetTokenAsync(cancellationToken).ConfigureAwait(false);
