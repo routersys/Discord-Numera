@@ -23,7 +23,7 @@ internal interface IApplicationCommandGateway
     Task DeleteAsync(CommandSyncTarget target, RegisteredCommand command, CancellationToken cancellationToken);
 }
 
-internal interface IApplicationCommandSynchronizer
+public interface IApplicationCommandSynchronizer
 {
     Task<DiscordCommandSyncOutcome> SynchronizeAsync(CancellationToken cancellationToken);
 }

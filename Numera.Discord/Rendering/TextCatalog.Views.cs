@@ -13,6 +13,9 @@ public static class ViewKeys
     public const string ManageCurrencyCreated = "view.manage.currency_created";
     public const string ManageCurrencyIssued = "view.manage.currency_issued";
     public const string ManageCurrencyBurned = "view.manage.currency_burned";
+    public const string ManagePanel = "view.manage.panel";
+    public const string SystemPanel = "view.system.panel";
+    public const string SystemCommandsSynced = "view.system.commands_synced";
     public const string AccountLinkIssued = "view.account.link_issued";
     public const string AccountLinkConsumed = "view.account.link_consumed";
     public const string AccountUnlinked = "view.account.unlinked";
@@ -70,6 +73,12 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageCurrencyBurned + ".title"] = "通貨を償却しました",
             [ViewKeys.ManageCurrencyBurned + ".description"] =
                 "{amount} を償却しました。発行済のベースマネーは {baseMoneySupply} です。",
+            [ViewKeys.ManagePanel + ".title"] = "管理メニュー",
+            [ViewKeys.ManagePanel + ".description"] = "銀行と通貨の管理は /manage の各サブコマンドから行います。",
+            [ViewKeys.SystemPanel + ".title"] = "システムメニュー",
+            [ViewKeys.SystemPanel + ".description"] = "Command 同期は /system commands-sync から行います。",
+            [ViewKeys.SystemCommandsSynced + ".title"] = "Command を同期しました",
+            [ViewKeys.SystemCommandsSynced + ".description"] = "作成 {created} 件 / 更新 {updated} 件 / 削除 {deleted} 件です。",
             [ViewKeys.AccountLinkIssued + ".title"] = "連携コードを発行しました",
             [ViewKeys.AccountLinkIssued + ".description"] = "連携コードは {code} です。10分で失効します。",
             [ViewKeys.AccountLinkConsumed + ".title"] = "連携が完了しました",

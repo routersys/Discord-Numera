@@ -31,6 +31,9 @@ public sealed class EndpointSurfaceTests
                 "manage currency-burn",
                 "manage currency-create",
                 "manage currency-issue",
+                "manage panel",
+                "system commands-sync",
+                "system panel",
             },
             routes);
     }
@@ -41,7 +44,14 @@ public sealed class EndpointSurfaceTests
         string[] modules = [.. EconomyGeneratedModules.All.Select(static type => type.Name).Order(StringComparer.Ordinal)];
 
         CollectionAssert.AreEqual(
-            new[] { "AccountModule", "BankModule", "ManageModule", "NumeraDiscordEndpointsHelpEndpointsModule" },
+            new[]
+            {
+                "AccountModule",
+                "BankModule",
+                "ManageModule",
+                "NumeraDiscordEndpointsHelpEndpointsModule",
+                "SystemModule",
+            },
             modules);
     }
 
@@ -56,7 +66,7 @@ public sealed class EndpointSurfaceTests
         ];
 
         CollectionAssert.AreEqual(new[] { "account", "bank", "help", "manage" }, primary);
-        Assert.AreEqual(0, provider.ControlCommands().Count);
+        Assert.AreEqual("system", provider.ControlCommands().Single().Name);
     }
 
     [TestMethod]
