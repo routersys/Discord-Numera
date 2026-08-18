@@ -259,9 +259,11 @@ public sealed class FxOrder : VersionedEntity
             ? FxOrderStatus.Filled
             : FxOrderStatus.PartiallyFilled;
 
-        Transitions.EnsureAllowed(Status, next);
-
-        Status = next;
+        if (next != Status)
+        {
+            Transitions.EnsureAllowed(Status, next);
+            Status = next;
+        }
 
         if (next == FxOrderStatus.Filled)
         {

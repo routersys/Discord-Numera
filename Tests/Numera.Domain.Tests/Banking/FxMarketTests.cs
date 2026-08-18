@@ -222,6 +222,19 @@ public sealed class FxOrderTests
     }
 
     [TestMethod]
+    public void ASecondPartialFillStaysPartiallyFilled()
+    {
+        FxOrder order = Limit();
+        order.Fill(400, UtcTimestamp.FromUnixMilliseconds(2));
+        order.Fill(300, UtcTimestamp.FromUnixMilliseconds(3));
+
+        Assert.AreEqual(FxOrderStatus.PartiallyFilled, order.Status);
+        Assert.AreEqual(700L, order.FilledBaseMinor);
+        Assert.AreEqual(300L, order.RemainingBaseMinor);
+        Assert.IsFalse(order.IsTerminal);
+    }
+
+    [TestMethod]
     public void OverfillingIsRejected()
     {
         FxOrder order = Limit();
