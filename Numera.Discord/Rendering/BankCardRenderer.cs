@@ -97,7 +97,8 @@ internal sealed class BankCardRenderer : IBankCardRenderer
                 CardTextAlignment.Left, CardFontRole.General, 42, 30, LargeText: true, null),
             new(
                 request.CapabilityLabel, 760, 72, 194, 56,
-                CardTextAlignment.Right, CardFontRole.General, 30, 30, LargeText: true, null),
+                CardTextAlignment.Right, CardFontRole.General, 30, CardCanvas.MinimumFontSize,
+                LargeText: true, null),
             new(
                 request.CustomerDisplayName, 72, 478, 580, 70,
                 CardTextAlignment.Left, CardFontRole.General, 28, 22, LargeText: false, null),

@@ -1,0 +1,29 @@
+{
+  "general": {
+    "family": "BIZ UDPGothic",
+    "style": "Bold",
+    "weight": "700",
+    "relative_path": "BIZUDPGothic-Bold.ttf",
+    "sha256": "3a1adc5c062064d4e6fe20df1368ffd52d6bf969d5e0ac90f4083da8cd5597b8",
+    "license_spdx": "OFL-1.1",
+    "upstream_release": "v1.051"
+  },
+  "mono": {
+    "family": "IBM Plex Mono",
+    "style": "SemiBold",
+    "weight": "600",
+    "relative_path": "IBMPlexMono-SemiBold.otf",
+    "sha256": "bc63f5550b440d5edd4da15c4740e7468d2064a72f5509aca55348f930588267",
+    "license_spdx": "OFL-1.1",
+    "upstream_release": "@ibm/plex-mono@2.5.0"
+  },
+  "fallback": {
+    "family": "Noto Sans CJK JP",
+    "style": "Bold",
+    "weight": "700",
+    "relative_path": "NotoSansCJKjp-Bold.otf",
+    "sha256": "e53dcb0dcb2922e45d01aae1ebd2f382bb81d4229b18b6b883bd170678af1f76",
+    "license_spdx": "OFL-1.1",
+    "upstream_release": "Sans2.004"
+  }
+}

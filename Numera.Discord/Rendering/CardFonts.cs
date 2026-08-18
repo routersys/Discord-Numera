@@ -56,7 +56,11 @@ internal static class CardFontManifest
         {
             declared = JsonSerializer.Deserialize<Dictionary<string, CardFontEntry>>(
                 File.ReadAllBytes(path),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                    PropertyNameCaseInsensitive = false,
+                });
         }
         catch (JsonException)
         {

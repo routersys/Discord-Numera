@@ -123,6 +123,7 @@ public sealed class BankCardRendererTests
         Assert.AreEqual(760, capability.X);
         Assert.AreEqual(194, capability.Width);
         Assert.AreEqual(CardTextAlignment.Right, capability.Alignment);
+        Assert.AreEqual(CardCanvas.MinimumFontSize, capability.MinimumFontSizePx);
 
         CardTextElement identifier = elements[2];
         Assert.AreEqual(882, identifier.Width);
