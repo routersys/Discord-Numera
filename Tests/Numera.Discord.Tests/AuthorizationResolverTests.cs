@@ -21,6 +21,21 @@ public sealed class AuthorizationResolverTests
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<Result<LinkGrantView>> CreateLinkGrantAsync(
+            CreateLinkGrantCommand command,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<Result<CustomerAccountView>> ConsumeLinkGrantAsync(
+            ConsumeLinkGrantCommand command,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<Result> UnlinkDiscordIdentityAsync(
+            UnlinkDiscordIdentityCommand command,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<Result<CustomerAccountStatusView>> GetCustomerAccountStatusAsync(
             GetCustomerAccountStatusQuery query,
             CancellationToken cancellationToken)

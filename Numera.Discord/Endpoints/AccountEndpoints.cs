@@ -74,4 +74,65 @@ public sealed class AccountEndpoints : IEconomyEndpoint
                 })
             : EndpointFailures.From(result.Error!);
     }
+
+    [EconomySlashCommand("link", "別の Discord アカウントを連携する連携コードを発行します。")]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
+    public async Task<DiscordEndpointResponse> LinkAsync(
+        DiscordEndpointContext context,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        Result<LinkGrantView> result = await accounts
+            .CreateLinkGrantAsync(new CreateLinkGrantCommand(context.UserId), cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? DiscordEndpointResponse.Message(
+                ViewKeys.AccountLinkIssued,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["code"] = result.Value.Code,
+                })
+            : EndpointFailures.From(result.Error!);
+    }
+
+    [EconomySlashCommand("unlink", "連携済みの Discord アカウントを解除します。")]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
+    public async Task<DiscordEndpointResponse> UnlinkAsync(
+        DiscordEndpointContext context,
+        [EconomyOption("code", "連携コードを入力すると連携します。", false)] string code,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (!string.IsNullOrEmpty(code))
+        {
+            Result<CustomerAccountView> consumed = await accounts
+                .ConsumeLinkGrantAsync(new ConsumeLinkGrantCommand(context.UserId, code), cancellationToken)
+                .ConfigureAwait(false);
+
+            return consumed.IsSuccess
+                ? DiscordEndpointResponse.Message(
+                    ViewKeys.AccountLinkConsumed,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["publicHandle"] = consumed.Value.PublicHandle,
+                    })
+                : EndpointFailures.From(consumed.Error!);
+        }
+
+        Result result = await accounts
+            .UnlinkDiscordIdentityAsync(
+                new UnlinkDiscordIdentityCommand(context.UserId, context.UserId),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? DiscordEndpointResponse.Message(ViewKeys.AccountUnlinked, NoViewData)
+            : EndpointFailures.From(result.Error!);
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> NoViewData =
+        new Dictionary<string, string>(StringComparer.Ordinal);
 }

@@ -378,4 +378,153 @@ public sealed class RegisterCustomerAccountTests
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(ErrorCategory.Validation, result.Error!.Category);
     }
+
+    [TestMethod]
+    public async Task ALinkGrantIsIssuedForARegisteredUser()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result<LinkGrantView> result = await harness.Service.CreateLinkGrantAsync(
+            new CreateLinkGrantCommand(DiscordUser), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(32, result.Value.Code.Length);
+        Assert.AreEqual(1L, harness.Count("account_link_grants"));
+        Assert.AreEqual("ISSUED", harness.ReadSingleText("SELECT status FROM account_link_grants;"));
+    }
+
+    [TestMethod]
+    public async Task AnUnregisteredUserCannotIssueALinkGrant()
+    {
+        await using Harness harness = Harness.Create();
+
+        Result<LinkGrantView> result = await harness.Service.CreateLinkGrantAsync(
+            new CreateLinkGrantCommand(DiscordUser), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CustomerAccountNotFound, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task TheRawCodeIsNotStored()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result<LinkGrantView> issued = await harness.Service.CreateLinkGrantAsync(
+            new CreateLinkGrantCommand(DiscordUser), CancellationToken.None);
+
+        string stored = harness.ReadSingleText(
+            "SELECT CAST(code_digest AS TEXT) FROM account_link_grants;");
+
+        Assert.IsFalse(stored.Contains(issued.Value.Code, StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ASecondDiscordUserConsumesTheGrant()
+    {
+        await using Harness harness = Harness.Create();
+        Result<CustomerAccountView> owner = await harness.RegisterAsync();
+
+        Result<LinkGrantView> issued = await harness.Service.CreateLinkGrantAsync(
+            new CreateLinkGrantCommand(DiscordUser), CancellationToken.None);
+
+        Result<CustomerAccountView> consumed = await harness.Service.ConsumeLinkGrantAsync(
+            new ConsumeLinkGrantCommand(999UL, issued.Value.Code), CancellationToken.None);
+
+        Assert.IsTrue(consumed.IsSuccess);
+        Assert.AreEqual(owner.Value.Id, consumed.Value.Id);
+        Assert.AreEqual("CONSUMED", harness.ReadSingleText("SELECT status FROM account_link_grants;"));
+        Assert.AreEqual(2L, harness.Count("discord_identity_links"));
+    }
+
+    [TestMethod]
+    public async Task AGrantIsSingleUse()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result<LinkGrantView> issued = await harness.Service.CreateLinkGrantAsync(
+            new CreateLinkGrantCommand(DiscordUser), CancellationToken.None);
+
+        await harness.Service.ConsumeLinkGrantAsync(
+            new ConsumeLinkGrantCommand(999UL, issued.Value.Code), CancellationToken.None);
+
+        Result<CustomerAccountView> second = await harness.Service.ConsumeLinkGrantAsync(
+            new ConsumeLinkGrantCommand(1000UL, issued.Value.Code), CancellationToken.None);
+
+        Assert.IsFalse(second.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.LinkGrantInvalid, second.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task AnExpiredGrantIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result<LinkGrantView> issued = await harness.Service.CreateLinkGrantAsync(
+            new CreateLinkGrantCommand(DiscordUser), CancellationToken.None);
+
+        harness.Clock.Advance(AccountLinkGrant.LifetimeMilliseconds);
+
+        Result<CustomerAccountView> consumed = await harness.Service.ConsumeLinkGrantAsync(
+            new ConsumeLinkGrantCommand(999UL, issued.Value.Code), CancellationToken.None);
+
+        Assert.IsFalse(consumed.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.LinkGrantExpired, consumed.Error!.Code);
+        Assert.AreEqual("ISSUED", harness.ReadSingleText("SELECT status FROM account_link_grants;"));
+    }
+
+    [TestMethod]
+    public async Task AnUnknownCodeIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result<CustomerAccountView> consumed = await harness.Service.ConsumeLinkGrantAsync(
+            new ConsumeLinkGrantCommand(999UL, "DEADBEEF"), CancellationToken.None);
+
+        Assert.IsFalse(consumed.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.LinkGrantInvalid, consumed.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task TheLastLinkCannotBeUnlinked()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result result = await harness.Service.UnlinkDiscordIdentityAsync(
+            new UnlinkDiscordIdentityCommand(DiscordUser, DiscordUser), CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.LastLinkCannotBeRemoved, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task UnlinkingPromotesAnotherLinkToPrimary()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.RegisterAsync();
+
+        Result<LinkGrantView> issued = await harness.Service.CreateLinkGrantAsync(
+            new CreateLinkGrantCommand(DiscordUser), CancellationToken.None);
+        await harness.Service.ConsumeLinkGrantAsync(
+            new ConsumeLinkGrantCommand(999UL, issued.Value.Code), CancellationToken.None);
+
+        Result result = await harness.Service.UnlinkDiscordIdentityAsync(
+            new UnlinkDiscordIdentityCommand(DiscordUser, DiscordUser), CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(
+            "UNLINKED",
+            harness.ReadSingleText(
+                $"SELECT status FROM discord_identity_links WHERE discord_user_id = '{DiscordUser}';"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadSingleText(
+                "SELECT CAST(COUNT(*) AS TEXT) FROM discord_identity_links WHERE is_primary = 1 AND status = 'ACTIVE';"));
+    }
 }

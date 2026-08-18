@@ -18,9 +18,6 @@ public sealed class CommandApiClosureTests
         "IBankAdministrationApplicationService.RetireBankAsync",
         "IBankAdministrationApplicationService.StartCreateBankAsync",
         "IBankAdministrationApplicationService.UpdateBankPolicyAsync",
-        "ICustomerAccountApplicationService.ConsumeLinkGrantAsync",
-        "ICustomerAccountApplicationService.CreateLinkGrantAsync",
-        "ICustomerAccountApplicationService.UnlinkDiscordIdentityAsync",
     ];
 
     private static readonly string[] EntriesWithoutCanonicalUseCase =

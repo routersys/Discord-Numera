@@ -3,4 +3,12 @@ namespace Numera.Application.Common;
 public static partial class BankingErrorCodes
 {
     public static string GuildEconomyNotFound { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 50);
+
+    public static string LinkGrantInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 51);
+
+    public static string LinkNotFound { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 52);
+
+    public static string LinkGrantExpired { get; } = ErrorCodeFormat.Compose(ErrorCategory.OperationExpired, 50);
+
+    public static string LastLinkCannotBeRemoved { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 50);
 }

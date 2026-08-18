@@ -37,9 +37,21 @@ public interface ICustomerAccountApplicationService
     Task<Result<CustomerAccountStatusView>> GetCustomerAccountStatusAsync(
         GetCustomerAccountStatusQuery query,
         CancellationToken cancellationToken);
+
+    Task<Result<LinkGrantView>> CreateLinkGrantAsync(
+        CreateLinkGrantCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<CustomerAccountView>> ConsumeLinkGrantAsync(
+        ConsumeLinkGrantCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result> UnlinkDiscordIdentityAsync(
+        UnlinkDiscordIdentityCommand command,
+        CancellationToken cancellationToken);
 }
 
-public sealed class CustomerAccountApplicationService : ICustomerAccountApplicationService
+public sealed partial class CustomerAccountApplicationService : ICustomerAccountApplicationService
 {
     public const string OperationType = "ACCOUNT_REGISTER";
     public const string RegisteredEventType = "CUSTOMER_ACCOUNT_REGISTERED";

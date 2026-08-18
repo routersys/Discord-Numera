@@ -13,6 +13,9 @@ public static class ViewKeys
     public const string ManageCurrencyCreated = "view.manage.currency_created";
     public const string ManageCurrencyIssued = "view.manage.currency_issued";
     public const string ManageCurrencyBurned = "view.manage.currency_burned";
+    public const string AccountLinkIssued = "view.account.link_issued";
+    public const string AccountLinkConsumed = "view.account.link_consumed";
+    public const string AccountUnlinked = "view.account.unlinked";
     public const string BankList = "view.bank.list";
     public const string BankListEmpty = "view.bank.list_empty";
     public const string BankAccountList = "view.bank.accounts";
@@ -67,6 +70,12 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageCurrencyBurned + ".title"] = "通貨を償却しました",
             [ViewKeys.ManageCurrencyBurned + ".description"] =
                 "{amount} を償却しました。発行済のベースマネーは {baseMoneySupply} です。",
+            [ViewKeys.AccountLinkIssued + ".title"] = "連携コードを発行しました",
+            [ViewKeys.AccountLinkIssued + ".description"] = "連携コードは {code} です。10分で失効します。",
+            [ViewKeys.AccountLinkConsumed + ".title"] = "連携が完了しました",
+            [ViewKeys.AccountLinkConsumed + ".description"] = "ハンドル {publicHandle} のアカウントへ連携しました。",
+            [ViewKeys.AccountUnlinked + ".title"] = "連携を解除しました",
+            [ViewKeys.AccountUnlinked + ".description"] = "この Discord アカウントの連携を解除しました。",
             [ViewKeys.BankList + ".title"] = "銀行の一覧",
             [ViewKeys.BankList + ".description"] = "{count}件の銀行があります。{items}",
             [ViewKeys.BankListEmpty + ".title"] = "銀行がありません",

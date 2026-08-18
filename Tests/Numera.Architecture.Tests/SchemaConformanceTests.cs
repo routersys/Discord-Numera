@@ -17,7 +17,7 @@ public sealed class SchemaConformanceTests
 
     private static readonly string[] TablesAwaitingImplementation =
     [
-        "account_link_grants",
+
         "account_product_version_assignments",
         "account_restrictions",
         "atm_cash_cassettes",

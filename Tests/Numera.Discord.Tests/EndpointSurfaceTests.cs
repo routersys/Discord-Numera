@@ -18,8 +18,10 @@ public sealed class EndpointSurfaceTests
         CollectionAssert.AreEqual(
             new[]
             {
+                "account link",
                 "account register",
                 "account status",
+                "account unlink",
                 "bank accounts",
                 "bank list",
                 "bank open",

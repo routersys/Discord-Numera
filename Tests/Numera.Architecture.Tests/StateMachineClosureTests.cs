@@ -11,6 +11,7 @@ public sealed class StateMachineClosureTests
 {
     private static readonly Dictionary<string, string[]> DomainStatusTokens = new(StringComparer.Ordinal)
     {
+        ["account_link_grants"] = Tokens<AccountLinkGrantStatus>(static value => value.ToToken()),
         ["account_opening_applications"] =
             Tokens<AccountOpeningApplicationStatus>(static value => value.ToToken()),
         ["parties"] = Tokens<PartyStatus>(static value => value.ToToken()),
