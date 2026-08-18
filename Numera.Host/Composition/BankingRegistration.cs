@@ -36,6 +36,7 @@ internal static class BankingRegistration
             new SqliteBankingReadGateway(provider.GetRequiredService<SqliteConnectionFactory>()));
 
         services.AddSingleton<PaymentApplicationService>();
+        services.AddSingleton<ISuggestionApplicationService, SuggestionApplicationService>();
         services.AddSingleton<ICustomerAccountApplicationService, CustomerAccountApplicationService>();
         services.AddSingleton<IBankAccountApplicationService, BankAccountApplicationService>();
         services.AddSingleton<ICurrencyAdministrationApplicationService, CurrencyAdministrationApplicationService>();

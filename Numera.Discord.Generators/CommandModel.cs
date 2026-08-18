@@ -216,6 +216,8 @@ internal sealed class HandlerDescriptor
     internal HandlerDescriptor(
         string key,
         string endpointDisplayName,
+        string endpointTypeFullyQualifiedName,
+        string endpointMethodName,
         string returnTypeDisplayName,
         bool endsWithCancellationToken,
         ImmutableArray<string> parameterTypeDisplayNames,
@@ -224,6 +226,8 @@ internal sealed class HandlerDescriptor
     {
         Key = key;
         EndpointDisplayName = endpointDisplayName;
+        EndpointTypeFullyQualifiedName = endpointTypeFullyQualifiedName;
+        EndpointMethodName = endpointMethodName;
         ReturnTypeDisplayName = returnTypeDisplayName;
         EndsWithCancellationToken = endsWithCancellationToken;
         ParameterTypeDisplayNames = parameterTypeDisplayNames;
@@ -234,6 +238,10 @@ internal sealed class HandlerDescriptor
     internal string Key { get; }
 
     internal string EndpointDisplayName { get; }
+
+    internal string EndpointTypeFullyQualifiedName { get; }
+
+    internal string EndpointMethodName { get; }
 
     internal string ReturnTypeDisplayName { get; }
 

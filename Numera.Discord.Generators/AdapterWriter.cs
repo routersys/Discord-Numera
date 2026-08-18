@@ -6,6 +6,33 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace Numera.Discord.Generators;
 
+internal sealed class AdapterAutocomplete
+{
+    internal AdapterAutocomplete(
+        string commandName,
+        string commandPath,
+        string optionName,
+        string providerType,
+        string providerMethod)
+    {
+        CommandName = commandName;
+        CommandPath = commandPath;
+        OptionName = optionName;
+        ProviderType = providerType;
+        ProviderMethod = providerMethod;
+    }
+
+    internal string CommandName { get; }
+
+    internal string CommandPath { get; }
+
+    internal string OptionName { get; }
+
+    internal string ProviderType { get; }
+
+    internal string ProviderMethod { get; }
+}
+
 internal sealed class AdapterModule
 {
     internal AdapterModule(string typeName, CommandGroupDescriptor? group)
@@ -22,8 +49,11 @@ internal sealed class AdapterModule
 
     internal List<AdapterModule> Children { get; } = [];
 
+    internal List<AdapterAutocomplete> Autocompletes { get; } = [];
+
     internal IEnumerable<string> EndpointTypes =>
         Commands.Select(static command => command.EndpointTypeFullyQualifiedName)
+            .Concat(Autocompletes.Select(static entry => entry.ProviderType))
             .Distinct(System.StringComparer.Ordinal)
             .OrderBy(static name => name, System.StringComparer.Ordinal);
 }
@@ -110,7 +140,47 @@ internal static class AdapterWriter
             child.Commands.Add(command);
         }
 
+        foreach (AdapterModule module in ordered)
+        {
+            AttachAutocompletes(module, surface);
+
+            foreach (AdapterModule child in module.Children)
+            {
+                AttachAutocompletes(child, surface);
+            }
+        }
+
         return [.. ordered];
+    }
+
+    private static void AttachAutocompletes(AdapterModule module, CommandSurface surface)
+    {
+        foreach (CommandDescriptor command in module.Commands)
+        {
+            foreach (OptionDescriptor option in command.Options)
+            {
+                if (string.IsNullOrEmpty(option.AutocompleteProviderKey))
+                {
+                    continue;
+                }
+
+                HandlerDescriptor? provider = surface.AutocompleteProviders.FirstOrDefault(
+                    candidate => string.Equals(
+                        candidate.Key, option.AutocompleteProviderKey, System.StringComparison.Ordinal));
+
+                if (provider is null)
+                {
+                    continue;
+                }
+
+                module.Autocompletes.Add(new AdapterAutocomplete(
+                    command.Name,
+                    command.CanonicalPath,
+                    option.Name,
+                    provider.EndpointTypeFullyQualifiedName,
+                    provider.EndpointMethodName));
+            }
+        }
     }
 
     private static AdapterModule Resolve(
@@ -222,6 +292,14 @@ internal static class AdapterWriter
             WriteCommand(builder, command, depth + 1);
         }
 
+        foreach (AdapterAutocomplete entry in module.Autocompletes
+            .OrderBy(static entry => entry.CommandName, System.StringComparer.Ordinal)
+            .ThenBy(static entry => entry.OptionName, System.StringComparer.Ordinal))
+        {
+            builder.AppendLine();
+            WriteAutocomplete(builder, entry, depth + 1);
+        }
+
         foreach (AdapterModule child in module.Children
             .OrderBy(static child => child.TypeName, System.StringComparer.Ordinal))
         {
@@ -232,6 +310,37 @@ internal static class AdapterWriter
         builder.Append(pad).AppendLine("}");
     }
 
+
+    private static void WriteAutocomplete(StringBuilder builder, AdapterAutocomplete entry, int depth)
+    {
+        string pad = Repeat(depth);
+        string field = FieldName(entry.ProviderType);
+
+        builder.Append(pad).Append("[AutocompleteCommand(\"").Append(Escape(entry.OptionName))
+            .Append("\", \"").Append(Escape(entry.CommandName)).AppendLine("\")]");
+        builder.Append(pad).Append("public async Task ").Append(MethodName(entry)).AppendLine("()");
+        builder.Append(pad).AppendLine("{");
+        builder.Append(pad).Append(Indent)
+            .AppendLine("System.Collections.Generic.IReadOnlyList<DiscordAutocompleteOption> options =");
+        builder.Append(pad).Append(Indent).Append(Indent).Append("await ").Append(field).Append('.')
+            .Append(entry.ProviderMethod).AppendLine("(");
+        builder.Append(pad).Append(Indent).Append(Indent).Append(Indent)
+            .Append("dispatcher.CreateAutocompleteRequest(Context, \"").Append(Escape(entry.CommandPath))
+            .AppendLine("\"),");
+        builder.Append(pad).Append(Indent).Append(Indent).Append(Indent)
+            .AppendLine("CancellationToken.None).ConfigureAwait(false);");
+        builder.AppendLine();
+        builder.Append(pad).Append(Indent)
+            .AppendLine("await dispatcher.DispatchAutocompleteAsync(");
+        builder.Append(pad).Append(Indent).Append(Indent).AppendLine("Context,");
+        builder.Append(pad).Append(Indent).Append(Indent).AppendLine("options,");
+        builder.Append(pad).Append(Indent).Append(Indent)
+            .AppendLine("CancellationToken.None).ConfigureAwait(false);");
+        builder.Append(pad).AppendLine("}");
+    }
+
+    private static string MethodName(AdapterAutocomplete entry) =>
+        ModuleName(entry.CommandName + "-" + entry.OptionName).Replace("Module", string.Empty) + "Autocomplete";
     private static void WriteCommand(StringBuilder builder, CommandDescriptor command, int depth)
     {
         string pad = Repeat(depth);

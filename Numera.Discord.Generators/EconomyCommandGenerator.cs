@@ -136,6 +136,8 @@ public sealed class EconomyCommandGenerator : IIncrementalGenerator
         return new HandlerDescriptor(
             ReadString(attribute, keyArgumentIndex) ?? string.Empty,
             method.ToDisplayString(),
+            method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            method.Name,
             method.ReturnType.ToDisplayString(),
             EndsWithCancellationToken(method),
             ReadParameterTypes(method),

@@ -17,6 +17,15 @@ public interface IGeneratedEndpointDispatcher
 
     DiscordMessageInput CreateMessageInput(global::Discord.IMessage message);
 
+    DiscordAutocompleteRequest CreateAutocompleteRequest(
+        SocketInteractionContext context,
+        string commandPath);
+
+    Task<ResponsePlanFailure> DispatchAutocompleteAsync(
+        SocketInteractionContext context,
+        IReadOnlyList<DiscordAutocompleteOption> options,
+        CancellationToken cancellationToken);
+
     Task<ResponsePlanFailure> DispatchAsync(
         SocketInteractionContext context,
         DiscordInteractionKind kind,
@@ -79,6 +88,38 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
     {
         ArgumentNullException.ThrowIfNull(message);
         return new DiscordMessageInput(message.Id, message.Channel.Id, message.Author.Id);
+    }
+
+    public DiscordAutocompleteRequest CreateAutocompleteRequest(
+        SocketInteractionContext context,
+        string commandPath)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(commandPath);
+
+        global::Discord.WebSocket.SocketAutocompleteInteraction interaction =
+            (global::Discord.WebSocket.SocketAutocompleteInteraction)context.Interaction;
+
+        return new DiscordAutocompleteRequest(
+            interaction.User.Id,
+            interaction.GuildId ?? 0UL,
+            commandPath,
+            interaction.Data.Current.Name ?? string.Empty,
+            interaction.Data.Current.Value?.ToString() ?? string.Empty);
+    }
+
+    public Task<ResponsePlanFailure> DispatchAutocompleteAsync(
+        SocketInteractionContext context,
+        IReadOnlyList<DiscordAutocompleteOption> options,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(options);
+
+        DiscordInteractionExchange exchange = new(
+            DiscordInteractionKind.Autocomplete, new SocketResponseSink(context.Interaction));
+
+        return executor.ExecuteAutocompleteAsync(exchange, options, cancellationToken);
     }
 
     public Task<ResponsePlanFailure> DispatchAsync(

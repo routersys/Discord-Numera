@@ -33,7 +33,9 @@ public sealed class BankEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> OpenAsync(
         DiscordEndpointContext context,
-        [EconomyOption("bank", "銀行を選びます。", true)] string bank,
+        [EconomyOption("bank", "銀行を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.BankProviderKey)]
+        string bank,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -73,7 +75,9 @@ public sealed class BankEndpoints : IEconomyEndpoint
     public async Task<DiscordEndpointResponse> TransferAsync(
         DiscordEndpointContext context,
         [EconomyOption("source-account", "送金元の口座番号を入力します。", true)] string sourceAccount,
-        [EconomyOption("bank", "送金先の銀行を選びます。", true)] string bank,
+        [EconomyOption("bank", "送金先の銀行を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.BankProviderKey)]
+        string bank,
         [EconomyOption("branch", "送金先の支店番号を入力します。", true)] string branch,
         [EconomyOption("account", "送金先の口座番号を入力します。", true)] string account,
         [EconomyOption("amount", "振込金額を入力します。", true)] long amount,

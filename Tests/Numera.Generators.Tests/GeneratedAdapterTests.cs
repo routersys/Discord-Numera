@@ -298,6 +298,55 @@ public sealed class GeneratedAdapterTests
         }
     }
 
+
+    [TestMethod]
+    public void AnAutocompleteOptionGeneratesAnAutocompleteCommand()
+    {
+        GeneratorRun run = Run("""
+            [EconomyCommandGroup("bank", "銀行の機能です。")]
+            public sealed class BankEndpoints
+            {
+                [EconomySlashCommand("open", "口座を開設します。")]
+                public Task<DiscordEndpointResponse> OpenAsync(
+                    DiscordEndpointContext context,
+                    [EconomyOption("bank", "銀行を選びます。", true)]
+                    [EconomyAutocomplete("bank-suggest")]
+                    string bank,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+
+                [EconomyAutocompleteProvider("bank-suggest")]
+                public Task<IReadOnlyList<DiscordAutocompleteOption>> SuggestBanksAsync(
+                    DiscordAutocompleteRequest request,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult<IReadOnlyList<DiscordAutocompleteOption>>([]);
+            }
+            """);
+
+        AssertCompiles(run);
+        StringAssert.Contains(run.AdapterSource, "[AutocompleteCommand(\"bank\", \"open\")]");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateAutocompleteRequest(Context, \"bank open\")");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.DispatchAutocompleteAsync(");
+        StringAssert.Contains(run.AdapterSource, "bankEndpoints.SuggestBanksAsync(");
+    }
+
+    [TestMethod]
+    public void AnOptionWithoutAutocompleteGeneratesNoAutocompleteCommand()
+    {
+        GeneratorRun run = Run("""
+            public sealed class HelpEndpoints
+            {
+                [EconomySlashCommand("help", "使い方を表示します。")]
+                public Task<DiscordEndpointResponse> ShowAsync(
+                    DiscordEndpointContext context,
+                    CancellationToken cancellationToken) =>
+                    Task.FromResult(DiscordEndpointResponse.NoContent());
+            }
+            """);
+
+        AssertCompiles(run);
+        Assert.IsFalse(run.AdapterSource.Contains("AutocompleteCommand", StringComparison.Ordinal));
+    }
     private static int Occurrences(string text, string value)
     {
         int count = 0;

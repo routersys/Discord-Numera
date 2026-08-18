@@ -32,6 +32,7 @@ public static class DiscordServiceRegistration
         services.AddSingleton<Endpoints.HelpEndpoints>();
         services.AddSingleton<Endpoints.BankEndpoints>();
         services.AddSingleton<Endpoints.ManageEndpoints>();
+        services.AddSingleton<Endpoints.SuggestionEndpoints>();
         services.AddSingleton<DiscordInteractionRouter>();
         services.TryAddSingleton<ICommandManifestProvider, GeneratedCommandManifestProvider>();
         services.AddSingleton<IApplicationCommandGateway>(static provider =>
