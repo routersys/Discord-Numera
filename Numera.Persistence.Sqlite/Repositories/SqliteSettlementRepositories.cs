@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Numera.Application.Abstractions;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
+using Numera.Domain.Identity;
 using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Persistence.Sqlite.Repositories;
@@ -489,9 +490,10 @@ public sealed class SqliteGuildEconomyRepository : IGuildEconomyRepository
     public string? FindGuildId(EconomyScopeId economyScopeId)
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""
-            SELECT guild_id FROM guild_economies WHERE economy_scope_id = $scope AND status = 'ACTIVE';
+            SELECT guild_id FROM guild_economies WHERE economy_scope_id = $scope AND status = $status;
             """);
         command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
+        command.Parameters.AddWithValue("$status", GuildEconomyStatus.Active.ToToken());
 
         return command.ExecuteScalar() as string;
     }
@@ -499,11 +501,12 @@ public sealed class SqliteGuildEconomyRepository : IGuildEconomyRepository
     public EconomyScopeId? FindEconomyScope(ulong guildId)
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""
-            SELECT economy_scope_id FROM guild_economies WHERE guild_id = $guildId AND status = 'ACTIVE';
+            SELECT economy_scope_id FROM guild_economies WHERE guild_id = $guildId AND status = $status;
             """);
         command.Parameters.AddWithValue(
             "$guildId",
             guildId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$status", GuildEconomyStatus.Active.ToToken());
 
         return command.ExecuteScalar() is byte[] bytes
             ? EconomyScopeId.FromValue(EntityIdValue.FromBytes(bytes))

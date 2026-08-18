@@ -83,10 +83,11 @@ public sealed class SqliteAccountingTransactionRepository : IAccountingTransacti
                 currency_id, transaction_type, business_date, occurred_at, posted_at,
                 reverses_transaction_id, status, version)
             VALUES($id, $book, $period, $operation, $currency, $type, $date, $occurred, $posted,
-                $reverses, 'POSTED', 1);
+                $reverses, $status, 1);
             """))
         {
             command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(transaction.Id.Value));
+            command.Parameters.AddWithValue("$status", AccountingTransactionStatus.Posted.ToToken());
             command.Parameters.AddWithValue("$book", SqliteValueMapper.ToBlob(transaction.BookId.Value));
             command.Parameters.AddWithValue("$period", SqliteValueMapper.ToBlob(periodId.Value));
             command.Parameters.AddWithValue(

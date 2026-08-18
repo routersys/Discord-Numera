@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Numera.Application.Abstractions;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 using Numera.Persistence.Sqlite.Transactions;
@@ -88,10 +89,11 @@ public sealed class SqliteBankAdministrationRepository : IBankAdministrationRepo
         using SqliteCommand command = unitOfWork.CreateCommand("""
             INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
                 created_at, version)
-            VALUES($id, $owner, 'COMMERCIAL_BANK', 'OPEN', $created, 1);
+            VALUES($id, $owner, 'COMMERCIAL_BANK', $status, $created, 1);
             """);
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
         command.Parameters.AddWithValue("$owner", SqliteValueMapper.ToBlob(ownerPartyId.Value));
+        command.Parameters.AddWithValue("$status", AccountingBookStatus.Open.ToToken());
         command.Parameters.AddWithValue("$created", createdAt.UnixMilliseconds);
         command.ExecuteNonQuery();
     }
@@ -100,10 +102,11 @@ public sealed class SqliteBankAdministrationRepository : IBankAdministrationRepo
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""
             INSERT INTO branches(branch_id, bank_id, branch_code, name, status, created_at, closed_at, version)
-            VALUES($id, $bank, $code, $name, 'ACTIVE', $created, NULL, 1);
+            VALUES($id, $bank, $code, $name, $status, $created, NULL, 1);
             """);
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
         command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+        command.Parameters.AddWithValue("$status", BranchStatus.Active.ToToken());
         command.Parameters.AddWithValue("$code", branchCode);
         command.Parameters.AddWithValue("$name", name);
         command.Parameters.AddWithValue("$created", createdAt.UnixMilliseconds);

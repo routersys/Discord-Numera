@@ -3,6 +3,7 @@ using Numera.Application.Abstractions;
 using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
+using Numera.Domain.Identity;
 using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Persistence.Sqlite.Repositories;
@@ -91,9 +92,10 @@ public sealed class SqliteCurrencyRepository : ICurrencyRepository
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""
             SELECT 1 FROM guild_economies
-            WHERE economy_scope_id = $scope AND status = 'ACTIVE';
+            WHERE economy_scope_id = $scope AND status = $status;
             """);
         command.Parameters.AddWithValue("$scope", SqliteValueMapper.ToBlob(economyScopeId.Value));
+        command.Parameters.AddWithValue("$status", GuildEconomyStatus.Active.ToToken());
 
         return command.ExecuteScalar() is not null;
     }

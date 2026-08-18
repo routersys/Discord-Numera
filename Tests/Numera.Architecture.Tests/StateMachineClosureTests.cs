@@ -117,17 +117,19 @@ public sealed class StateMachineClosureTests
             Tokens<DepositInsuranceClaimStatus>(static value => value.ToToken()),
         ["bank_treasury_fx_accounts"] =
             Tokens<BankTreasuryFxAccountStatus>(static value => value.ToToken()),
+        ["accounting_books"] = Tokens<AccountingBookStatus>(static value => value.ToToken()),
+        ["accounting_periods"] = Tokens<AccountingPeriodStatus>(static value => value.ToToken()),
+        ["accounting_transactions"] =
+            Tokens<AccountingTransactionStatus>(static value => value.ToToken()),
+        ["branches"] = Tokens<BranchStatus>(static value => value.ToToken()),
+        ["guild_economies"] = Tokens<GuildEconomyStatus>(static value => value.ToToken()),
+        ["idempotency_records"] = Tokens<IdempotencyRecordStatus>(static value => value.ToToken()),
+        ["prudential_policy_versions"] =
+            Tokens<PrudentialPolicyVersionStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
     [
-        "accounting_books",
-        "accounting_periods",
-        "accounting_transactions",
-        "branches",
-        "guild_economies",
-        "idempotency_records",
-        "prudential_policy_versions",
     ];
 
     private static string[] Tokens<TStatus>(Func<TStatus, string> toToken)
@@ -328,7 +330,7 @@ internal sealed class SchemaFixture : IDisposable
 
         if (check < 0)
         {
-            return [];
+            return SingleTokenOf(sql);
         }
 
         int open = check + "CHECK(status IN (".Length;
@@ -341,6 +343,21 @@ internal sealed class SchemaFixture : IDisposable
                 .Select(static token => token.Trim().Trim('\''))
                 .Order(StringComparer.Ordinal),
         ];
+    }
+
+    private static string[] SingleTokenOf(string sql)
+    {
+        int equality = sql.IndexOf("CHECK(status = '", StringComparison.Ordinal);
+
+        if (equality < 0)
+        {
+            return [];
+        }
+
+        int open = equality + "CHECK(status = '".Length;
+        int close = sql.IndexOf('\'', open);
+
+        return close < 0 ? [] : [sql[open..close]];
     }
 
     private static string? StatusColumn(string sql)

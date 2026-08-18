@@ -57,10 +57,11 @@ public sealed class SqliteEconomyScopeReadRepository : IEconomyScopeReadReposito
             SELECT economy_scope_id
             FROM guild_economies
             WHERE guild_id = $guildId
-              AND status = 'ACTIVE'
+              AND status = $status
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("$guildId", guildId.ToString(CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$status", GuildEconomyStatus.Active.ToToken());
 
         object? value = command.ExecuteScalar();
 
