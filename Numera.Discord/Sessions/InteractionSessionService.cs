@@ -51,25 +51,32 @@ public sealed class InteractionSessionService
     public const int RawTokenTextLength = 43;
 
     private readonly IBankingWriteGateway writeGateway;
+    private readonly IBankingReadGateway readGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
     private readonly TimeSpan lifetime;
 
     public InteractionSessionService(
         IBankingWriteGateway writeGateway,
+        IBankingReadGateway readGateway,
         IClock clock,
         IIdGenerator idGenerator,
         TimeSpan? lifetime = null)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(readGateway);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.readGateway = readGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
         this.lifetime = lifetime ?? TimeSpan.FromMinutes(InteractionSession.DefaultLifetimeMinutes);
     }
+
+    public EconomyScopeId? FindEconomyScope(ulong guildId) =>
+        readGateway.Execute(context => context.EconomyScopes.FindByGuild(guildId));
 
     public static string CreateRawToken()
     {

@@ -1,3 +1,4 @@
+using Discord.Interactions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Numera.Application.Banking;
@@ -43,6 +44,35 @@ public sealed class HostCompositionTests
         Assert.IsNotNull(host.Services.GetRequiredService<ISettlementMaintenanceRunner>());
         Assert.IsNotNull(host.Services.GetRequiredService<SettlementMaintenanceService>());
         Assert.IsNotNull(host.Services.GetRequiredService<PaymentApplicationService>());
+    }
+
+    [TestMethod]
+    public async Task EveryGeneratedModuleIsAcceptedByTheInteractionService()
+    {
+        using IHost host = Build();
+
+        InteractionService interactions = host.Services.GetRequiredService<InteractionService>();
+
+        await host.Services.GetRequiredService<Numera.Discord.Gateway.IGeneratedModuleRegistrar>()
+            .RegisterAsync(interactions, TestContext.CancellationTokenSource.Token);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "bank:v1:btn:transfer-execute:*",
+                "bank:v1:btn:transfer-input:*",
+                "bank:v1:sel:transfer-source:*",
+            },
+            interactions.ComponentCommands.Select(static command => command.Name)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
+
+        ModalCommandInfo modal = interactions.ModalCommands.Single();
+
+        Assert.AreEqual("bank:v1:modal:transfer:*", modal.Name);
+        CollectionAssert.AreEqual(
+            new[] { "bank-code", "branch-code", "account-number", "amount", "memo" },
+            modal.Modal.TextInputComponents.Select(static component => component.CustomId).ToArray());
     }
 
     [TestMethod]
@@ -104,4 +134,6 @@ public sealed class HostCompositionTests
         Assert.IsTrue(guild.UseGuildRegistration);
         Assert.AreEqual(2UL, guild.TestGuildId);
     }
+
+    public TestContext TestContext { get; set; } = null!;
 }

@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Numera.Discord.Tests" />
+    <InternalsVisibleTo Include="Numera.Host.Tests" />
   </ItemGroup>
 
   <ItemGroup>

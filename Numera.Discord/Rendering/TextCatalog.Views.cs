@@ -27,11 +27,33 @@ internal static class ViewKeys
     public const string Statement = "view.bank.statement";
     public const string StatementEmpty = "view.bank.statement_empty";
 
+    public const string TransferSource = "view.bank.transfer_source";
+    public const string TransferSourceEmpty = "view.bank.transfer_source_empty";
+    public const string TransferInput = "view.bank.transfer_input";
+    public const string TransferModal = "view.bank.transfer_modal";
+    public const string TransferConfirm = "view.bank.transfer_confirm";
+
+    public const string TransferSourcePlaceholder = "label.bank.transfer_source";
+    public const string TransferInputLabel = "label.bank.transfer_input";
+    public const string TransferExecuteLabel = "label.bank.transfer_execute";
+
+    public const string FieldSource = "source";
+    public const string FieldBank = "bank";
+    public const string FieldBranch = "branch";
+    public const string FieldAccount = "account";
+    public const string FieldAmount = "amount";
+    public const string FieldFee = "fee";
+    public const string FieldTotal = "total";
+
     public const string StatusPrefix = "status.";
 
     public const string StatusUnknown = "status.unknown";
 
     public static string StatusOf(string internalToken) => StatusPrefix + internalToken;
+
+    public static string FieldLabel(string viewKey, string field) => viewKey + ".field." + field + ".label";
+
+    public static string FieldValue(string viewKey, string field) => viewKey + ".field." + field + ".value";
 }
 
 public static partial class CanonicalTextCatalog
@@ -100,6 +122,35 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.Statement + ".description"] = "{count}件の取引があります。{items}",
             [ViewKeys.StatementEmpty + ".title"] = "取引がありません",
             [ViewKeys.StatementEmpty + ".description"] = "この口座にはまだ取引がありません。",
+            [ViewKeys.TransferSource + ".title"] = "送金元口座の選択",
+            [ViewKeys.TransferSource + ".description"] = "振込に使う口座を選んでください。",
+            [ViewKeys.TransferSourceEmpty + ".title"] = "対象がありません",
+            [ViewKeys.TransferSourceEmpty + ".description"] = "現在利用できる対象がありません。",
+            [ViewKeys.TransferInput + ".title"] = "振込内容の入力",
+            [ViewKeys.TransferInput + ".description"] =
+                "送金元は {sourceAccount} です。振込内容を入力してください。",
+            [ViewKeys.TransferModal + ".title"] = "振込内容の入力",
+            [ViewKeys.TransferModal + ".description"] = "振込先と金額を入力してください。",
+            [ViewKeys.TransferConfirm + ".title"] = "振込内容の確認",
+            [ViewKeys.TransferConfirm + ".description"] =
+                "内容を確認して、振込を実行してください。実行するまで引落は行いません。",
+            [ViewKeys.FieldLabel(ViewKeys.TransferConfirm, ViewKeys.FieldSource)] = "送金元",
+            [ViewKeys.FieldValue(ViewKeys.TransferConfirm, ViewKeys.FieldSource)] = "{sourceAccount}",
+            [ViewKeys.FieldLabel(ViewKeys.TransferConfirm, ViewKeys.FieldBank)] = "振込先銀行",
+            [ViewKeys.FieldValue(ViewKeys.TransferConfirm, ViewKeys.FieldBank)] = "{institutionCode}",
+            [ViewKeys.FieldLabel(ViewKeys.TransferConfirm, ViewKeys.FieldBranch)] = "振込先支店",
+            [ViewKeys.FieldValue(ViewKeys.TransferConfirm, ViewKeys.FieldBranch)] = "{branchCode}",
+            [ViewKeys.FieldLabel(ViewKeys.TransferConfirm, ViewKeys.FieldAccount)] = "振込先口座",
+            [ViewKeys.FieldValue(ViewKeys.TransferConfirm, ViewKeys.FieldAccount)] = "{accountNumberSuffix}",
+            [ViewKeys.FieldLabel(ViewKeys.TransferConfirm, ViewKeys.FieldAmount)] = "振込金額",
+            [ViewKeys.FieldValue(ViewKeys.TransferConfirm, ViewKeys.FieldAmount)] = "{amount}",
+            [ViewKeys.FieldLabel(ViewKeys.TransferConfirm, ViewKeys.FieldFee)] = "手数料",
+            [ViewKeys.FieldValue(ViewKeys.TransferConfirm, ViewKeys.FieldFee)] = "実行時に確定します",
+            [ViewKeys.FieldLabel(ViewKeys.TransferConfirm, ViewKeys.FieldTotal)] = "合計引落額",
+            [ViewKeys.FieldValue(ViewKeys.TransferConfirm, ViewKeys.FieldTotal)] = "実行時に確定します",
+            [ViewKeys.TransferSourcePlaceholder] = "送金元口座を選んでください",
+            [ViewKeys.TransferInputLabel] = "振込内容を入力",
+            [ViewKeys.TransferExecuteLabel] = "振込を実行",
             [ViewKeys.StatusOf("ACTIVE")] = "利用可能",
             [ViewKeys.StatusOf("OPERATING")] = "利用可能",
             [ViewKeys.StatusOf("PENDING")] = "処理待ち",

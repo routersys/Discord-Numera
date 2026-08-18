@@ -1,32 +1,42 @@
+using System.Globalization;
 using Numera.Application.Banking;
 using Numera.Application.Common;
 using Numera.Discord.Abstractions;
 using Numera.Discord.Gateway;
 using Numera.Discord.Rendering;
+using Numera.Discord.Sessions;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 
 namespace Numera.Discord.Endpoints;
 
 [EconomyCommandGroup("bank", "銀行口座を操作します。")]
-public sealed class BankEndpoints : IEconomyEndpoint
+public sealed partial class BankEndpoints : IEconomyEndpoint
 {
     private readonly IBankAccountApplicationService accounts;
     private readonly IPaymentApplicationService payments;
     private readonly ICustomerAccountApplicationService customers;
+    private readonly IBankQueryApplicationService queries;
+    private readonly InteractionSessionService sessions;
 
     public BankEndpoints(
         IBankAccountApplicationService accounts,
         IPaymentApplicationService payments,
-        ICustomerAccountApplicationService customers)
+        ICustomerAccountApplicationService customers,
+        IBankQueryApplicationService queries,
+        InteractionSessionService sessions)
     {
         ArgumentNullException.ThrowIfNull(accounts);
         ArgumentNullException.ThrowIfNull(payments);
         ArgumentNullException.ThrowIfNull(customers);
+        ArgumentNullException.ThrowIfNull(queries);
+        ArgumentNullException.ThrowIfNull(sessions);
 
         this.accounts = accounts;
         this.payments = payments;
         this.customers = customers;
+        this.queries = queries;
+        this.sessions = sessions;
     }
 
     [EconomySlashCommand("open", "銀行口座を開設します。")]
@@ -74,17 +84,14 @@ public sealed class BankEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> TransferAsync(
         DiscordEndpointContext context,
-        [EconomyOption("source-account", "送金元の口座番号を入力します。", true)] string sourceAccount,
-        [EconomyOption("bank", "送金先の銀行を選びます。", true)]
-        [EconomyAutocomplete(SuggestionEndpoints.BankProviderKey)]
-        string bank,
-        [EconomyOption("branch", "送金先の支店番号を入力します。", true)] string branch,
-        [EconomyOption("account", "送金先の口座番号を入力します。", true)] string account,
-        [EconomyOption("amount", "振込金額を入力します。", true)] long amount,
-        [EconomyOption("memo", "摘要を入力します。", false)] string memo,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        if (sessions.FindEconomyScope(context.GuildId) is not { } scope)
+        {
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
 
         Result<CustomerAccountStatusView> customer = await ResolveCustomerAsync(context, cancellationToken)
             .ConfigureAwait(false);
@@ -94,45 +101,79 @@ public sealed class BankEndpoints : IEconomyEndpoint
             return EndpointFailures.From(customer.Error!);
         }
 
-        if (!DepositAccountReference.TryParse(sourceAccount, out DepositAccountId sourceDepositAccountId))
-        {
-            return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
-        }
-
-        Result<PaymentOrderView> result = await payments
-            .CreatePaymentOrderAsync(
-                new CreatePaymentOrderCommand(
-                    context.GuildId,
-                    customer.Value.Id,
-                    sourceDepositAccountId,
-                    bank,
-                    branch,
-                    account,
-                    amount,
-                    string.IsNullOrEmpty(memo) ? null : memo,
-                    context.InteractionId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        Result<BankAccountPageView> accounts = await queries
+            .ListCustomerBankAccountsAsync(
+                new ListCustomerBankAccountsQuery(customer.Value.Id, null),
                 cancellationToken)
             .ConfigureAwait(false);
 
-        if (!result.IsSuccess)
+        if (!accounts.IsSuccess)
         {
-            return EndpointFailures.From(result.Error!);
+            return EndpointFailures.From(accounts.Error!);
+        }
+
+        TransferCandidate[] candidates = Candidates(accounts.Value.Items);
+
+        if (candidates.Length == 0)
+        {
+            return DiscordEndpointResponse.Message(
+                ViewKeys.TransferSourceEmpty,
+                new Dictionary<string, string>(StringComparer.Ordinal));
+        }
+
+        Result<InteractionSessionTicket> ticket = await sessions
+            .OpenAsync(
+                new OpenInteractionSessionRequest(
+                    context.UserId,
+                    context.GuildId,
+                    scope,
+                    TransferFlow.FlowType,
+                    TransferFlow.SourceSelectState,
+                    TransferPayloadCodec.Write(TransferPayloadCodec.Empty with { Candidates = candidates })),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!ticket.IsSuccess)
+        {
+            return EndpointFailures.From(ticket.Error!);
         }
 
         return DiscordEndpointResponse.Message(
-            result.Value.Status == PaymentOrderStatus.Completed
-                ? ViewKeys.TransferCompleted
-                : ViewKeys.TransferAccepted,
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["amount"] = result.Value.Amount.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["fee"] = result.Value.FeeAmount.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["availableBalance"] =
-                    result.Value.SourceAvailableBalance.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            });
+            ViewKeys.TransferSource,
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            DiscordResponseBody.WithComponents(new DiscordResponseComponents(
+                new DiscordResponseSelect(
+                    DiscordCustomId.Select(TransferFlow.SourceAction, ticket.Value.RawToken),
+                    ViewKeys.TransferSourcePlaceholder,
+                    [
+                        .. candidates.Select(static candidate => new DiscordResponseSelectOption(
+                            Describe(candidate),
+                            TransferPayloadCodec.OptionValue(candidate.Token))),
+                    ]),
+                [])));
     }
 
+    private static TransferCandidate[] Candidates(IReadOnlyList<BankAccountItem> items)
+    {
+        List<TransferCandidate> candidates = [];
+
+        foreach (BankAccountItem item in items)
+        {
+            if (item.Status != DepositAccountStatus.Active
+                || candidates.Count == DiscordResponseSelect.MaximumOptionCount)
+            {
+                continue;
+            }
+
+            candidates.Add(new TransferCandidate(
+                candidates.Count.ToString(CultureInfo.InvariantCulture),
+                item.DepositAccountId.Value.ToString(),
+                item.InstitutionCode,
+                item.AccountNumberSuffix));
+        }
+
+        return [.. candidates];
+    }
 
     [EconomySlashCommand("close", "口座の解約を申し込みます。")]
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]

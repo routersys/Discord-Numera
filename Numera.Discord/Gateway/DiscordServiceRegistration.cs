@@ -31,6 +31,7 @@ public static class DiscordServiceRegistration
         services.AddSingleton<IAuthorizationResolver, AuthorizationResolver>();
         services.AddSingleton<Endpoints.AccountEndpoints>();
         services.AddSingleton<Endpoints.HelpEndpoints>();
+        services.AddSingleton<Sessions.InteractionSessionService>();
         services.AddSingleton<Endpoints.BankEndpoints>();
         services.AddSingleton<Endpoints.ManageEndpoints>();
         services.AddSingleton<Endpoints.SuggestionEndpoints>();

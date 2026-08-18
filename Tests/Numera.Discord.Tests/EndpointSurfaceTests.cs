@@ -1,3 +1,4 @@
+using Numera.Discord.Abstractions;
 using Numera.Discord.Commands;
 using Numera.Discord.Gateway;
 using Numera.Discord.Routing;
@@ -50,6 +51,7 @@ public sealed class EndpointSurfaceTests
                 "AccountModule",
                 "BankModule",
                 "ManageModule",
+                "NumeraDiscordEndpointsBankEndpointsInteractionsModule",
                 "NumeraDiscordEndpointsHelpEndpointsModule",
                 "SystemModule",
             },
@@ -71,7 +73,7 @@ public sealed class EndpointSurfaceTests
     }
 
     [TestMethod]
-    public void TheTransferCommandCarriesItsOptions()
+    public void TheTransferCommandStartsTheSelectFlowWithoutOptions()
     {
         GeneratedCommandManifestProvider provider = new();
 
@@ -82,10 +84,7 @@ public sealed class EndpointSurfaceTests
             .Single(static option => string.Equals(option.Name, "transfer", StringComparison.Ordinal));
 
         Assert.AreEqual(GeneratedOptionType.SubCommand, transfer.Type);
-        CollectionAssert.AreEqual(
-            new[] { "source-account", "bank", "branch", "account", "amount", "memo" },
-            transfer.Options.Select(static option => option.Name).ToArray());
-        Assert.IsFalse(transfer.Options.Single(static o => o.Name == "memo").Required);
+        Assert.AreEqual(0, transfer.Options.Count);
     }
 
     [TestMethod]
@@ -96,15 +95,41 @@ public sealed class EndpointSurfaceTests
         CommandManifestEntry bank = provider.PrimaryCommands()
             .Single(static entry => string.Equals(entry.Name, "bank", StringComparison.Ordinal));
 
-        foreach (string subcommand in new[] { "open", "transfer" })
-        {
-            CommandOptionManifest option = bank.Options
-                .Single(entry => string.Equals(entry.Name, subcommand, StringComparison.Ordinal))
-                .Options
-                .Single(static entry => string.Equals(entry.Name, "bank", StringComparison.Ordinal));
+        CommandOptionManifest option = bank.Options
+            .Single(static entry => string.Equals(entry.Name, "open", StringComparison.Ordinal))
+            .Options
+            .Single(static entry => string.Equals(entry.Name, "bank", StringComparison.Ordinal));
 
-            Assert.IsTrue(option.Autocomplete, subcommand);
-            Assert.AreEqual(0, option.Choices.Count, subcommand);
-        }
+        Assert.IsTrue(option.Autocomplete);
+        Assert.AreEqual(0, option.Choices.Count);
+    }
+
+    [TestMethod]
+    public void TheTransferFlowDeclaresItsComponentsAndModal()
+    {
+        CollectionAssert.AreEqual(
+            new[] { "transfer-execute", "transfer-input", "transfer-source" },
+            EconomyCommandManifest.ComponentActions.Order(StringComparer.Ordinal).ToArray());
+
+        CollectionAssert.AreEqual(
+            new[] { "transfer" },
+            EconomyCommandManifest.ModalActions.ToArray());
+    }
+
+    [TestMethod]
+    public void TheTransferModalCarriesTheCanonicalFields()
+    {
+        EconomyGeneratedModalFormCatalog catalog = new();
+
+        CollectionAssert.AreEqual(
+            new[] { "bank-code", "branch-code", "account-number", "amount", "memo" },
+            catalog.Resolve("transfer").Select(static field => field.CustomId).ToArray());
+
+        DiscordModalFieldDefinition memo = catalog.Resolve("transfer")[4];
+
+        Assert.AreEqual(EconomyModalFieldStyle.Paragraph, memo.Style);
+        Assert.IsFalse(memo.Required);
+        Assert.AreEqual(100, memo.MaximumLength);
+        Assert.IsEmpty(catalog.Resolve("unknown"));
     }
 }

@@ -4,6 +4,7 @@ using Numera.Discord.Sessions;
 using Numera.Domain.Common;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Migrations;
+using Numera.Persistence.Sqlite.Repositories;
 using Numera.Persistence.Sqlite.Transactions;
 
 namespace Numera.Application.Tests;
@@ -60,6 +61,7 @@ public sealed class InteractionSessionTests
 
             harness.Service = new InteractionSessionService(
                 new SqliteBankingWriteGateway(new FinancialWriteCoordinator(harness.Coordinator)),
+                new SqliteBankingReadGateway(harness.ConnectionFactory),
                 harness.Clock,
                 new SequentialIdGenerator(5_000));
 
