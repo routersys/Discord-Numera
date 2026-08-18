@@ -17,4 +17,10 @@ public static partial class InvariantViolationCode
     public const string PrudentialPolicyVersionStatusUnknown = "PRUDENTIAL_POLICY_VERSION_STATUS_UNKNOWN";
     public const string IdempotencyRecordTransitionInvalid = "IDEMPOTENCY_RECORD_TRANSITION_INVALID";
     public const string IdempotencyRecordStatusUnknown = "IDEMPOTENCY_RECORD_STATUS_UNKNOWN";
+    public const string InboxEventTransitionInvalid = "INBOX_EVENT_TRANSITION_INVALID";
+    public const string InboxEventStatusUnknown = "INBOX_EVENT_STATUS_UNKNOWN";
+    public const string InterestPostingBatchTransitionInvalid = "INTEREST_POSTING_BATCH_TRANSITION_INVALID";
+    public const string InterestPostingBatchStatusUnknown = "INTEREST_POSTING_BATCH_STATUS_UNKNOWN";
+    public const string ReconciliationRunTransitionInvalid = "RECONCILIATION_RUN_TRANSITION_INVALID";
+    public const string ReconciliationRunStatusUnknown = "RECONCILIATION_RUN_STATUS_UNKNOWN";
 }

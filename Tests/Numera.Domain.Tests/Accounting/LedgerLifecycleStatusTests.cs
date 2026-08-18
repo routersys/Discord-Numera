@@ -97,6 +97,45 @@ public sealed class LedgerLifecycleStatusTests
     }
 
     [TestMethod]
+    public void AnInboxEventIsProcessedOrFailedOnce()
+    {
+        InboxEventStatusCatalog.EnsureCreatable(InboxEventStatus.Received);
+        InboxEventStatusCatalog.EnsureTransition(InboxEventStatus.Received, InboxEventStatus.Processed);
+        InboxEventStatusCatalog.EnsureTransition(InboxEventStatus.Received, InboxEventStatus.Failed);
+
+        Assert.ThrowsExactly<InvariantViolationException>(() =>
+            InboxEventStatusCatalog.EnsureTransition(
+                InboxEventStatus.Failed, InboxEventStatus.Processed));
+    }
+
+    [TestMethod]
+    public void AFailedInterestBatchIsTerminal()
+    {
+        InterestPostingBatchStatusCatalog.EnsureTransition(
+            InterestPostingBatchStatus.Pending, InterestPostingBatchStatus.Posted);
+        InterestPostingBatchStatusCatalog.EnsureTransition(
+            InterestPostingBatchStatus.Pending, InterestPostingBatchStatus.Failed);
+
+        Assert.IsFalse(InterestPostingBatchStatusCatalog.IsAllowed(
+            InterestPostingBatchStatus.Failed, InterestPostingBatchStatus.Pending));
+    }
+
+    [TestMethod]
+    public void AReconciliationRunEndsInOneOfThreeStates()
+    {
+        ReconciliationRunStatusCatalog.EnsureTransition(
+            ReconciliationRunStatus.Running, ReconciliationRunStatus.Succeeded);
+        ReconciliationRunStatusCatalog.EnsureTransition(
+            ReconciliationRunStatus.Running, ReconciliationRunStatus.IssuesFound);
+        ReconciliationRunStatusCatalog.EnsureTransition(
+            ReconciliationRunStatus.Running, ReconciliationRunStatus.Failed);
+
+        Assert.ThrowsExactly<InvariantViolationException>(() =>
+            ReconciliationRunStatusCatalog.EnsureTransition(
+                ReconciliationRunStatus.IssuesFound, ReconciliationRunStatus.Succeeded));
+    }
+
+    [TestMethod]
     public void EveryTokenRoundTrips()
     {
         Assert.AreEqual(
@@ -112,6 +151,13 @@ public sealed class LedgerLifecycleStatusTests
         Assert.AreEqual(
             IdempotencyRecordStatus.InProgress,
             IdempotencyRecordStatusCatalog.ParseToken("IN_PROGRESS"));
+
+        Assert.AreEqual(InboxEventStatus.Failed, InboxEventStatusCatalog.ParseToken("FAILED"));
+        Assert.AreEqual(
+            InterestPostingBatchStatus.Posted, InterestPostingBatchStatusCatalog.ParseToken("POSTED"));
+        Assert.AreEqual(
+            ReconciliationRunStatus.IssuesFound,
+            ReconciliationRunStatusCatalog.ParseToken("ISSUES_FOUND"));
 
         Assert.ThrowsExactly<InvariantViolationException>(() =>
             AccountingTransactionStatusCatalog.ParseToken("REVERSED"));

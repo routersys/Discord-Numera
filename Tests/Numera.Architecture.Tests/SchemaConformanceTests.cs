@@ -17,19 +17,6 @@ public sealed class SchemaConformanceTests
 
     private static readonly string[] TablesAwaitingImplementation =
     [
-
-        "account_product_version_assignments",
-        "account_restrictions",
-        "authorization_decisions",
-        "bank_assets",
-        "inbox_events",
-        "interest_accruals",
-        "interest_posting_batches",
-        "operation_results",
-        "reconciliation_issues",
-        "reconciliation_runs",
-        "resolution_transfers",
-        "routing_aliases",
     ];
 
     [TestMethod]

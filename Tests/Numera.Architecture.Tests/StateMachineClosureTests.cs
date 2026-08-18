@@ -126,6 +126,10 @@ public sealed class StateMachineClosureTests
         ["idempotency_records"] = Tokens<IdempotencyRecordStatus>(static value => value.ToToken()),
         ["prudential_policy_versions"] =
             Tokens<PrudentialPolicyVersionStatus>(static value => value.ToToken()),
+        ["inbox_events"] = Tokens<InboxEventStatus>(static value => value.ToToken()),
+        ["interest_posting_batches"] =
+            Tokens<InterestPostingBatchStatus>(static value => value.ToToken()),
+        ["reconciliation_runs"] = Tokens<ReconciliationRunStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
