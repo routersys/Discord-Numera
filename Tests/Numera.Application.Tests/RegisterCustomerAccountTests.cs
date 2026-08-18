@@ -131,7 +131,7 @@ public sealed class RegisterCustomerAccountTests
 
         public Task<Result<CustomerAccountStatusView>> StatusAsync(ulong discordUserId = DiscordUser) =>
             Service.GetCustomerAccountStatusAsync(
-                new GetCustomerAccountStatusQuery(Scope, discordUserId),
+                new GetCustomerAccountStatusQuery(discordUserId),
                 CancellationToken.None);
 
         public async ValueTask DisposeAsync()

@@ -19,9 +19,7 @@ public sealed record CustomerAccountView(
     CustomerAccountStatus Status,
     UtcTimestamp CreatedAt);
 
-public sealed record GetCustomerAccountStatusQuery(
-    EconomyScopeId EconomyScopeId,
-    ulong DiscordUserId);
+public sealed record GetCustomerAccountStatusQuery(ulong DiscordUserId);
 
 public sealed record CustomerAccountStatusView(
     CustomerAccountId Id,

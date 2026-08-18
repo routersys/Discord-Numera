@@ -259,11 +259,15 @@ internal static class AdapterWriter
         }
 
         builder.Append(pad).AppendLine("{");
+        builder.Append(pad).Append(Indent).AppendLine("DiscordEndpointContext context =");
+        builder.Append(pad).Append(Indent).Append(Indent)
+            .Append("await dispatcher.CreateContextAsync(Context, \"").Append(Escape(command.CanonicalPath))
+            .AppendLine("\", CancellationToken.None).ConfigureAwait(false);");
+        builder.AppendLine();
         builder.Append(pad).Append(Indent).AppendLine("DiscordEndpointResponse response =");
         builder.Append(pad).Append(Indent).Append(Indent).Append("await ").Append(field).Append('.')
             .Append(command.EndpointMethodName).AppendLine("(");
-        builder.Append(pad).Append(Indent).Append(Indent).Append(Indent)
-            .Append("dispatcher.CreateContext(Context, \"").Append(Escape(command.CanonicalPath)).AppendLine("\"),");
+        builder.Append(pad).Append(Indent).Append(Indent).Append(Indent).AppendLine("context,");
 
         WriteArguments(builder, command, pad);
 

@@ -17,7 +17,8 @@ public sealed class DiscordEndpointContext
         ulong guildId,
         ulong channelId,
         string locale,
-        string commandPath)
+        string commandPath,
+        AuthorizationLevel level)
     {
         ArgumentNullException.ThrowIfNull(locale);
         ArgumentNullException.ThrowIfNull(commandPath);
@@ -28,6 +29,7 @@ public sealed class DiscordEndpointContext
         ChannelId = channelId;
         Locale = locale;
         CommandPath = commandPath;
+        Level = level;
     }
 
     public ulong InteractionId { get; }
@@ -41,6 +43,8 @@ public sealed class DiscordEndpointContext
     public string Locale { get; }
 
     public string CommandPath { get; }
+
+    public AuthorizationLevel Level { get; }
 }
 
 public sealed class DiscordUserInput

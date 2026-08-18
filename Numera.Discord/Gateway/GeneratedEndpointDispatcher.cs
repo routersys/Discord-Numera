@@ -1,4 +1,5 @@
 using Discord.Interactions;
+using Numera.Application.Common;
 using Numera.Discord.Abstractions;
 using Numera.Discord.Commands;
 
@@ -6,7 +7,10 @@ namespace Numera.Discord.Gateway;
 
 public interface IGeneratedEndpointDispatcher
 {
-    DiscordEndpointContext CreateContext(SocketInteractionContext context, string commandPath);
+    Task<DiscordEndpointContext> CreateContextAsync(
+        SocketInteractionContext context,
+        string commandPath,
+        CancellationToken cancellationToken);
 
     DiscordUserInput CreateUserInput(global::Discord.IUser user);
 
@@ -22,25 +26,42 @@ public interface IGeneratedEndpointDispatcher
 internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
 {
     private readonly IDiscordEndpointExecutor executor;
+    private readonly IAuthorizationResolver authorization;
 
-    public GeneratedEndpointDispatcher(IDiscordEndpointExecutor executor)
+    public GeneratedEndpointDispatcher(
+        IDiscordEndpointExecutor executor,
+        IAuthorizationResolver authorization)
     {
         ArgumentNullException.ThrowIfNull(executor);
+        ArgumentNullException.ThrowIfNull(authorization);
+
         this.executor = executor;
+        this.authorization = authorization;
     }
 
-    public DiscordEndpointContext CreateContext(SocketInteractionContext context, string commandPath)
+    public async Task<DiscordEndpointContext> CreateContextAsync(
+        SocketInteractionContext context,
+        string commandPath,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(commandPath);
 
+        ulong userId = context.Interaction.User.Id;
+        ulong guildId = context.Interaction.GuildId ?? 0UL;
+
+        AuthorizationContext actor = await authorization
+            .ResolveAsync(userId, guildId, context.Interaction.User as global::Discord.IGuildUser, cancellationToken)
+            .ConfigureAwait(false);
+
         return new DiscordEndpointContext(
             context.Interaction.Id,
-            context.Interaction.User.Id,
-            context.Interaction.GuildId ?? 0UL,
+            userId,
+            guildId,
             context.Interaction.ChannelId ?? 0UL,
             context.Interaction.UserLocale ?? string.Empty,
-            commandPath);
+            commandPath,
+            EndpointAuthorization.ToContract(actor.Level));
     }
 
     public DiscordUserInput CreateUserInput(global::Discord.IUser user)

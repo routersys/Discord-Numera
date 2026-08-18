@@ -43,3 +43,29 @@ public sealed class SqliteCustomerIdentityReadRepository : ICustomerIdentityRead
             UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(4)));
     }
 }
+
+public sealed class SqliteEconomyScopeReadRepository : IEconomyScopeReadRepository
+{
+    private readonly SqliteConnection connection;
+
+    internal SqliteEconomyScopeReadRepository(SqliteConnection connection) => this.connection = connection;
+
+    public EconomyScopeId? FindByGuild(ulong guildId)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT economy_scope_id
+            FROM guild_economies
+            WHERE guild_id = $guildId
+              AND status = 'ACTIVE'
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$guildId", guildId.ToString(CultureInfo.InvariantCulture));
+
+        object? value = command.ExecuteScalar();
+
+        return value is byte[] bytes
+            ? EconomyScopeId.FromValue(EntityIdValue.FromBytes(bytes))
+            : null;
+    }
+}

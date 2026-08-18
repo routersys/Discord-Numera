@@ -54,7 +54,7 @@ public sealed class GeneratedAdapterTests
         StringAssert.Contains(run.AdapterSource, "public sealed class SampleHelpEndpointsModule : InteractionModuleBase<SocketInteractionContext>");
         StringAssert.Contains(run.AdapterSource, "[SlashCommand(\"help\", \"使い方を表示します。\")]");
         StringAssert.Contains(run.AdapterSource, "typeof(SampleHelpEndpointsModule)");
-        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContext(Context, \"help\")");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"help\", CancellationToken.None)");
         StringAssert.Contains(run.AdapterSource, "DiscordInteractionKind.SlashCommand");
     }
 
@@ -76,7 +76,7 @@ public sealed class GeneratedAdapterTests
         AssertCompiles(run);
         StringAssert.Contains(run.AdapterSource, "[Group(\"bank\", \"銀行の機能です。\")]");
         StringAssert.Contains(run.AdapterSource, "public sealed class BankModule");
-        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContext(Context, \"bank list\")");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"bank list\", CancellationToken.None)");
     }
 
     [TestMethod]
@@ -140,7 +140,7 @@ public sealed class GeneratedAdapterTests
         StringAssert.Contains(run.AdapterSource, "[Group(\"bank\", \"銀行の機能です。\")]");
         StringAssert.Contains(run.AdapterSource, "[Group(\"card\", \"カードの機能です。\")]");
         StringAssert.Contains(run.AdapterSource, "public sealed class BankCardModule");
-        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContext(Context, \"bank card issue\")");
+        StringAssert.Contains(run.AdapterSource, "dispatcher.CreateContextAsync(Context, \"bank card issue\", CancellationToken.None)");
         Assert.AreEqual(1, Occurrences(run.AdapterSource, "typeof("));
     }
 

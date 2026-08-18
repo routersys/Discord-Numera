@@ -228,6 +228,7 @@ public sealed class SqliteBankingReadContext : IBankingReadContext
         Currencies = new SqliteCurrencyReadRepository(connection);
         TransferPreparation = new SqliteTransferPreparationReadRepository(connection);
         CustomerIdentities = new SqliteCustomerIdentityReadRepository(connection);
+        EconomyScopes = new SqliteEconomyScopeReadRepository(connection);
     }
 
     public IBankReadRepository Banks { get; }
@@ -237,6 +238,8 @@ public sealed class SqliteBankingReadContext : IBankingReadContext
     public ITransferPreparationReadRepository TransferPreparation { get; }
 
     public ICustomerIdentityReadRepository CustomerIdentities { get; }
+
+    public IEconomyScopeReadRepository EconomyScopes { get; }
 }
 
 public sealed class SqliteBankingReadGateway : IBankingReadGateway
