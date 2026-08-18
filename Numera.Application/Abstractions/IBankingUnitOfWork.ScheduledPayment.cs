@@ -41,6 +41,8 @@ public interface IPaymentManagementRepository
 
     DirectDebitMandate? FindMandate(DirectDebitMandateId id);
 
+    IReadOnlyList<DirectDebitMandate> ListExpiredMandates(UtcTimestamp now, int limit);
+
     IReadOnlyList<DirectDebitMandate> ListMandatesForDebtor(
         CustomerAccountId debtorCustomerAccountId,
         long? afterValidFrom,

@@ -42,6 +42,8 @@ public sealed class PaymentManagementTests
 
         public PaymentManagementApplicationService Payments { get; private set; } = null!;
 
+        public ExpiryMaintenanceService Expiries { get; private set; } = null!;
+
         public static Harness Create()
         {
             string root = Path.Combine(Path.GetTempPath(), "numera-paymgmt", Guid.NewGuid().ToString("n"));
@@ -72,6 +74,7 @@ public sealed class PaymentManagementTests
                 harness.Clock,
                 ids);
             harness.Payments = new PaymentManagementApplicationService(gateway, harness.Clock, ids);
+            harness.Expiries = new ExpiryMaintenanceService(gateway, harness.Clock);
 
             return harness;
         }
@@ -426,6 +429,33 @@ public sealed class PaymentManagementTests
         Assert.IsTrue(activated.IsSuccess);
         Assert.AreEqual(DirectDebitMandateStatus.Active, activated.Value.Status);
         Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM direct_debit_mandates;"));
+    }
+
+    [TestMethod]
+    public async Task AMandatePastItsValidityIsExpiredByMaintenance()
+    {
+        await using Harness harness = Harness.Create();
+        (CustomerAccountId debtor, DepositAccountId debtorAccount) =
+            await harness.OpenAsync(FirstUser, "taro");
+        (_, DepositAccountId creditorAccount) = await harness.OpenAsync(SecondUser, "jiro");
+
+        Result<DirectDebitMandateView> created = await harness.Payments.CreateDirectDebitMandateAsync(
+            new CreateDirectDebitMandateCommand(
+                debtor, debtorAccount, creditorAccount, 5_000, 1_776_000_060_000L),
+            CancellationToken.None);
+
+        Assert.IsTrue(created.IsSuccess, created.Error?.Code);
+        Assert.IsTrue((await harness.Payments.SetDirectDebitMandateStateAsync(
+            new SetDirectDebitMandateStateCommand(
+                debtor, created.Value.Id, DirectDebitMandateStatus.Active),
+            CancellationToken.None)).IsSuccess);
+
+        harness.Clock.Advance(120_000L);
+
+        ExpiryMaintenanceReport report = await harness.Expiries.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Mandates);
+        Assert.AreEqual("EXPIRED", harness.ReadText("SELECT status FROM direct_debit_mandates;"));
     }
 
     [TestMethod]

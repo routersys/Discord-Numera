@@ -359,6 +359,30 @@ internal sealed class SqlitePaymentManagementRepository : IPaymentManagementRepo
         return reader.Read() ? ReadMandate(reader) : null;
     }
 
+    public IReadOnlyList<DirectDebitMandate> ListExpiredMandates(UtcTimestamp now, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {MandateColumns} FROM direct_debit_mandates
+            WHERE status IN ('ACTIVE','SUSPENDED')
+              AND valid_until IS NOT NULL AND valid_until <= $now
+            ORDER BY valid_until, direct_debit_mandate_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<DirectDebitMandate> mandates = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            mandates.Add(ReadMandate(reader));
+        }
+
+        return mandates;
+    }
+
     public IReadOnlyList<DirectDebitMandate> ListMandatesForDebtor(
         CustomerAccountId debtorCustomerAccountId,
         long? afterValidFrom,

@@ -11,26 +11,35 @@ internal interface ISettlementMaintenanceRunner
     Task<SettlementMaintenanceReport> ProcessClearingCyclesAsync(CancellationToken cancellationToken);
 
     Task<CommerceMaintenanceReport> ExpireCheckoutsAsync(CancellationToken cancellationToken);
+
+    Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken);
 }
 
 internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
 {
     private readonly SettlementMaintenanceService service;
     private readonly CommerceMaintenanceService commerce;
+    private readonly ExpiryMaintenanceService expiries;
 
     public SettlementMaintenanceRunner(
         SettlementMaintenanceService service,
-        CommerceMaintenanceService commerce)
+        CommerceMaintenanceService commerce,
+        ExpiryMaintenanceService expiries)
     {
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(commerce);
+        ArgumentNullException.ThrowIfNull(expiries);
 
         this.service = service;
         this.commerce = commerce;
+        this.expiries = expiries;
     }
 
     public Task<CommerceMaintenanceReport> ExpireCheckoutsAsync(CancellationToken cancellationToken) =>
         commerce.ExpireCheckoutsAsync(cancellationToken);
+
+    public Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken) =>
+        expiries.ProcessDueAsync(cancellationToken);
 
     public Task<SettlementMaintenanceReport> ProcessQueuedAsync(CancellationToken cancellationToken) =>
         service.ProcessQueuedAsync(cancellationToken);
@@ -74,10 +83,12 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
                 .ConfigureAwait(false);
             CommerceMaintenanceReport checkouts = await runner.ExpireCheckoutsAsync(cancellationToken)
                 .ConfigureAwait(false);
+            ExpiryMaintenanceReport expiries = await runner.ProcessDueExpiriesAsync(cancellationToken)
+                .ConfigureAwait(false);
 
             diagnostics.SettlementMaintenanceCompleted(
-                queued.Examined + cycles.Examined + checkouts.Examined,
-                queued.Settled + cycles.Settled + checkouts.Cancelled);
+                queued.Examined + cycles.Examined + checkouts.Examined + expiries.Total,
+                queued.Settled + cycles.Settled + checkouts.Cancelled + expiries.Total);
         }
         catch (OperationCanceledException)
         {

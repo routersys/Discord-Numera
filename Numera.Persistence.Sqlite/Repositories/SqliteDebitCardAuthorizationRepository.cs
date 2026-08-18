@@ -93,6 +93,29 @@ internal sealed class SqliteDebitCardAuthorizationRepository : IDebitCardAuthori
         return reader.Read() ? Read(reader) : null;
     }
 
+    public IReadOnlyList<DebitCardAuthorizationRecord> ListExpired(UtcTimestamp now, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM debit_card_authorizations
+            WHERE status IN ('AUTHORIZED','PARTIALLY_CAPTURED') AND expires_at <= $now
+            ORDER BY expires_at, debit_card_authorization_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<DebitCardAuthorizationRecord> authorizations = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            authorizations.Add(Read(reader));
+        }
+
+        return authorizations;
+    }
+
     public void AddCapture(DebitCardCaptureRecord capture)
     {
         ArgumentNullException.ThrowIfNull(capture);

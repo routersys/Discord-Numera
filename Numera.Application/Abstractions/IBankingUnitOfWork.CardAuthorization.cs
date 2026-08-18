@@ -53,6 +53,8 @@ public interface IDebitCardAuthorizationRepository
 
     DebitCardAuthorizationRecord? FindByOrder(CommerceOrderId commerceOrderId);
 
+    IReadOnlyList<DebitCardAuthorizationRecord> ListExpired(UtcTimestamp now, int limit);
+
     void AddCapture(DebitCardCaptureRecord capture);
 }
 

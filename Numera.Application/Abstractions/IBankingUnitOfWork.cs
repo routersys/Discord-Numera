@@ -268,6 +268,8 @@ public interface IHoldRepository
     Numera.Domain.Banking.Hold? FindActiveByBusinessOperation(BusinessOperationId businessOperationId);
 
     Numera.Domain.Banking.Hold? FindByBusinessOperation(BusinessOperationId businessOperationId);
+
+    IReadOnlyList<Numera.Domain.Banking.Hold> ListExpiredStandalone(UtcTimestamp now, int limit);
 }
 
 public interface IPaymentOrderRepository

@@ -136,6 +136,31 @@ public sealed class SqliteHoldRepository : IHoldRepository
 
     internal SqliteHoldRepository(SqliteUnitOfWork unitOfWork) => this.unitOfWork = unitOfWork;
 
+    public IReadOnlyList<Hold> ListExpiredStandalone(UtcTimestamp now, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM holds
+            WHERE status = 'ACTIVE' AND expires_at IS NOT NULL AND expires_at <= $now
+              AND hold_id NOT IN (
+                  SELECT hold_id FROM debit_card_authorizations WHERE hold_id IS NOT NULL)
+            ORDER BY expires_at, hold_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<Hold> holds = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            holds.Add(Read(reader));
+        }
+
+        return holds;
+    }
+
     public void Add(Hold hold)
     {
         ArgumentNullException.ThrowIfNull(hold);

@@ -56,6 +56,8 @@ public sealed class CommerceCatalogTests
 
         public BankCardApplicationService Cards { get; private set; } = null!;
 
+        public ExpiryMaintenanceService Expiries { get; private set; } = null!;
+
         public static Harness Create()
         {
             string root = Path.Combine(Path.GetTempPath(), "numera-commerce", Guid.NewGuid().ToString("n"));
@@ -95,6 +97,7 @@ public sealed class CommerceCatalogTests
             harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock);
             harness.Cards = new BankCardApplicationService(
                 gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
+            harness.Expiries = new ExpiryMaintenanceService(gateway, harness.Clock);
 
             return harness;
         }
@@ -246,6 +249,72 @@ public sealed class CommerceCatalogTests
                 CancellationToken.None);
 
             return opened.Value.Id;
+        }
+
+        public void SeedStandaloneHold(DepositAccountId accountId, long amount, long expiresAt)
+        {
+            Execute($"""
+                INSERT INTO business_operations(business_operation_id, operation_type, economy_scope_id,
+                    actor_party_id, correlation_id, idempotency_scope, idempotency_key, status,
+                    created_at, committed_at, version)
+                VALUES({Blob(60)}, 'MANUAL_HOLD', {Blob(1)}, NULL, {Blob(61)}, 'MANUAL_HOLD',
+                    'manual-hold-1', 'COMMITTED', 1, 1, 1);
+                """);
+
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = $"""
+                INSERT INTO holds(hold_id, hold_scope_kind, deposit_account_id, ledger_account_id,
+                    business_operation_id, amount_minor, remaining_minor, reason, status, created_at,
+                    expires_at, terminal_at, version)
+                VALUES({Blob(62)}, 'CUSTOMER_DEPOSIT', $account, NULL, {Blob(60)}, $amount, $amount,
+                    'MANUAL', 'ACTIVE', 1, $expires, NULL, 1);
+
+                UPDATE ledger_balance_projections
+                SET held_minor = held_minor + $amount, version = version + 1
+                WHERE ledger_account_id = (
+                    SELECT ledger_account_id FROM deposit_accounts WHERE deposit_account_id = $account);
+                """;
+            command.Parameters.AddWithValue("$account", accountId.Value.ToByteArray());
+            command.Parameters.AddWithValue("$amount", amount);
+            command.Parameters.AddWithValue("$expires", expiresAt);
+            command.ExecuteNonQuery();
+        }
+
+        public void SeedAuthorization(
+            MerchantProfileId profileId,
+            DepositAccountId accountId,
+            string status,
+            long amount,
+            long expiresAt)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = $"""
+                INSERT INTO debit_card_authorizations(debit_card_authorization_id, debit_card_id,
+                    deposit_account_id, merchant_profile_id, commerce_order_id,
+                    merchant_destination_deposit_account_id, source_currency_id,
+                    presentment_currency_id, hold_id, merchant_reference, authorization_amount_minor,
+                    captured_amount_minor, refunded_amount_minor, presentment_authorized_minor,
+                    presentment_captured_minor, presentment_refunded_minor, fee_schedule_version_id,
+                    purchase_fee_assessed_minor, settlement_route, status, authorized_at, expires_at,
+                    completed_at, version)
+                SELECT {Blob(63)}, d.debit_card_id, $account, $merchant, NULL,
+                    p.settlement_deposit_account_id, {Blob(2)}, {Blob(2)}, {Blob(62)}, 'MANUAL-1',
+                    $amount, $captured, 0, $amount, $captured, 0, {Blob(31)}, 0,
+                    'SAME_CURRENCY_PAYMENT', $status, 1, $expires, NULL, 1
+                FROM debit_cards d
+                INNER JOIN bank_cards c ON c.bank_card_id = d.bank_card_id
+                INNER JOIN merchant_profiles p ON p.merchant_profile_id = $merchant
+                WHERE c.deposit_account_id = $account;
+                """;
+            command.Parameters.AddWithValue("$account", accountId.Value.ToByteArray());
+            command.Parameters.AddWithValue("$merchant", profileId.Value.ToByteArray());
+            command.Parameters.AddWithValue("$amount", amount);
+            command.Parameters.AddWithValue("$captured", status == "PARTIALLY_CAPTURED" ? 600L : 0L);
+            command.Parameters.AddWithValue("$status", status);
+            command.Parameters.AddWithValue("$expires", expiresAt);
+            command.ExecuteNonQuery();
         }
 
         public void Fund(DepositAccountId accountId, long amount)
@@ -710,6 +779,132 @@ public sealed class CommerceCatalogTests
                 SELECT CAST(COUNT(*) AS TEXT) FROM business_operations
                 WHERE operation_type = 'COMMERCE_CAPTURE' AND status = 'FAILED';
                 """));
+    }
+
+    [TestMethod]
+    public async Task AnExpiredStandaloneHoldReleasesTheHeldAmount()
+    {
+        await using Harness harness = Harness.Create();
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, 5_000L);
+        harness.SeedStandaloneHold(buyer, 1_500L, expiresAt: 1_776_000_060_000L);
+
+        harness.Clock.Advance(120_000L);
+
+        ExpiryMaintenanceReport report = await harness.Expiries.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Holds);
+        Assert.AreEqual("EXPIRED", harness.ReadText("SELECT status FROM holds;"));
+        Assert.AreEqual(
+            "0",
+            harness.ReadText("""
+                SELECT CAST(COALESCE(SUM(held_minor), 0) AS TEXT) FROM ledger_balance_projections;
+                """));
+    }
+
+    [TestMethod]
+    public async Task AnUnexpiredHoldSurvivesTheSweep()
+    {
+        await using Harness harness = Harness.Create();
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, 5_000L);
+        harness.SeedStandaloneHold(buyer, 1_500L, expiresAt: 1_776_000_600_000L);
+
+        ExpiryMaintenanceReport report = await harness.Expiries.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, report.Holds);
+        Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM holds;"));
+    }
+
+    [TestMethod]
+    public async Task ACapturedHoldIsNotTouchedByTheSweep()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, _) = await ConfirmableAsync(harness, "expiry-1");
+
+        Assert.IsTrue((await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation),
+            CancellationToken.None)).IsSuccess);
+
+        harness.Clock.Advance(30L * 24 * 60 * 60 * 1000);
+
+        ExpiryMaintenanceReport report = await harness.Expiries.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, report.Total);
+        Assert.AreEqual("CAPTURED", harness.ReadText("SELECT status FROM debit_card_authorizations;"));
+        Assert.AreEqual("CAPTURED", harness.ReadText("SELECT status FROM holds;"));
+    }
+
+    [TestMethod]
+    public async Task AnExpiredAuthorizationReleasesItsHoldInTheSameSweep()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, 5_000L);
+
+        Result<CustomerAccountStatusView> customer =
+            await harness.Registration.GetCustomerAccountStatusAsync(
+                new GetCustomerAccountStatusQuery(BuyerUser), CancellationToken.None);
+
+        Assert.IsTrue((await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                customer.Value.Id,
+                buyer,
+                BankCardForm.DebitOnly,
+                IdempotencyKey.Create("BANK_CARD_ISSUE", "expiry-auth")),
+            CancellationToken.None)).IsSuccess);
+
+        harness.SeedStandaloneHold(buyer, 1_500L, expiresAt: 1_776_000_060_000L);
+        harness.SeedAuthorization(profile.Id, buyer, "AUTHORIZED", 1_500L, 1_776_000_060_000L);
+
+        harness.Clock.Advance(120_000L);
+
+        ExpiryMaintenanceReport report = await harness.Expiries.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Authorizations);
+        Assert.AreEqual(0, report.Holds);
+        Assert.AreEqual("EXPIRED", harness.ReadText("SELECT status FROM debit_card_authorizations;"));
+        Assert.AreEqual("RELEASED", harness.ReadText("SELECT status FROM holds;"));
+        Assert.AreEqual(
+            "0",
+            harness.ReadText("""
+                SELECT CAST(COALESCE(SUM(held_minor), 0) AS TEXT) FROM ledger_balance_projections;
+                """));
+    }
+
+    [TestMethod]
+    public async Task APartiallyCapturedAuthorizationFinalizesAsCaptured()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, 5_000L);
+
+        Result<CustomerAccountStatusView> customer =
+            await harness.Registration.GetCustomerAccountStatusAsync(
+                new GetCustomerAccountStatusQuery(BuyerUser), CancellationToken.None);
+
+        Assert.IsTrue((await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                customer.Value.Id,
+                buyer,
+                BankCardForm.DebitOnly,
+                IdempotencyKey.Create("BANK_CARD_ISSUE", "expiry-partial")),
+            CancellationToken.None)).IsSuccess);
+
+        harness.SeedStandaloneHold(buyer, 1_500L, expiresAt: 1_776_000_060_000L);
+        harness.SeedAuthorization(profile.Id, buyer, "PARTIALLY_CAPTURED", 1_500L, 1_776_000_060_000L);
+
+        harness.Clock.Advance(120_000L);
+
+        ExpiryMaintenanceReport report = await harness.Expiries.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Authorizations);
+        Assert.AreEqual("CAPTURED", harness.ReadText("SELECT status FROM debit_card_authorizations;"));
+        Assert.AreEqual(
+            "600",
+            harness.ReadText("SELECT CAST(captured_amount_minor AS TEXT) FROM debit_card_authorizations;"));
     }
 
     [TestMethod]
