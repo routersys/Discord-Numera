@@ -17,4 +17,8 @@ public static partial class BankingErrorCodes
     public static string PrudentialPolicyInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 51);
 
     public static string PrudentialPolicyNotDraft { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 51);
+
+    public static string FeeRuleInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 52);
+
+    public static string FeeScheduleAlreadyPublished { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 52);
 }
