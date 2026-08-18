@@ -32,6 +32,8 @@ internal interface IDiscordResponseComposer
 
     DiscordEmbedPayload Compose(RenderedError error);
 
+    DiscordComponentPayload ComposeComponents(DiscordEndpointResponse response);
+
     string ResolveModalCustomId(DiscordEndpointResponse response);
 }
 
@@ -61,6 +63,36 @@ internal sealed class CatalogResponseComposer : IDiscordResponseComposer
         ArgumentNullException.ThrowIfNull(error);
 
         return new DiscordEmbedPayload(error.Title, error.Description, error.Footer, error.Color);
+    }
+
+    public DiscordComponentPayload ComposeComponents(DiscordEndpointResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+
+        if (response.Components.IsEmpty)
+        {
+            return DiscordComponentPayload.None;
+        }
+
+        DiscordSelectPayload? select = response.Components.Select is { } declared
+            ? new DiscordSelectPayload(
+                declared.CustomId,
+                catalog.Format(declared.PlaceholderKey, response.ViewData),
+                [
+                    .. declared.Options.Select(static option =>
+                        new DiscordSelectOptionPayload(option.Label, option.Value)),
+                ])
+            : null;
+
+        return new DiscordComponentPayload(
+            select,
+            [
+                .. response.Components.Buttons.Select(button => new DiscordButtonPayload(
+                    button.CustomId,
+                    catalog.Format(button.LabelKey, response.ViewData),
+                    button.Style,
+                    button.Disabled)),
+            ]);
     }
 
     public string ResolveModalCustomId(DiscordEndpointResponse response)

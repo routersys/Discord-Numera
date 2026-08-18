@@ -147,6 +147,124 @@ public sealed class DiscordAutocompleteRequest
     public string Value { get; }
 }
 
+public enum DiscordButtonStyle
+{
+    Primary = 1,
+    Secondary = 2,
+    Danger = 3,
+}
+
+public static class ComponentFailure
+{
+    public const string SelectOptionCountOutOfRange =
+        "Select の Option は1件以上25件以下でなければなりません。";
+
+    public const string ButtonCountOutOfRange =
+        "Button は1行あたり5個以下でなければなりません。";
+}
+
+public sealed class DiscordResponseButton
+{
+    public DiscordResponseButton(
+        string customId,
+        string labelKey,
+        DiscordButtonStyle style,
+        bool disabled = false)
+    {
+        ArgumentNullException.ThrowIfNull(customId);
+        ArgumentNullException.ThrowIfNull(labelKey);
+
+        CustomId = customId;
+        LabelKey = labelKey;
+        Style = style;
+        Disabled = disabled;
+    }
+
+    public string CustomId { get; }
+
+    public string LabelKey { get; }
+
+    public DiscordButtonStyle Style { get; }
+
+    public bool Disabled { get; }
+}
+
+public sealed class DiscordResponseSelectOption
+{
+    public DiscordResponseSelectOption(string label, string value)
+    {
+        ArgumentNullException.ThrowIfNull(label);
+        ArgumentNullException.ThrowIfNull(value);
+
+        Label = label;
+        Value = value;
+    }
+
+    public string Label { get; }
+
+    public string Value { get; }
+}
+
+public sealed class DiscordResponseSelect
+{
+    public const int MaximumOptionCount = 25;
+
+    public DiscordResponseSelect(
+        string customId,
+        string placeholderKey,
+        IReadOnlyList<DiscordResponseSelectOption> options)
+    {
+        ArgumentNullException.ThrowIfNull(customId);
+        ArgumentNullException.ThrowIfNull(placeholderKey);
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.Count is 0 or > MaximumOptionCount)
+        {
+            throw new ArgumentException(ComponentFailure.SelectOptionCountOutOfRange, nameof(options));
+        }
+
+        CustomId = customId;
+        PlaceholderKey = placeholderKey;
+        Options = options;
+    }
+
+    public string CustomId { get; }
+
+    public string PlaceholderKey { get; }
+
+    public IReadOnlyList<DiscordResponseSelectOption> Options { get; }
+}
+
+public sealed class DiscordResponseComponents
+{
+    public const int MaximumButtonCount = 5;
+
+    private static readonly IReadOnlyList<DiscordResponseButton> EmptyButtons = [];
+
+    public static readonly DiscordResponseComponents None = new(null, EmptyButtons);
+
+    public DiscordResponseComponents(
+        DiscordResponseSelect? select,
+        IReadOnlyList<DiscordResponseButton> buttons)
+    {
+        ArgumentNullException.ThrowIfNull(buttons);
+
+        if (buttons.Count > MaximumButtonCount)
+        {
+            throw new ArgumentException(ComponentFailure.ButtonCountOutOfRange, nameof(buttons));
+        }
+
+        Select = select;
+        Buttons = buttons;
+    }
+
+    public DiscordResponseSelect? Select { get; }
+
+    public IReadOnlyList<DiscordResponseButton> Buttons { get; }
+
+    public bool IsEmpty => Select is null && Buttons.Count == 0;
+}
+
 public sealed class DiscordEndpointResponse
 {
     private static readonly IReadOnlyDictionary<string, string> EmptyViewData =
@@ -157,14 +275,18 @@ public sealed class DiscordEndpointResponse
         string viewKey,
         IReadOnlyDictionary<string, string> viewData,
         bool ephemeral,
+        DiscordResponseComponents components,
         DiscordEndpointFailure? failure = null)
     {
         Kind = kind;
         ViewKey = viewKey;
         ViewData = viewData;
         Ephemeral = ephemeral;
+        Components = components;
         Failure = failure;
     }
+
+    public DiscordResponseComponents Components { get; }
 
     public DiscordEndpointFailure? Failure { get; }
 
@@ -180,43 +302,64 @@ public sealed class DiscordEndpointResponse
         string viewKey,
         IReadOnlyDictionary<string, string> viewData,
         bool ephemeral = true) =>
-        Create(DiscordResponseKind.Message, viewKey, viewData, ephemeral);
+        Create(DiscordResponseKind.Message, viewKey, viewData, ephemeral, DiscordResponseComponents.None);
+
+    public static DiscordEndpointResponse Message(
+        string viewKey,
+        IReadOnlyDictionary<string, string> viewData,
+        DiscordResponseComponents components,
+        bool ephemeral = true) =>
+        Create(DiscordResponseKind.Message, viewKey, viewData, ephemeral, components);
 
     public static DiscordEndpointResponse UpdateMessage(
         string viewKey,
         IReadOnlyDictionary<string, string> viewData) =>
-        Create(DiscordResponseKind.UpdateMessage, viewKey, viewData, ephemeral: true);
+        Create(DiscordResponseKind.UpdateMessage, viewKey, viewData, true, DiscordResponseComponents.None);
+
+    public static DiscordEndpointResponse UpdateMessage(
+        string viewKey,
+        IReadOnlyDictionary<string, string> viewData,
+        DiscordResponseComponents components) =>
+        Create(DiscordResponseKind.UpdateMessage, viewKey, viewData, true, components);
 
     public static DiscordEndpointResponse Modal(
         string viewKey,
         IReadOnlyDictionary<string, string> viewData) =>
-        Create(DiscordResponseKind.Modal, viewKey, viewData, ephemeral: true);
+        Create(DiscordResponseKind.Modal, viewKey, viewData, true, DiscordResponseComponents.None);
 
     public static DiscordEndpointResponse Autocomplete(
         string viewKey,
         IReadOnlyDictionary<string, string> viewData) =>
-        Create(DiscordResponseKind.Autocomplete, viewKey, viewData, ephemeral: true);
+        Create(DiscordResponseKind.Autocomplete, viewKey, viewData, true, DiscordResponseComponents.None);
 
     public static DiscordEndpointResponse NoContent() =>
-        Create(DiscordResponseKind.NoContent, string.Empty, EmptyViewData, ephemeral: true);
+        Create(DiscordResponseKind.NoContent, string.Empty, EmptyViewData, true, DiscordResponseComponents.None);
 
     public static DiscordEndpointResponse Failed(DiscordEndpointFailure failure)
     {
         ArgumentNullException.ThrowIfNull(failure);
 
         return new DiscordEndpointResponse(
-            DiscordResponseKind.Failure, string.Empty, EmptyViewData, ephemeral: true, failure);
+            DiscordResponseKind.Failure,
+            string.Empty,
+            EmptyViewData,
+            true,
+            DiscordResponseComponents.None,
+            failure);
     }
 
     private static DiscordEndpointResponse Create(
         DiscordResponseKind kind,
         string viewKey,
         IReadOnlyDictionary<string, string> viewData,
-        bool ephemeral)
+        bool ephemeral,
+        DiscordResponseComponents components)
     {
         ArgumentNullException.ThrowIfNull(viewKey);
         ArgumentNullException.ThrowIfNull(viewData);
-        return new DiscordEndpointResponse(kind, viewKey, viewData, ephemeral);
+        ArgumentNullException.ThrowIfNull(components);
+
+        return new DiscordEndpointResponse(kind, viewKey, viewData, ephemeral, components);
     }
 }
 

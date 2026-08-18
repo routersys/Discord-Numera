@@ -14,6 +14,8 @@ internal sealed class RecordingResponseSink : IDiscordResponseSink
 
     internal List<DiscordModalPayload> Modals { get; } = [];
 
+    internal List<DiscordComponentPayload> Components { get; } = [];
+
     internal List<IReadOnlyList<DiscordAutocompleteOption>> AutocompleteResults { get; } = [];
 
     internal int Deferrals { get; private set; }
@@ -28,24 +30,37 @@ internal sealed class RecordingResponseSink : IDiscordResponseSink
         return Task.CompletedTask;
     }
 
-    public Task RespondAsync(DiscordEmbedPayload embed, bool ephemeral, CancellationToken cancellationToken)
+    public Task RespondAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        bool ephemeral,
+        CancellationToken cancellationToken)
     {
         Calls.Add(nameof(RespondAsync));
         Embeds.Add(embed);
+        Components.Add(components);
         return Task.CompletedTask;
     }
 
-    public Task UpdateAsync(DiscordEmbedPayload embed, CancellationToken cancellationToken)
+    public Task UpdateAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        CancellationToken cancellationToken)
     {
         Calls.Add(nameof(UpdateAsync));
         Embeds.Add(embed);
+        Components.Add(components);
         return Task.CompletedTask;
     }
 
-    public Task ModifyOriginalResponseAsync(DiscordEmbedPayload embed, CancellationToken cancellationToken)
+    public Task ModifyOriginalResponseAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        CancellationToken cancellationToken)
     {
         Calls.Add(nameof(ModifyOriginalResponseAsync));
         Embeds.Add(embed);
+        Components.Add(components);
         return Task.CompletedTask;
     }
 
@@ -80,6 +95,8 @@ public sealed class DiscordEndpointExecutorTests
     private static TextCatalog Catalog() => TextCatalog.Create(new Dictionary<string, string>(StringComparer.Ordinal)
     {
         [ViewKey + ".title"] = "Transfer accepted",
+        [ButtonLabelKey] = "Execute",
+        [SelectPlaceholderKey] = "Choose an account",
         [ViewKey + ".description"] = "The transfer is being processed.",
         [TextCatalogKeys.OperationFooter] = "Operation: {operationPublicId}",
         [TextCatalogKeys.ErrorNotFoundTitle] = "Not found",
@@ -95,6 +112,9 @@ public sealed class DiscordEndpointExecutorTests
 
         return (executor, new DiscordInteractionExchange(kind, sink), sink);
     }
+
+    private const string ButtonLabelKey = "bank.transfer.execute";
+    private const string SelectPlaceholderKey = "bank.transfer.source";
 
     private static DiscordEndpointResponse Message() => DiscordEndpointResponse.Message(ViewKey, ViewData);
 
@@ -413,4 +433,69 @@ public sealed class DiscordEndpointExecutorTests
 
         Assert.AreEqual(1, sink.LastDeferralEphemeral);
     }
+
+    [TestMethod]
+    public async Task ComponentLabelsAreResolvedFromTheCatalog()
+    {
+        (DiscordEndpointExecutor executor, DiscordInteractionExchange exchange, RecordingResponseSink sink) =
+            Create(DiscordInteractionKind.SlashCommand);
+
+        DiscordResponseComponents components = new(
+            new DiscordResponseSelect(
+                DiscordCustomId.Select("source-account", "token"),
+                SelectPlaceholderKey,
+                [new DiscordResponseSelectOption("Numera Bank", "o:abc")]),
+            [
+                new DiscordResponseButton(
+                    DiscordCustomId.Button("transfer-execute", "token"),
+                    ButtonLabelKey,
+                    DiscordButtonStyle.Primary),
+            ]);
+
+        ResponsePlanFailure failure = await executor.ExecuteAsync(
+            exchange,
+            DiscordEndpointResponse.Message(ViewKey, ViewData, components),
+            CancellationToken.None);
+
+        Assert.AreEqual(ResponsePlanFailure.None, failure);
+        Assert.AreEqual("Choose an account", sink.Components[0].Select!.Placeholder);
+        Assert.AreEqual("bank:v1:sel:source-account:token", sink.Components[0].Select!.CustomId);
+        Assert.AreEqual("Numera Bank", sink.Components[0].Select!.Options[0].Label);
+        Assert.AreEqual("Execute", sink.Components[0].Buttons[0].Label);
+        Assert.AreEqual("bank:v1:btn:transfer-execute:token", sink.Components[0].Buttons[0].CustomId);
+    }
+
+    [TestMethod]
+    public async Task AResponseWithoutComponentsCarriesTheEmptyPayload()
+    {
+        (DiscordEndpointExecutor executor, DiscordInteractionExchange exchange, RecordingResponseSink sink) =
+            Create(DiscordInteractionKind.SlashCommand);
+
+        await executor.ExecuteAsync(exchange, Message(), CancellationToken.None);
+
+        Assert.IsTrue(sink.Components[0].IsEmpty);
+        Assert.IsNull(SocketResponseSink.BuildComponents(sink.Components[0]));
+    }
+
+    [TestMethod]
+    public void AnErrorResponseCarriesNoComponent() =>
+        Assert.IsTrue(DiscordComponentPayload.None.IsEmpty);
+
+    [TestMethod]
+    public void AnOverfullButtonRowIsRejected() =>
+        Assert.ThrowsExactly<ArgumentException>(static () => _ = new DiscordResponseComponents(
+            null,
+            [
+                new DiscordResponseButton("a", ButtonLabelKey, DiscordButtonStyle.Secondary),
+                new DiscordResponseButton("b", ButtonLabelKey, DiscordButtonStyle.Secondary),
+                new DiscordResponseButton("c", ButtonLabelKey, DiscordButtonStyle.Secondary),
+                new DiscordResponseButton("d", ButtonLabelKey, DiscordButtonStyle.Secondary),
+                new DiscordResponseButton("e", ButtonLabelKey, DiscordButtonStyle.Secondary),
+                new DiscordResponseButton("f", ButtonLabelKey, DiscordButtonStyle.Secondary),
+            ]));
+
+    [TestMethod]
+    public void AnEmptySelectIsRejected() =>
+        Assert.ThrowsExactly<ArgumentException>(static () =>
+            _ = new DiscordResponseSelect("id", SelectPlaceholderKey, []));
 }

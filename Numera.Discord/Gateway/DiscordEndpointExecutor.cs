@@ -132,7 +132,13 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
         exchange.State.RecordResponse();
 
         DiscordEmbedPayload embed = composer.Compose(response);
-        await DispatchAsync(exchange, plan.Operation, embed, response.Ephemeral, cancellationToken)
+        await DispatchAsync(
+                exchange,
+                plan.Operation,
+                embed,
+                composer.ComposeComponents(response),
+                response.Ephemeral,
+                cancellationToken)
             .ConfigureAwait(false);
 
         return ResponsePlanFailure.None;
@@ -223,7 +229,13 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
         exchange.State.RecordResponse();
 
         DiscordEmbedPayload embed = composer.Compose(error);
-        await DispatchAsync(exchange, plan.Operation, embed, error.Ephemeral, cancellationToken)
+        await DispatchAsync(
+                exchange,
+                plan.Operation,
+                embed,
+                DiscordComponentPayload.None,
+                error.Ephemeral,
+                cancellationToken)
             .ConfigureAwait(false);
 
         return ResponsePlanFailure.None;
@@ -233,11 +245,14 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
         DiscordInteractionExchange exchange,
         DiscordResponseOperation operation,
         DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
         bool ephemeral,
         CancellationToken cancellationToken) => operation switch
         {
-            DiscordResponseOperation.Respond => exchange.Sink.RespondAsync(embed, ephemeral, cancellationToken),
-            DiscordResponseOperation.UpdateMessage => exchange.Sink.UpdateAsync(embed, cancellationToken),
-            _ => exchange.Sink.ModifyOriginalResponseAsync(embed, cancellationToken),
+            DiscordResponseOperation.Respond =>
+                exchange.Sink.RespondAsync(embed, components, ephemeral, cancellationToken),
+            DiscordResponseOperation.UpdateMessage =>
+                exchange.Sink.UpdateAsync(embed, components, cancellationToken),
+            _ => exchange.Sink.ModifyOriginalResponseAsync(embed, components, cancellationToken),
         };
 }

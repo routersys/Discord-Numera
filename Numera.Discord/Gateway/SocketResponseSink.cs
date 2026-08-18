@@ -27,24 +27,36 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
     public Task DeferAsync(bool ephemeral, CancellationToken cancellationToken) =>
         interaction.DeferAsync(ephemeral, Options(cancellationToken));
 
-    public Task RespondAsync(DiscordEmbedPayload embed, bool ephemeral, CancellationToken cancellationToken) =>
+    public Task RespondAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        bool ephemeral,
+        CancellationToken cancellationToken) =>
         interaction.RespondAsync(
             text: null,
             embeds: null,
             isTTS: false,
             ephemeral: ephemeral,
             allowedMentions: DiscordClientConfiguration.CanonicalAllowedMentions,
-            components: null,
+            components: BuildComponents(components),
             embed: BuildEmbed(embed),
             options: Options(cancellationToken));
 
-    public Task UpdateAsync(DiscordEmbedPayload embed, CancellationToken cancellationToken) =>
+    public Task UpdateAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        CancellationToken cancellationToken) =>
         interaction is IComponentInteraction component
-            ? component.UpdateAsync(properties => Apply(properties, embed), Options(cancellationToken))
+            ? component.UpdateAsync(
+                properties => Apply(properties, embed, components), Options(cancellationToken))
             : throw new InvalidOperationException(SinkFailure.ComponentInteractionRequired);
 
-    public Task ModifyOriginalResponseAsync(DiscordEmbedPayload embed, CancellationToken cancellationToken) =>
-        interaction.ModifyOriginalResponseAsync(properties => Apply(properties, embed), Options(cancellationToken));
+    public Task ModifyOriginalResponseAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        CancellationToken cancellationToken) =>
+        interaction.ModifyOriginalResponseAsync(
+            properties => Apply(properties, embed, components), Options(cancellationToken));
 
     public Task RespondWithModalAsync(DiscordModalPayload modal, CancellationToken cancellationToken) =>
         interaction.RespondWithModalAsync(BuildModal(modal), Options(cancellationToken));
@@ -118,9 +130,65 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
             ? TextInputStyle.Paragraph
             : CanonicalTextInputStyle;
 
-    private static void Apply(MessageProperties properties, DiscordEmbedPayload payload)
+    internal static MessageComponent? BuildComponents(DiscordComponentPayload payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        if (payload.IsEmpty)
+        {
+            return null;
+        }
+
+        ComponentBuilder builder = new();
+
+        if (payload.Select is { } select)
+        {
+            SelectMenuBuilder menu = new SelectMenuBuilder()
+                .WithCustomId(select.CustomId)
+                .WithPlaceholder(select.Placeholder)
+                .WithMinValues(1)
+                .WithMaxValues(1);
+
+            foreach (DiscordSelectOptionPayload option in select.Options)
+            {
+                menu.AddOption(new SelectMenuOptionBuilder()
+                    .WithLabel(option.Label)
+                    .WithValue(option.Value));
+            }
+
+            builder.WithSelectMenu(menu, row: 0);
+        }
+
+        int buttonRow = payload.Select is null ? 0 : 1;
+
+        foreach (DiscordButtonPayload button in payload.Buttons)
+        {
+            builder.WithButton(
+                new ButtonBuilder()
+                    .WithCustomId(button.CustomId)
+                    .WithLabel(button.Label)
+                    .WithStyle(Resolve(button.Style))
+                    .WithDisabled(button.Disabled),
+                buttonRow);
+        }
+
+        return builder.Build();
+    }
+
+    private static ButtonStyle Resolve(DiscordButtonStyle style) => style switch
+    {
+        DiscordButtonStyle.Primary => ButtonStyle.Primary,
+        DiscordButtonStyle.Danger => ButtonStyle.Danger,
+        _ => ButtonStyle.Secondary,
+    };
+
+    private static void Apply(
+        MessageProperties properties,
+        DiscordEmbedPayload payload,
+        DiscordComponentPayload components)
     {
         properties.Embed = BuildEmbed(payload);
+        properties.Components = BuildComponents(components);
         properties.AllowedMentions = DiscordClientConfiguration.CanonicalAllowedMentions;
     }
 
