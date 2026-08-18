@@ -7,6 +7,7 @@ public sealed class SqliteDatabaseOptions
     public const int MinimumBusyTimeoutSeconds = 1;
     public const int MaximumBusyTimeoutSeconds = 60;
     public const string LockFileSuffix = ".lock";
+    public const string BackupDirectoryName = "backups";
 
     private SqliteDatabaseOptions(string path, int busyTimeoutSeconds)
     {
@@ -25,6 +26,9 @@ public sealed class SqliteDatabaseOptions
     public string LockFilePath => FullPath + LockFileSuffix;
 
     public string? DirectoryPath => System.IO.Path.GetDirectoryName(FullPath);
+
+    public string BackupDirectoryPath =>
+        System.IO.Path.Combine(DirectoryPath ?? ".", BackupDirectoryName);
 
     public static SqliteDatabaseOptions Create(string path, int busyTimeoutSeconds)
     {

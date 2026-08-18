@@ -205,7 +205,13 @@ internal sealed class StartupComposer
 
         Initializer().EnsureDirectory();
 
-        return StartupCheckResult.Passed;
+        DirectoryProtectionResult protection = DataDirectoryProtection.Apply(
+            databaseOptions.DirectoryPath ?? ".",
+            databaseOptions.BackupDirectoryPath);
+
+        return protection.IsApplied
+            ? StartupCheckResult.Passed
+            : StartupCheckResult.Failed(protection.Detail);
     }
 
     private StartupCheckResult VerifyConnection() => Guarded(static initializer =>
