@@ -72,6 +72,24 @@ public sealed class StateMachineClosureTests
         ["direct_debit_mandates"] = Tokens<DirectDebitMandateStatus>(static value => value.ToToken()),
         ["direct_debit_collections"] =
             Tokens<DirectDebitCollectionStatus>(static value => value.ToToken()),
+        ["merchant_products"] = Tokens<MerchantProductStatus>(static value => value.ToToken()),
+        ["merchant_product_price_versions"] =
+            Tokens<MerchantProductPriceVersionStatus>(static value => value.ToToken()),
+        ["merchant_product_purchase_policy_versions"] =
+            Tokens<MerchantProductPurchasePolicyVersionStatus>(static value => value.ToToken()),
+        ["merchant_fulfillment_policy_versions"] =
+            Tokens<MerchantFulfillmentPolicyVersionStatus>(static value => value.ToToken()),
+        ["merchant_aftercare_policy_versions"] =
+            Tokens<MerchantAftercarePolicyVersionStatus>(static value => value.ToToken()),
+        ["commerce_orders"] = Tokens<CommerceOrderStatus>(static value => value.ToToken()),
+        ["commerce_payments"] = Tokens<CommercePaymentStatus>(static value => value.ToToken()),
+        ["commerce_returns"] = Tokens<CommerceReturnStatus>(static value => value.ToToken()),
+        ["commerce_fulfillments"] =
+            Tokens<CommerceFulfillmentStatus>(static value => value.ToToken()),
+        ["commerce_fulfillment_reversals"] =
+            Tokens<CommerceFulfillmentReversalStatus>(static value => value.ToToken()),
+        ["debit_card_authorizations"] =
+            Tokens<DebitCardAuthorizationStatus>(static value => value.ToToken()),
     };
 
     private static readonly string[] TablesAwaitingDomainStateMachine =
