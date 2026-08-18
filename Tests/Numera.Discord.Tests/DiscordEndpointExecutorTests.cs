@@ -30,6 +30,8 @@ internal sealed class RecordingResponseSink : IDiscordResponseSink
         return Task.CompletedTask;
     }
 
+    public List<DiscordResponseAttachment> Attachments { get; } = [];
+
     public Task RespondAsync(
         DiscordEmbedPayload embed,
         DiscordComponentPayload components,
@@ -39,6 +41,20 @@ internal sealed class RecordingResponseSink : IDiscordResponseSink
         Calls.Add(nameof(RespondAsync));
         Embeds.Add(embed);
         Components.Add(components);
+        return Task.CompletedTask;
+    }
+
+    public Task RespondWithAttachmentAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        DiscordResponseAttachment attachment,
+        bool ephemeral,
+        CancellationToken cancellationToken)
+    {
+        Calls.Add(nameof(RespondWithAttachmentAsync));
+        Embeds.Add(embed);
+        Components.Add(components);
+        Attachments.Add(attachment);
         return Task.CompletedTask;
     }
 

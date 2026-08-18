@@ -42,6 +42,30 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
             embed: BuildEmbed(embed),
             options: Options(cancellationToken));
 
+    public Task RespondWithAttachmentAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        DiscordResponseAttachment attachment,
+        bool ephemeral,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+
+        using MemoryStream content = new(attachment.Content, writable: false);
+
+        return interaction.RespondWithFileAsync(
+            content,
+            attachment.FileName,
+            text: null,
+            embeds: null,
+            isTTS: false,
+            ephemeral: ephemeral,
+            allowedMentions: DiscordClientConfiguration.CanonicalAllowedMentions,
+            components: BuildComponents(components),
+            embed: BuildEmbed(embed),
+            options: Options(cancellationToken));
+    }
+
     public Task UpdateAsync(
         DiscordEmbedPayload embed,
         DiscordComponentPayload components,
@@ -99,6 +123,11 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
         foreach (DiscordEmbedFieldPayload field in payload.Fields ?? [])
         {
             builder.AddField(field.Name, field.Value, inline: false);
+        }
+
+        if (!string.IsNullOrEmpty(payload.ImageUrl))
+        {
+            builder.WithImageUrl(payload.ImageUrl);
         }
 
         return builder.Build();

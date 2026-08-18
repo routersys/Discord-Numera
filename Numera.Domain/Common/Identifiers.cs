@@ -453,3 +453,23 @@ public readonly record struct DirectDebitCollectionId(EntityIdValue Value)
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct BankCardDesignVersionId(EntityIdValue Value)
+    : IEntityId<BankCardDesignVersionId>
+{
+    public static string EntityName => "bank_card_design_version";
+
+    public static BankCardDesignVersionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct BankCardDesignTextSlotId(EntityIdValue Value)
+    : IEntityId<BankCardDesignTextSlotId>
+{
+    public static string EntityName => "bank_card_design_text_slot";
+
+    public static BankCardDesignTextSlotId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

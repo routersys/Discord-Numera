@@ -30,8 +30,6 @@ public sealed class SchemaConformanceTests
         "atm_transactions",
         "authorization_decisions",
         "bank_assets",
-        "bank_card_design_template_versions",
-        "bank_card_design_text_slots",
         "bank_cash_vaults",
         "bank_treasury_fx_accounts",
         "cash_holders",

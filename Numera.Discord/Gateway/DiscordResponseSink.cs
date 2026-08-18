@@ -9,7 +9,8 @@ internal sealed record DiscordEmbedPayload(
     string Description,
     string? Footer,
     uint Color,
-    IReadOnlyList<DiscordEmbedFieldPayload>? Fields = null);
+    IReadOnlyList<DiscordEmbedFieldPayload>? Fields = null,
+    string? ImageUrl = null);
 
 internal sealed record DiscordButtonPayload(
     string CustomId,
@@ -55,6 +56,13 @@ internal interface IDiscordResponseSink
     Task RespondAsync(
         DiscordEmbedPayload embed,
         DiscordComponentPayload components,
+        bool ephemeral,
+        CancellationToken cancellationToken);
+
+    Task RespondWithAttachmentAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        DiscordResponseAttachment attachment,
         bool ephemeral,
         CancellationToken cancellationToken);
 

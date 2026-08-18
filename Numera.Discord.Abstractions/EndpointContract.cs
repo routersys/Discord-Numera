@@ -284,6 +284,13 @@ public sealed class DiscordResponseField
     public string ValueKey { get; }
 }
 
+public sealed record DiscordResponseAttachment(string FileName, byte[] Content)
+{
+    public const string CanonicalScheme = "attachment://";
+
+    public string Reference => CanonicalScheme + FileName;
+}
+
 public sealed class DiscordResponseBody
 {
     public const int MaximumFieldCount = 10;
@@ -295,7 +302,8 @@ public sealed class DiscordResponseBody
 
     public DiscordResponseBody(
         IReadOnlyList<DiscordResponseField> fields,
-        DiscordResponseComponents components)
+        DiscordResponseComponents components,
+        DiscordResponseAttachment? attachment = null)
     {
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(components);
@@ -307,17 +315,23 @@ public sealed class DiscordResponseBody
 
         Fields = fields;
         Components = components;
+        Attachment = attachment;
     }
 
     public IReadOnlyList<DiscordResponseField> Fields { get; }
 
     public DiscordResponseComponents Components { get; }
 
+    public DiscordResponseAttachment? Attachment { get; }
+
     public static DiscordResponseBody WithComponents(DiscordResponseComponents components) =>
         new(EmptyFields, components);
 
     public static DiscordResponseBody WithFields(IReadOnlyList<DiscordResponseField> fields) =>
         new(fields, DiscordResponseComponents.None);
+
+    public static DiscordResponseBody WithAttachment(DiscordResponseAttachment attachment) =>
+        new(EmptyFields, DiscordResponseComponents.None, attachment);
 }
 
 public sealed class DiscordEndpointResponse

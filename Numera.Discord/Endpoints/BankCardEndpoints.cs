@@ -25,22 +25,28 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
     private const string ActionUnlockDebit = "unlock-debit";
     private const string ActionReplace = "replace";
 
+    internal const string CardImageFileName = "bank-card.png";
+
     private readonly IBankCardApplicationService cards;
     private readonly ICustomerAccountApplicationService customers;
     private readonly ITextCatalog catalog;
+    private readonly IBankCardImageService images;
 
     public BankCardEndpoints(
         IBankCardApplicationService cards,
         ICustomerAccountApplicationService customers,
-        ITextCatalog catalog)
+        ITextCatalog catalog,
+        IBankCardImageService images)
     {
         ArgumentNullException.ThrowIfNull(cards);
         ArgumentNullException.ThrowIfNull(customers);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(images);
 
         this.cards = cards;
         this.customers = customers;
         this.catalog = catalog;
+        this.images = images;
     }
 
     [EconomySlashCommand("card", "銀行カードを確認します。")]
@@ -85,9 +91,28 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
             action ?? ActionShow, customer.Value.Id, id, context, cancellationToken)
             .ConfigureAwait(false);
 
-        return result.IsSuccess
-            ? DiscordEndpointResponse.Message(ViewKeys.BankCard, Describe(result.Value))
-            : EndpointFailures.From(result.Error!);
+        if (!result.IsSuccess)
+        {
+            return EndpointFailures.From(result.Error!);
+        }
+
+        Result<BankCardRenderView> render = await cards
+            .RenderBankCardAsync(new RenderBankCardQuery(customer.Value.Id, id), cancellationToken)
+            .ConfigureAwait(false);
+
+        Dictionary<string, string> data = Describe(result.Value);
+
+        if (!render.IsSuccess
+            || images.TryRender(render.Value, customer.Value.DisplayName) is not { } png)
+        {
+            return DiscordEndpointResponse.Message(ViewKeys.BankCard, data);
+        }
+
+        return DiscordEndpointResponse.Message(
+            ViewKeys.BankCard,
+            data,
+            DiscordResponseBody.WithAttachment(
+                new DiscordResponseAttachment(CardImageFileName, png)));
     }
 
     private Task<Result<BankCardView>> ExecuteAsync(

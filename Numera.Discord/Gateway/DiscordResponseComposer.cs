@@ -60,7 +60,8 @@ internal sealed class CatalogResponseComposer : IDiscordResponseComposer
                 .. response.Body.Fields.Select(field => new DiscordEmbedFieldPayload(
                     catalog.Format(field.LabelKey, response.ViewData),
                     catalog.Format(field.ValueKey, response.ViewData))),
-            ]);
+            ],
+            response.Body.Attachment?.Reference);
     }
 
     public DiscordEmbedPayload Compose(RenderedError error)

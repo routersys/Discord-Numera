@@ -37,6 +37,12 @@ public static class DiscordServiceRegistration
         services.AddSingleton<Endpoints.ManageBankEndpoints>();
         services.AddSingleton<Endpoints.SuggestionEndpoints>();
         services.AddSingleton<Endpoints.BankQueryEndpoints>();
+        services.AddSingleton<Rendering.ICardRenderDiagnostics, Rendering.CardRenderDiagnostics>();
+        services.AddSingleton<Rendering.ICardFontProvider>(static _ =>
+            new Rendering.ManifestCardFontProvider(
+                Path.Combine(AppContext.BaseDirectory, "assets", "fonts")));
+        services.AddSingleton<Rendering.IBankCardRenderer, Rendering.BankCardRenderer>();
+        services.AddSingleton<Rendering.IBankCardImageService, Rendering.BankCardImageService>();
         services.AddSingleton<Endpoints.BankCardEndpoints>();
         services.AddSingleton<Endpoints.BankPaymentsEndpoints>();
         services.AddSingleton<Endpoints.ManagePanelEndpoints>();

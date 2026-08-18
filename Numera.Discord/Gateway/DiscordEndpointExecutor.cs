@@ -138,6 +138,7 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
                 embed,
                 composer.ComposeComponents(response),
                 response.Ephemeral,
+                response.Body.Attachment,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -235,6 +236,7 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
                 embed,
                 DiscordComponentPayload.None,
                 error.Ephemeral,
+                attachment: null,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -247,8 +249,12 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
         DiscordEmbedPayload embed,
         DiscordComponentPayload components,
         bool ephemeral,
+        DiscordResponseAttachment? attachment,
         CancellationToken cancellationToken) => operation switch
         {
+            DiscordResponseOperation.Respond when attachment is not null =>
+                exchange.Sink.RespondWithAttachmentAsync(
+                    embed, components, attachment, ephemeral, cancellationToken),
             DiscordResponseOperation.Respond =>
                 exchange.Sink.RespondAsync(embed, components, ephemeral, cancellationToken),
             DiscordResponseOperation.UpdateMessage =>
