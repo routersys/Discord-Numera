@@ -19,6 +19,9 @@ internal interface ISettlementMaintenanceRunner
 
     Task<AtmInstallationRecoveryReport> ScanAtmInstallationsAsync(CancellationToken cancellationToken);
 
+    Task<ScheduledPaymentMaintenanceReport> ProcessDueScheduledPaymentsAsync(
+        CancellationToken cancellationToken);
+
     Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken);
 
     Task<DormancyMaintenanceReport> ProcessDueDormancyAsync(CancellationToken cancellationToken);
@@ -30,6 +33,7 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
     private readonly CommerceMaintenanceService commerce;
     private readonly CommerceFulfillmentService fulfillments;
     private readonly AtmInstallationRecoveryService installations;
+    private readonly ScheduledPaymentMaintenanceService scheduled;
     private readonly ExpiryMaintenanceService expiries;
     private readonly DormancyMaintenanceService dormancy;
 
@@ -38,11 +42,13 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
         CommerceMaintenanceService commerce,
         CommerceFulfillmentService fulfillments,
         AtmInstallationRecoveryService installations,
+        ScheduledPaymentMaintenanceService scheduled,
         ExpiryMaintenanceService expiries,
         DormancyMaintenanceService dormancy)
     {
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(commerce);
+        ArgumentNullException.ThrowIfNull(scheduled);
         ArgumentNullException.ThrowIfNull(expiries);
         ArgumentNullException.ThrowIfNull(dormancy);
 
@@ -50,6 +56,7 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
         this.commerce = commerce;
         this.fulfillments = fulfillments;
         this.installations = installations;
+        this.scheduled = scheduled;
         this.expiries = expiries;
         this.dormancy = dormancy;
     }
@@ -71,6 +78,10 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
     public Task<AtmInstallationRecoveryReport> ScanAtmInstallationsAsync(
         CancellationToken cancellationToken) =>
         installations.ScanAsync(cancellationToken);
+
+    public Task<ScheduledPaymentMaintenanceReport> ProcessDueScheduledPaymentsAsync(
+        CancellationToken cancellationToken) =>
+        scheduled.ProcessDueAsync(cancellationToken);
 
     public Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken) =>
         expiries.ProcessDueAsync(cancellationToken);
@@ -123,6 +134,8 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
                 .ProcessDueFulfillmentsAsync(cancellationToken).ConfigureAwait(false);
             AtmInstallationRecoveryReport installations = await runner
                 .ScanAtmInstallationsAsync(cancellationToken).ConfigureAwait(false);
+            ScheduledPaymentMaintenanceReport scheduled = await runner
+                .ProcessDueScheduledPaymentsAsync(cancellationToken).ConfigureAwait(false);
             ExpiryMaintenanceReport expiries = await runner.ProcessDueExpiriesAsync(cancellationToken)
                 .ConfigureAwait(false);
             DormancyMaintenanceReport dormancy = await runner.ProcessDueDormancyAsync(cancellationToken)
@@ -132,10 +145,11 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
 
             diagnostics.SettlementMaintenanceCompleted(
                 queued.Examined + cycles.Examined + checkouts.Examined + finality.Examined +
-                    fulfillments.Examined + installations.Examined + expiries.Total + dormancyCount,
+                    fulfillments.Examined + installations.Examined + scheduled.Examined +
+                    expiries.Total + dormancyCount,
                 queued.Settled + cycles.Settled + checkouts.Cancelled + finality.Finalized +
                     fulfillments.Succeeded + installations.Confirmed + installations.Broken +
-                    expiries.Total + dormancyCount);
+                    scheduled.Executed + expiries.Total + dormancyCount);
         }
         catch (OperationCanceledException)
         {

@@ -80,6 +80,7 @@ internal static class BankingRegistration
         services.AddSingleton<CommerceMaintenanceService>();
         services.AddSingleton<CommerceFulfillmentService>();
         services.AddSingleton<AtmInstallationRecoveryService>();
+        services.AddSingleton<ScheduledPaymentMaintenanceService>();
         services.AddSingleton<ExpiryMaintenanceService>();
         services.AddSingleton<DormancyMaintenanceService>();
         services.AddSingleton<ISettlementMaintenanceRunner, SettlementMaintenanceRunner>();

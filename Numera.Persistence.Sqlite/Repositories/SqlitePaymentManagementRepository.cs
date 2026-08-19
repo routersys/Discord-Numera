@@ -18,6 +18,14 @@ internal sealed class SqlitePaymentManagementRepository : IPaymentManagementRepo
         "destination_deposit_account_id, saved_beneficiary_id, currency_id, kind, status, amount_minor, " +
         "anchor_day_of_month, canonical_timezone, next_due_at, created_at, version";
 
+    private const string OccurrenceColumns =
+        "scheduled_payment_occurrence_id, scheduled_payment_plan_id, payment_order_id, " +
+        "scheduled_for, status, attempted_at, completed_at, version";
+
+    private const string CollectionColumns =
+        "direct_debit_collection_id, direct_debit_mandate_id, payment_order_id, " +
+        "creditor_collection_reference, amount_minor, status, scheduled_for, completed_at, version";
+
     private const string MandateColumns =
         "direct_debit_mandate_id, creditor_party_id, creditor_settlement_account_id, " +
         "debtor_customer_account_id, debtor_deposit_account_id, currency_id, status, " +
@@ -288,6 +296,43 @@ internal sealed class SqlitePaymentManagementRepository : IPaymentManagementRepo
         }
     }
 
+    public ScheduledPaymentOccurrence? FindOccurrence(ScheduledPaymentOccurrenceId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {OccurrenceColumns} FROM scheduled_payment_occurrences
+            WHERE scheduled_payment_occurrence_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadOccurrence(reader) : null;
+    }
+
+    public IReadOnlyList<ScheduledPaymentOccurrence> ListDueOccurrences(UtcTimestamp now, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {OccurrenceColumns} FROM scheduled_payment_occurrences
+            WHERE status = 'PENDING' AND scheduled_for <= $now
+            ORDER BY scheduled_for, scheduled_payment_occurrence_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<ScheduledPaymentOccurrence> items = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            items.Add(ReadOccurrence(reader));
+        }
+
+        return items;
+    }
+
     public void AddMandate(DirectDebitMandate mandate)
     {
         ArgumentNullException.ThrowIfNull(mandate);
@@ -463,6 +508,87 @@ internal sealed class SqlitePaymentManagementRepository : IPaymentManagementRepo
             throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
         }
     }
+
+    public DirectDebitCollection? FindCollection(DirectDebitCollectionId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {CollectionColumns} FROM direct_debit_collections
+            WHERE direct_debit_collection_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadCollection(reader) : null;
+    }
+
+    public DirectDebitCollection? FindCollectionByReference(
+        DirectDebitMandateId mandateId,
+        string creditorCollectionReference)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {CollectionColumns} FROM direct_debit_collections
+            WHERE direct_debit_mandate_id = $mandate AND creditor_collection_reference = $reference;
+            """);
+
+        command.Parameters.AddWithValue("$mandate", SqliteValueMapper.ToBlob(mandateId.Value));
+        command.Parameters.AddWithValue("$reference", creditorCollectionReference);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadCollection(reader) : null;
+    }
+
+    public IReadOnlyList<DirectDebitCollection> ListDueCollections(UtcTimestamp now, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {CollectionColumns} FROM direct_debit_collections
+            WHERE status = 'PENDING' AND scheduled_for <= $now
+            ORDER BY scheduled_for, direct_debit_collection_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<DirectDebitCollection> items = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            items.Add(ReadCollection(reader));
+        }
+
+        return items;
+    }
+
+    private static ScheduledPaymentOccurrence ReadOccurrence(SqliteDataReader reader) =>
+        ScheduledPaymentOccurrence.Rehydrate(
+            ScheduledPaymentOccurrenceId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),
+            ScheduledPaymentPlanId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(1))),
+            reader.IsDBNull(2)
+                ? null
+                : PaymentOrderId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(2))),
+            UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(3)),
+            ScheduledPaymentOccurrenceCatalog.ParseToken(reader.GetString(4)),
+            reader.IsDBNull(5) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(5)),
+            reader.IsDBNull(6) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(6)),
+            reader.GetInt64(7));
+
+    private static DirectDebitCollection ReadCollection(SqliteDataReader reader) =>
+        DirectDebitCollection.Rehydrate(
+            DirectDebitCollectionId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),
+            DirectDebitMandateId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(1))),
+            reader.IsDBNull(2)
+                ? null
+                : PaymentOrderId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(2))),
+            reader.GetString(3),
+            MoneyMinor.FromMinor(reader.GetInt64(4)),
+            DirectDebitCollectionCatalog.ParseToken(reader.GetString(5)),
+            UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(6)),
+            reader.IsDBNull(7) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(7)),
+            reader.GetInt64(8));
 
     private static SavedBeneficiary ReadBeneficiary(SqliteDataReader reader) =>
         SavedBeneficiary.Rehydrate(

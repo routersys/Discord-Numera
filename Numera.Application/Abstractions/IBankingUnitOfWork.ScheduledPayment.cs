@@ -35,6 +35,10 @@ public interface IPaymentManagementRepository
 
     void UpdateOccurrence(ScheduledPaymentOccurrence occurrence);
 
+    ScheduledPaymentOccurrence? FindOccurrence(ScheduledPaymentOccurrenceId id);
+
+    IReadOnlyList<ScheduledPaymentOccurrence> ListDueOccurrences(UtcTimestamp now, int limit);
+
     void AddMandate(DirectDebitMandate mandate);
 
     void UpdateMandate(DirectDebitMandate mandate);
@@ -51,6 +55,14 @@ public interface IPaymentManagementRepository
     void AddCollection(DirectDebitCollection collection);
 
     void UpdateCollection(DirectDebitCollection collection);
+
+    DirectDebitCollection? FindCollection(DirectDebitCollectionId id);
+
+    DirectDebitCollection? FindCollectionByReference(
+        DirectDebitMandateId mandateId,
+        string creditorCollectionReference);
+
+    IReadOnlyList<DirectDebitCollection> ListDueCollections(UtcTimestamp now, int limit);
 }
 
 public partial interface IBankingUnitOfWork

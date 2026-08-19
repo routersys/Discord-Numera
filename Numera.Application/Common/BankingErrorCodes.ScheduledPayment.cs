@@ -26,6 +26,9 @@ public static partial class BankingErrorCodes
     public static string DirectDebitMandateStateInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 104);
 
+    public static string DirectDebitCollectionReferenceDuplicated { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 105);
+
     public static string BeneficiaryNameInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 100);
 
@@ -40,6 +43,9 @@ public static partial class BankingErrorCodes
 
     public static string DirectDebitMandateInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 104);
+
+    public static string DirectDebitCollectionAmountInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 105);
 
     public static string BeneficiaryNotReceivable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.AccountRestricted, 100);
