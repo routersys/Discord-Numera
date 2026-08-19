@@ -21,6 +21,7 @@ public sealed class FxMatchingTests
     private const string ForeignInstitution = "NUM0003";
     private const ulong MakerUser = 780_000_000_000_000_001UL;
     private const ulong TakerUser = 780_000_000_000_000_002UL;
+    private const ulong OwnerUser = 780_000_000_000_000_003UL;
     private const long PriceScale = 100;
     private const long LotSize = 100;
 
@@ -53,6 +54,10 @@ public sealed class FxMatchingTests
         public FxApplicationService Markets { get; private set; } = null!;
 
         public SettlementMaintenanceService Maintenance { get; private set; } = null!;
+
+        public FxAdministrationApplicationService Administration { get; private set; } = null!;
+
+        public CurrencyTrustAdministrationApplicationService Trust { get; private set; } = null!;
 
         public FxMarketId MarketId { get; } = FxMarketId.FromValue(EntityIdValue.FromBits(100));
 
@@ -88,6 +93,10 @@ public sealed class FxMatchingTests
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Maintenance = new SettlementMaintenanceService(
                 gateway, payments, harness.Clock, ids);
+            harness.Administration = new FxAdministrationApplicationService(
+                gateway, harness.Clock, ids);
+            harness.Trust = new CurrencyTrustAdministrationApplicationService(
+                gateway, harness.Clock, ids);
 
             return harness;
         }
@@ -132,6 +141,45 @@ public sealed class FxMatchingTests
                 INSERT INTO fx_market_summaries(market_id, last_trade_price_units, last_trade_sequence_no,
                     summary_version, order_book_version, updated_at)
                 VALUES({Blob(100)}, NULL, NULL, 1, 1, 1);
+                """);
+        }
+
+        public void SeedGovernance()
+        {
+            Execute($"""
+                INSERT INTO system_owner_identities(discord_user_id, created_at)
+                VALUES('{OwnerUser}', 1);
+
+                INSERT INTO currency_trust_policy_versions(currency_trust_policy_version_id,
+                    economy_scope_id, established_min_age_seconds, established_min_trade_days,
+                    established_min_counterparties, trusted_min_age_seconds, trusted_min_trade_days,
+                    trusted_min_counterparties, reserve_min_age_seconds, reserve_min_trade_days,
+                    reserve_min_counterparties, status, created_at, published_at, retired_at, version)
+                VALUES({Blob(160)}, {Blob(1)}, 604800, 3, 2, 2592000, 10, 3,
+                    7776000, 30, 5, 'PUBLISHED', 1, 1, NULL, 1);
+                """);
+        }
+
+        public void SeedUnresolvedIssue()
+        {
+            Execute($"""
+                INSERT INTO reconciliation_runs(reconciliation_run_id, scope_type, scope_id, started_at,
+                    completed_at, status, version)
+                VALUES({Blob(161)}, 'ECONOMY_SCOPE', {Blob(1)}, 1, 2, 'ISSUES_FOUND', 1);
+
+                INSERT INTO reconciliation_issues(reconciliation_issue_id, reconciliation_run_id,
+                    issue_code, severity, target_type, target_id, detail, detected_at, resolved_at,
+                    resolution_business_operation_id)
+                VALUES({Blob(162)}, {Blob(161)}, 'LEDGER_IMBALANCE', 'CRITICAL', 'CURRENCY', NULL,
+                    'ledger-imbalance', 2, NULL, NULL);
+                """);
+        }
+
+        public void DraftMarket()
+        {
+            Execute($"""
+                UPDATE fx_markets SET status = 'PENDING_APPROVAL', version = version + 1
+                WHERE market_id = {Blob(100)};
                 """);
         }
 
@@ -338,6 +386,14 @@ public sealed class FxMatchingTests
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText = sql;
             return command.ExecuteScalar() is long value ? value : 0L;
+        }
+
+        public string ReadText(string sql)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = sql;
+            return command.ExecuteScalar() as string ?? string.Empty;
         }
 
         public long Balance(DepositAccountId accountId) => Projection(accountId, "posted_balance_minor");
@@ -861,6 +917,157 @@ public sealed class FxMatchingTests
         Assert.AreEqual(1L, chart.Value.CacheKey.ProjectionVersion);
         Assert.AreEqual(150L, rate.Value.High24hPriceUnits);
         Assert.AreEqual(1_000L, rate.Value.Volume24hBaseMinor);
+    }
+
+    [TestMethod]
+    public async Task ASingleGuildApprovalDoesNotActivateTheMarket()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedGovernance();
+        harness.DraftMarket();
+
+        Result<FxMarketView> first = await harness.Administration.SetMarketStateAsync(
+            new SetFxMarketStateCommand(
+                new AuthorizationContext(AuthorizationLevel.GuildOperator, MakerUser, BaseGuildId),
+                harness.MarketId,
+                FxMarketStatus.Active),
+            CancellationToken.None);
+
+        Assert.IsTrue(first.IsSuccess, first.Error?.Code);
+        Assert.AreEqual(FxMarketStatus.PendingApproval, first.Value.Status);
+        Assert.AreEqual(1L, harness.Count("authorization_decisions"));
+
+        Result<FxMarketView> second = await harness.Administration.SetMarketStateAsync(
+            new SetFxMarketStateCommand(
+                new AuthorizationContext(AuthorizationLevel.GuildOperator, TakerUser, QuoteGuildId),
+                harness.MarketId,
+                FxMarketStatus.Active),
+            CancellationToken.None);
+
+        Assert.IsTrue(second.IsSuccess, second.Error?.Code);
+        Assert.AreEqual(FxMarketStatus.Active, second.Value.Status);
+        Assert.AreEqual(2L, harness.Count("authorization_decisions"));
+        Assert.AreEqual(2L, harness.Count("audit_records"));
+        Assert.AreEqual(
+            2L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM outbox_events WHERE event_type = 'FX_MARKET_DECISION_RECORDED';
+                """));
+    }
+
+    [TestMethod]
+    public async Task ASystemOwnerOverrideActivatesTheMarketAlone()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedGovernance();
+        harness.DraftMarket();
+
+        Result<FxMarketView> result = await harness.Administration.SetMarketStateAsync(
+            new SetFxMarketStateCommand(
+                new AuthorizationContext(AuthorizationLevel.SystemOwner, OwnerUser, BaseGuildId),
+                harness.MarketId,
+                FxMarketStatus.Active),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess, result.Error?.Code);
+        Assert.AreEqual(FxMarketStatus.Active, result.Value.Status);
+        Assert.AreEqual(
+            "OVERRIDE",
+            harness.ReadText("SELECT decision_kind FROM authorization_decisions;"));
+    }
+
+    private static async Task TradeOnThreeDaysAsync(Harness harness)
+    {
+        (Trader maker, Trader taker) = await TradersAsync(harness);
+
+        for (int day = 0; day < 3; day++)
+        {
+            string suffix = day.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            await SellAsync(harness, maker, 1_000, 150, "sell-" + suffix);
+            Result<FxOrderView> filled = await BuyAsync(harness, taker, 1_000, 150, "buy-" + suffix);
+
+            Assert.IsTrue(filled.IsSuccess, filled.Error?.Code);
+
+            harness.Clock.Advance(24L * 60 * 60 * 1000);
+        }
+    }
+
+    [TestMethod]
+    public async Task TheTrustDesignationRecomputesTheObservationsFreshly()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedGovernance();
+        await TradeOnThreeDaysAsync(harness);
+
+        Result<CurrencyTrustDesignationView> result = await harness.Trust
+            .PublishDesignationAsync(
+                new PublishCurrencyTrustDesignationCommand(
+                    new AuthorizationContext(AuthorizationLevel.SystemOwner, OwnerUser, BaseGuildId),
+                    CurrencyId.FromValue(EntityIdValue.FromBits(2)),
+                    CurrencyTrustTier.Established),
+                CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess, result.Error?.Code);
+        Assert.AreEqual(CurrencyTrustTier.Established, result.Value.Tier);
+        Assert.AreEqual(
+            3L, harness.Scalar("SELECT qualified_trade_days FROM currency_trust_designations;"));
+        Assert.AreEqual(
+            2L, harness.Scalar("SELECT qualified_counterparties FROM currency_trust_designations;"));
+        Assert.IsGreaterThan(
+            604_800L, harness.Scalar("SELECT qualified_age_seconds FROM currency_trust_designations;"));
+        Assert.AreEqual(
+            1L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM authorization_decisions
+                WHERE target_type = 'CURRENCY_TRUST_DESIGNATION';
+                """));
+        Assert.AreEqual(
+            1L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM outbox_events WHERE event_type = 'CURRENCY_TRUST_DESIGNATED';
+                """));
+    }
+
+    [TestMethod]
+    public async Task ATierBeyondTheFreshObservationIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedGovernance();
+        await TradeOnThreeDaysAsync(harness);
+
+        Result<CurrencyTrustDesignationView> result = await harness.Trust
+            .PublishDesignationAsync(
+                new PublishCurrencyTrustDesignationCommand(
+                    new AuthorizationContext(AuthorizationLevel.SystemOwner, OwnerUser, BaseGuildId),
+                    CurrencyId.FromValue(EntityIdValue.FromBits(2)),
+                    CurrencyTrustTier.Trusted),
+                CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CurrencyTrustTierNotQualified, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("currency_trust_designations"));
+    }
+
+    [TestMethod]
+    public async Task AnUnresolvedIntegrityIssueBlocksTheTrustDesignation()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedGovernance();
+        harness.SeedUnresolvedIssue();
+        await TradeOnThreeDaysAsync(harness);
+
+        Result<CurrencyTrustDesignationView> result = await harness.Trust
+            .PublishDesignationAsync(
+                new PublishCurrencyTrustDesignationCommand(
+                    new AuthorizationContext(AuthorizationLevel.SystemOwner, OwnerUser, BaseGuildId),
+                    CurrencyId.FromValue(EntityIdValue.FromBits(2)),
+                    CurrencyTrustTier.Established),
+                CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CurrencyTrustIntegrityBlocked, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("currency_trust_designations"));
     }
 
     [TestMethod]

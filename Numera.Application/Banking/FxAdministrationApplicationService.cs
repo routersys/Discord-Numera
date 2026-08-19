@@ -1,5 +1,7 @@
+using System.Globalization;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 
@@ -79,6 +81,22 @@ public interface IFxAdministrationApplicationService
 
 public sealed class FxAdministrationApplicationService : IFxAdministrationApplicationService
 {
+    public const string MarketDecisionOperationType = "FX_MARKET_DECISION";
+
+    public const string MarketDecisionTargetType = "FX_MARKET_ACTIVATION";
+
+    public const string MarketDecisionEventType = "FX_MARKET_DECISION_RECORDED";
+
+    public const string GuildOperatorAuthority = "GUILD_OPERATOR";
+
+    public const string SystemOwnerAuthority = "SYSTEM_OWNER";
+
+    public const string ApproveDecision = "APPROVE";
+
+    public const string OverrideDecision = "OVERRIDE";
+
+    public const string RevokeDecision = "REVOKE";
+
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
@@ -346,9 +364,12 @@ public sealed class FxAdministrationApplicationService : IFxAdministrationApplic
                 ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
-        if (market.Status == command.DesiredStatus)
+        if (command.DesiredStatus is not (FxMarketStatus.Active
+            or FxMarketStatus.Suspended
+            or FxMarketStatus.Retired))
         {
-            return Result<FxMarketView>.Success(ToView(unitOfWork, market));
+            return Result<FxMarketView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.FxMarketStateInvalid);
         }
 
         if (command.DesiredStatus == FxMarketStatus.Retired
@@ -359,34 +380,144 @@ public sealed class FxAdministrationApplicationService : IFxAdministrationApplic
                 ErrorCategory.Conflict, BankingErrorCodes.FxMarketHasRestingOrders);
         }
 
-        try
+        UtcTimestamp now = clock.Now();
+        bool systemOwner = GovernanceAuthorization.IsSystemOwner(unitOfWork, command.Actor);
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            MarketDecisionOperationType,
+            EconomyScopeResolver.Resolve(unitOfWork, command.Actor, requested: null).Value,
+            actorPartyId: null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(
+                MarketDecisionOperationType,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{market.Id.Value}:{command.Actor.DiscordUserId}:{command.DesiredStatus.ToToken()}")),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        unitOfWork.AuthorizationDecisions.Add(new AuthorizationDecisionRecord(
+            AuthorizationDecisionId.FromValue(idGenerator.NextId()),
+            MarketDecisionTargetType,
+            market.Id.Value,
+            systemOwner
+                ? null
+                : command.Actor.GuildId.ToString(CultureInfo.InvariantCulture),
+            systemOwner ? SystemOwnerAuthority : GuildOperatorAuthority,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            ActorCustomerAccountId: null,
+            DecisionKindOf(command.DesiredStatus, systemOwner),
+            ReasonCode: null,
+            now));
+
+        bool activating = command.DesiredStatus == FxMarketStatus.Active;
+        bool moved = false;
+
+        if (!activating || Activatable(unitOfWork, market))
         {
-            switch (command.DesiredStatus)
+            try
             {
-                case FxMarketStatus.Suspended:
-                    market.Suspend();
-                    break;
-                case FxMarketStatus.Active:
-                    market.Activate();
-                    break;
-                case FxMarketStatus.Retired:
-                    market.Retire();
-                    break;
-                default:
+                switch (command.DesiredStatus)
+                {
+                    case FxMarketStatus.Suspended:
+                        market.Suspend();
+                        break;
+                    case FxMarketStatus.Active:
+                        market.Activate();
+                        break;
+                    default:
+                        market.Retire();
+                        break;
+                }
+
+                moved = true;
+            }
+            catch (InvariantViolationException)
+            {
+                if (market.Status != command.DesiredStatus)
+                {
                     return Result<FxMarketView>.Failure(
-                        ErrorCategory.Validation, BankingErrorCodes.FxMarketStateInvalid);
+                        ErrorCategory.Conflict, BankingErrorCodes.FxMarketStateInvalid);
+                }
             }
         }
-        catch (InvariantViolationException)
+
+        if (moved)
         {
-            return Result<FxMarketView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FxMarketStateInvalid);
+            unitOfWork.Fx.UpdateMarket(market);
         }
 
-        unitOfWork.Fx.UpdateMarket(market);
+        unitOfWork.BankAdministration.AddAuditRecord(
+            AuditRecordId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            MarketDecisionOperationType,
+            MarketDecisionTargetType,
+            market.Id.Value,
+            command.DesiredStatus.ToToken(),
+            now);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            MarketDecisionEventType,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $$"""{"market_id":"{{market.Id.Value}}","status":"{{market.Status.ToToken()}}"}"""),
+            now));
 
         return Result<FxMarketView>.Success(ToView(unitOfWork, market));
     }
+
+    private static string DecisionKindOf(FxMarketStatus desired, bool systemOwner) => desired switch
+    {
+        FxMarketStatus.Active => systemOwner ? OverrideDecision : ApproveDecision,
+        _ => RevokeDecision,
+    };
+
+    internal static bool Activatable(IBankingUnitOfWork unitOfWork, FxMarket market)
+    {
+        if (market.CurrentPolicyVersionId is null || !market.IsExactSettlementCapable)
+        {
+            return false;
+        }
+
+        string? baseGuild = GuildOf(unitOfWork, market.BaseCurrencyId);
+        string? quoteGuild = GuildOf(unitOfWork, market.QuoteCurrencyId);
+        bool baseApproved = false;
+        bool quoteApproved = false;
+
+        foreach (AuthorizationDecisionRecord decision in
+            unitOfWork.AuthorizationDecisions.ListEffective(MarketDecisionTargetType, market.Id.Value))
+        {
+            if (decision.AuthorityKind == SystemOwnerAuthority &&
+                decision.DecisionKind == OverrideDecision)
+            {
+                return true;
+            }
+
+            if (decision.AuthorityKind != GuildOperatorAuthority ||
+                decision.DecisionKind != ApproveDecision)
+            {
+                continue;
+            }
+
+            baseApproved |= decision.ScopeGuildId is { } scope && scope == baseGuild;
+            quoteApproved |= decision.ScopeGuildId is { } quoteScope && quoteScope == quoteGuild;
+        }
+
+        return baseApproved && quoteApproved;
+    }
+
+    private static string? GuildOf(IBankingUnitOfWork unitOfWork, CurrencyId currencyId) =>
+        unitOfWork.Currencies.Find(currencyId) is { } currency
+            ? unitOfWork.GuildEconomies.FindGuildId(currency.EconomyScopeId)
+            : null;
 
     internal static (CurrencyId First, CurrencyId Second) Orient(CurrencyId left, CurrencyId right) =>
         left.Value.CompareTo(right.Value) < 0 ? (left, right) : (right, left);

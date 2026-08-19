@@ -1,5 +1,7 @@
+using System.Globalization;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 
@@ -28,20 +30,12 @@ public sealed record PublishCurrencyTrustPolicyCommand(
     AuthorizationContext Actor,
     CurrencyTrustPolicyVersionId CurrencyTrustPolicyVersionId);
 
-public sealed record AssessCurrencyTrustQuery(
-    AuthorizationContext Actor,
-    CurrencyId CurrencyId,
-    long ObservedAgeSeconds,
-    int ObservedTradeDays,
-    int ObservedCounterparties);
+public sealed record AssessCurrencyTrustQuery(AuthorizationContext Actor, CurrencyId CurrencyId);
 
 public sealed record PublishCurrencyTrustDesignationCommand(
     AuthorizationContext Actor,
     CurrencyId CurrencyId,
-    CurrencyTrustTier Tier,
-    long ObservedAgeSeconds,
-    int ObservedTradeDays,
-    int ObservedCounterparties);
+    CurrencyTrustTier Tier);
 
 public sealed record SetCurrencyTrustDesignationStateCommand(
     AuthorizationContext Actor,
@@ -102,6 +96,12 @@ public sealed class CurrencyTrustAdministrationApplicationService
     public const long EstablishedFloorSeconds = 604_800;
     public const long TrustedFloorSeconds = 2_592_000;
     public const long ReserveFloorSeconds = 7_776_000;
+
+    public const string DesignationOperationType = "CURRENCY_TRUST_DESIGNATION";
+
+    public const string DesignationTargetType = "CURRENCY_TRUST_DESIGNATION";
+
+    public const string DesignationEventType = "CURRENCY_TRUST_DESIGNATED";
 
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
@@ -325,7 +325,7 @@ public sealed class CurrencyTrustAdministrationApplicationService
             published.Id, published.EconomyScopeId, published.Status));
     }
 
-    private static Result<CurrencyTrustAssessmentView> Assess(
+    private Result<CurrencyTrustAssessmentView> Assess(
         IBankingUnitOfWork unitOfWork,
         AssessCurrencyTrustQuery query)
     {
@@ -342,10 +342,19 @@ public sealed class CurrencyTrustAdministrationApplicationService
                 ErrorCategory.NotFound, BankingErrorCodes.CurrencyTrustPolicyNotPublished);
         }
 
+        if (Observe(unitOfWork, scope.Value, query.CurrencyId) is not { } observation)
+        {
+            return Result<CurrencyTrustAssessmentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
+        }
+
         return Result<CurrencyTrustAssessmentView>.Success(new CurrencyTrustAssessmentView(
             query.CurrencyId,
             Qualify(
-                policy, query.ObservedAgeSeconds, query.ObservedTradeDays, query.ObservedCounterparties),
+                policy,
+                observation.AgeSeconds,
+                observation.TradeDays,
+                observation.Counterparties),
             unitOfWork.Governance.FindCurrentTrustDesignation(query.CurrencyId)?.Tier));
     }
 
@@ -373,8 +382,22 @@ public sealed class CurrencyTrustAdministrationApplicationService
                 ErrorCategory.NotFound, BankingErrorCodes.CurrencyTrustPolicyNotPublished);
         }
 
+        UtcTimestamp now = clock.Now();
+
+        if (Observe(unitOfWork, scope.Value, command.CurrencyId) is not { } observation)
+        {
+            return Result<CurrencyTrustDesignationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
+        }
+
+        if (observation.UnresolvedIssues > 0)
+        {
+            return Result<CurrencyTrustDesignationView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CurrencyTrustIntegrityBlocked);
+        }
+
         CurrencyTrustTier qualified = Qualify(
-            policy, command.ObservedAgeSeconds, command.ObservedTradeDays, command.ObservedCounterparties);
+            policy, observation.AgeSeconds, observation.TradeDays, observation.Counterparties);
 
         if (command.Tier > qualified)
         {
@@ -394,24 +417,114 @@ public sealed class CurrencyTrustAdministrationApplicationService
             });
         }
 
+        CurrencyTrustDesignationId designationId =
+            CurrencyTrustDesignationId.FromValue(idGenerator.NextId());
+
+        AuthorizationDecisionId decisionId = AuthorizationDecisionId.FromValue(idGenerator.NextId());
+
+        unitOfWork.AuthorizationDecisions.Add(new AuthorizationDecisionRecord(
+            decisionId,
+            DesignationTargetType,
+            designationId.Value,
+            command.Actor.GuildId.ToString(CultureInfo.InvariantCulture),
+            GovernanceAuthorization.IsSystemOwner(unitOfWork, command.Actor)
+                ? FxAdministrationApplicationService.SystemOwnerAuthority
+                : FxAdministrationApplicationService.GuildOperatorAuthority,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            ActorCustomerAccountId: null,
+            FxAdministrationApplicationService.ApproveDecision,
+            ReasonCode: null,
+            now));
+
         CurrencyTrustDesignationRecord designation = new(
-            CurrencyTrustDesignationId.FromValue(idGenerator.NextId()),
+            designationId,
             command.CurrencyId,
             policy.Id,
             command.Tier,
             CurrencyTrustDesignationStatus.Active,
-            command.ObservedAgeSeconds,
-            command.ObservedTradeDays,
-            command.ObservedCounterparties,
-            clock.Now(),
+            observation.AgeSeconds,
+            observation.TradeDays,
+            observation.Counterparties,
+            command.Tier == CurrencyTrustTier.Experimental ? null : decisionId,
+            now,
             1);
 
         CurrencyTrustDesignationStatusCatalog.EnsureCreatable(designation.Status);
         unitOfWork.Governance.AddTrustDesignation(designation);
 
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            DesignationOperationType,
+            scope.Value,
+            actorPartyId: null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(
+                DesignationOperationType,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{command.CurrencyId.Value}:{designation.Id.Value}")),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        unitOfWork.BankAdministration.AddAuditRecord(
+            AuditRecordId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            DesignationOperationType,
+            DesignationTargetType,
+            designation.Id.Value,
+            command.Tier.ToToken(),
+            now);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            DesignationEventType,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $$"""{"currency_id":"{{command.CurrencyId.Value}}","tier":"{{command.Tier.ToToken()}}"}"""),
+            now));
+
         return Result<CurrencyTrustDesignationView>.Success(new CurrencyTrustDesignationView(
             designation.Id, designation.CurrencyId, designation.Tier, designation.Status));
     }
+
+    internal readonly record struct TrustObservation(
+        long AgeSeconds,
+        int TradeDays,
+        int Counterparties,
+        long UnresolvedIssues);
+
+    internal static TrustObservation? Observe(
+        IBankingUnitOfWork unitOfWork,
+        EconomyScopeId economyScopeId,
+        CurrencyId currencyId,
+        IClock clock)
+    {
+        if (unitOfWork.Currencies.Find(currencyId) is not { } currency)
+        {
+            return null;
+        }
+
+        FxTradingObservation trading = unitOfWork.Fx.ObserveTrading(currencyId);
+
+        return new TrustObservation(
+            Math.Max(
+                0L,
+                (clock.Now().UnixMilliseconds - currency.CreatedAt.UnixMilliseconds) / 1000),
+            trading.TradeDays,
+            trading.DistinctCounterparties,
+            unitOfWork.Reconciliation.CountUnresolvedIssues(economyScopeId));
+    }
+
+    private TrustObservation? Observe(
+        IBankingUnitOfWork unitOfWork,
+        EconomyScopeId economyScopeId,
+        CurrencyId currencyId) => Observe(unitOfWork, economyScopeId, currencyId, clock);
 
     private static Result<CurrencyTrustDesignationView> SetDesignationState(
         IBankingUnitOfWork unitOfWork,

@@ -21,7 +21,7 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
     private const string DesignationColumns =
         "currency_trust_designation_id, currency_id, currency_trust_policy_version_id, trust_tier, " +
         "status, qualified_age_seconds, qualified_trade_days, qualified_counterparties, " +
-        "effective_from, version";
+        "effective_from, version, authorization_decision_id";
 
     private const string MandateColumns =
         "fx_intervention_mandate_id, monetary_authority_id, market_id, allowed_side, " +
@@ -186,9 +186,9 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
         ArgumentNullException.ThrowIfNull(designation);
 
         using SqliteCommand command = unitOfWork.CreateCommand($"""
-            INSERT INTO currency_trust_designations({DesignationColumns}, authorization_decision_id)
+            INSERT INTO currency_trust_designations({DesignationColumns})
             VALUES($id, $currency, $policy, $tier, $status, $age, $days, $parties, $from, $version,
-                CASE WHEN $tier = 'EXPERIMENTAL' THEN NULL ELSE $id END);
+                $decision);
             """);
 
         BindDesignation(command, designation);
@@ -583,6 +583,11 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
         command.Parameters.AddWithValue("$parties", designation.QualifiedCounterparties);
         command.Parameters.AddWithValue("$from", designation.EffectiveFrom.UnixMilliseconds);
         command.Parameters.AddWithValue("$version", designation.Version);
+        command.Parameters.AddWithValue(
+            "$decision",
+            designation.AuthorizationDecisionId is { } decision
+                ? SqliteValueMapper.ToBlob(decision.Value)
+                : DBNull.Value);
     }
 
     private static void BindMandate(SqliteCommand command, FxInterventionMandateRecord mandate)
@@ -662,6 +667,10 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
             reader.GetInt64(5),
             reader.GetInt32(6),
             reader.GetInt32(7),
+            reader.IsDBNull(10)
+                ? null
+                : AuthorizationDecisionId.FromValue(
+                    EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(10))),
             UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(8)),
             reader.GetInt64(9));
 }

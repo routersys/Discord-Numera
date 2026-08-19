@@ -39,6 +39,7 @@ public sealed record CurrencyTrustDesignationRecord(
     long QualifiedAgeSeconds,
     int QualifiedTradeDays,
     int QualifiedCounterparties,
+    AuthorizationDecisionId? AuthorizationDecisionId,
     UtcTimestamp EffectiveFrom,
     long Version);
 

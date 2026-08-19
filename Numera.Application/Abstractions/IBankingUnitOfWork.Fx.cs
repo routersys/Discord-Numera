@@ -35,6 +35,8 @@ public sealed record FxOhlcBucket(
 
 public sealed record FxDepthLevel(long PriceUnits, long BaseMinor);
 
+public sealed record FxTradingObservation(int TradeDays, int DistinctCounterparties);
+
 public sealed record FxFundingEndpointRecord(
     FxFundingEndpointId Id,
     CurrencyId CurrencyId,
@@ -153,6 +155,8 @@ public interface IFxRepository
 
     IReadOnlyList<FxSettlementLegComponent> ListClearingComponents(
         ClearingInstructionId clearingInstructionId);
+
+    FxTradingObservation ObserveTrading(CurrencyId currencyId);
 
     FxOhlcBucket? FindBucket(FxMarketId marketId, int bucketSeconds, long bucketStart);
 

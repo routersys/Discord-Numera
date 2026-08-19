@@ -653,3 +653,13 @@ public readonly record struct MerchantOperatorGrantId(EntityIdValue Value) : IEn
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct AuthorizationDecisionId(EntityIdValue Value)
+    : IEntityId<AuthorizationDecisionId>
+{
+    public static string EntityName => "authorization_decision";
+
+    public static AuthorizationDecisionId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

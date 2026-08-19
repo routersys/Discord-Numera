@@ -17,7 +17,14 @@ public interface IOperationResultRepository
     OperationResultRecord? Find(BusinessOperationId businessOperationId);
 }
 
+public interface IReconciliationRepository
+{
+    long CountUnresolvedIssues(EconomyScopeId economyScopeId);
+}
+
 public partial interface IBankingUnitOfWork
 {
     IOperationResultRepository OperationResults { get; }
+
+    IReconciliationRepository Reconciliation { get; }
 }

@@ -47,6 +47,9 @@ public static partial class BankingErrorCodes
     public static string CurrencyTrustDesignationStateInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 164);
 
+    public static string CurrencyTrustIntegrityBlocked { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 172);
+
     public static string InterventionMandateNotActive { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 165);
 

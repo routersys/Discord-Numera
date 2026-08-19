@@ -989,6 +989,26 @@ internal sealed class SqliteFxRepository : IFxRepository
             reader.IsDBNull(14) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(14)),
             reader.GetInt64(15));
 
+    public FxTradingObservation ObserveTrading(CurrencyId currencyId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COUNT(DISTINCT t.executed_at / 86400000),
+                   COUNT(DISTINCT o.participant_party_id)
+            FROM fx_trades AS t
+            JOIN fx_markets AS m ON m.market_id = t.market_id
+            JOIN fx_orders AS o ON o.fx_order_id IN (t.maker_order_id, t.taker_order_id)
+            WHERE m.base_currency_id = $currency OR m.quote_currency_id = $currency;
+            """);
+
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(currencyId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new FxTradingObservation(reader.GetInt32(0), reader.GetInt32(1))
+            : new FxTradingObservation(0, 0);
+    }
+
     public FxOhlcBucket? FindBucket(FxMarketId marketId, int bucketSeconds, long bucketStart)
     {
         using SqliteCommand command = unitOfWork.CreateCommand($"""
