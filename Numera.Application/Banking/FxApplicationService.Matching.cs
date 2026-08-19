@@ -143,8 +143,6 @@ public sealed partial class FxApplicationService
         unitOfWork.Fx.AddOrder(order);
 
         bool rejected = command.OrderType == FxOrderType.MarketFok && !context.PlanComplete;
-        long lastPriceUnits = 0;
-        long lastSequenceNo = 0;
 
         if (!rejected)
         {
@@ -156,9 +154,6 @@ public sealed partial class FxApplicationService
                 {
                     return Result<FxOrderView>.Failure(executed.Error!);
                 }
-
-                lastPriceUnits = fill.Maker.PriceUnits!.Value;
-                lastSequenceNo = context.Market.NextTradeSequenceNo - 1;
             }
         }
 
@@ -175,13 +170,10 @@ public sealed partial class FxApplicationService
         context.Source.RecordCustomerActivity(context.Now);
         unitOfWork.DepositAccounts.Update(context.Source);
 
-        UpdateProjections(
-            unitOfWork,
-            context,
-            filled: !rejected && context.Fills.Count > 0,
-            resting: order.IsResting,
-            lastPriceUnits,
-            lastSequenceNo);
+        if ((!rejected && context.Fills.Count > 0) || order.IsResting)
+        {
+            BumpOrderBook(unitOfWork, context.Market.Id, context.Now);
+        }
 
         operation.Commit(context.Now);
         unitOfWork.BusinessOperations.Update(operation);
@@ -601,6 +593,7 @@ public sealed partial class FxApplicationService
         unitOfWork.Fx.UpdateOrder(maker);
         unitOfWork.Holds.Update(makerHold);
 
+        UpdateLastTrade(unitOfWork, context, fill.Maker.PriceUnits!.Value, sequenceNo);
         UpsertBuckets(unitOfWork, context, fill, sequenceNo);
 
         return Result.Success();
@@ -791,27 +784,20 @@ public sealed partial class FxApplicationService
             account.LedgerAccountId, balance.DecreaseHold(remaining), now);
     }
 
-    private void UpdateProjections(
+    private static void UpdateLastTrade(
         IBankingUnitOfWork unitOfWork,
         PlacementContext context,
-        bool filled,
-        bool resting,
-        long lastPriceUnits,
-        long lastSequenceNo)
+        long priceUnits,
+        long sequenceNo)
     {
         FxMarketSummary current = unitOfWork.Fx.FindSummary(context.Market.Id)
             ?? new FxMarketSummary(context.Market.Id, null, null, 1, 1, context.Now);
 
-        bool mutated = filled || resting;
-
         unitOfWork.Fx.UpsertSummary(current with
         {
-            LastTradePriceUnits = filled ? lastPriceUnits : current.LastTradePriceUnits,
-            LastTradeSequenceNo = filled ? lastSequenceNo : current.LastTradeSequenceNo,
-            SummaryVersion = filled ? checked(current.SummaryVersion + 1) : current.SummaryVersion,
-            OrderBookVersion = mutated
-                ? checked(current.OrderBookVersion + 1)
-                : current.OrderBookVersion,
+            LastTradePriceUnits = priceUnits,
+            LastTradeSequenceNo = sequenceNo,
+            SummaryVersion = checked(current.SummaryVersion + 1),
             UpdatedAt = context.Now,
         });
     }

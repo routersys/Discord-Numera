@@ -528,6 +528,8 @@ public sealed class FxMatchingTests
         Assert.AreEqual(
             160L, harness.Scalar("SELECT price_units FROM fx_trades WHERE sequence_no = 2;"));
         Assert.AreEqual(8_450L, harness.Balance(taker.QuoteAccount));
+        Assert.AreEqual(3L, harness.Scalar("SELECT summary_version FROM fx_market_summaries;"));
+        Assert.AreEqual(4L, harness.Scalar("SELECT order_book_version FROM fx_market_summaries;"));
     }
 
     [TestMethod]
