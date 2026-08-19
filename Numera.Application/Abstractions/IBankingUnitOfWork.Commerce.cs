@@ -343,6 +343,8 @@ public interface ICommerceRepository
 
     void AddRefundConfirmation(CommerceRefundConfirmationRecord confirmation);
 
+    IReadOnlyList<CommercePaymentRecord> ListPaymentsAwaitingSettlementFinality(int limit);
+
     void UpdateRefundConfirmation(CommerceRefundConfirmationRecord confirmation);
 
     CommerceRefundConfirmationRecord? FindRefundConfirmation(CommerceRefundConfirmationId id);

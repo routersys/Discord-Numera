@@ -70,6 +70,8 @@ public interface IDebitCardAuthorizationRepository
     void AddCapture(DebitCardCaptureRecord capture);
 
     void AddRefund(DebitCardRefundRecord refund);
+
+    DebitCardCaptureRecord? FindCapture(DebitCardAuthorizationId authorizationId);
 }
 
 public partial interface IBankingUnitOfWork

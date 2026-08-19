@@ -112,7 +112,7 @@ public sealed class CommerceCatalogTests
                 harness.Markets,
                 harness.Clock,
                 ids);
-            harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock);
+            harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock, ids);
             harness.Cards = new BankCardApplicationService(
                 gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
             harness.Expiries = new ExpiryMaintenanceService(gateway, harness.Clock);
@@ -1652,6 +1652,72 @@ public sealed class CommerceCatalogTests
         Assert.IsFalse(refunded.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.CommerceReturnQuantityExceeded, refunded.Error!.Code);
         Assert.AreEqual(0L, harness.Count("debit_card_refunds"));
+    }
+
+    [TestMethod]
+    public async Task ASameBankCaptureFinalizesTheMerchantSettlementAtCaptureTime()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, _) = await ConfirmableAsync(harness, "final-1");
+
+        Assert.IsTrue((await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation),
+            CancellationToken.None)).IsSuccess);
+
+        CommerceSettlementFinalityReport report =
+            await harness.Maintenance.FinalizeMerchantSettlementsAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Examined);
+        Assert.AreEqual(1, report.Finalized);
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM commerce_payments
+                WHERE merchant_settlement_finalized_at = capture_committed_at;
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM outbox_events
+                WHERE event_type = 'COMMERCE_SETTLEMENT_FINALIZED';
+                """));
+
+        CommerceSettlementFinalityReport again =
+            await harness.Maintenance.FinalizeMerchantSettlementsAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, again.Examined);
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM outbox_events
+                WHERE event_type = 'COMMERCE_SETTLEMENT_FINALIZED';
+                """));
+    }
+
+    [TestMethod]
+    public async Task AnInterbankCaptureIsNotFinalUntilTheClearingInstructionSettles()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedPartnerBank();
+
+        (CommerceCheckoutConfirmationId confirmation, _) =
+            await ConfirmableAsync(harness, "final-2", settleAtPartner: true);
+
+        Assert.IsTrue((await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation),
+            CancellationToken.None)).IsSuccess);
+
+        CommerceSettlementFinalityReport report =
+            await harness.Maintenance.FinalizeMerchantSettlementsAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Examined);
+        Assert.AreEqual(0, report.Finalized);
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM commerce_payments
+                WHERE merchant_settlement_finalized_at IS NULL;
+                """));
     }
 
     [TestMethod]

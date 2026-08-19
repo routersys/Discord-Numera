@@ -153,6 +153,42 @@ internal sealed class SqliteDebitCardAuthorizationRepository : IDebitCardAuthori
         command.ExecuteNonQuery();
     }
 
+    public DebitCardCaptureRecord? FindCapture(DebitCardAuthorizationId authorizationId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT debit_card_capture_id, debit_card_authorization_id, merchant_capture_reference,
+                   source_principal_minor, presentment_amount_minor, purchase_fee_minor,
+                   settlement_route, payment_order_id, fx_business_operation_id,
+                   business_operation_id, captured_at
+            FROM debit_card_captures WHERE debit_card_authorization_id = $authorization
+            ORDER BY captured_at LIMIT 1;
+            """);
+
+        command.Parameters.AddWithValue(
+            "$authorization", SqliteValueMapper.ToBlob(authorizationId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new DebitCardCaptureRecord(
+                DebitCardCaptureId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                DebitCardAuthorizationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                reader.GetString(2),
+                MoneyMinor.FromMinor(reader.GetInt64(3)),
+                MoneyMinor.FromMinor(reader.GetInt64(4)),
+                MoneyMinor.FromMinor(reader.GetInt64(5)),
+                reader.GetString(6),
+                reader.IsDBNull(7)
+                    ? null
+                    : PaymentOrderId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
+                reader.IsDBNull(8)
+                    ? null
+                    : BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 8)),
+                BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 9)),
+                SqliteValueMapper.ReadTimestamp(reader, 10))
+            : null;
+    }
+
     public void AddRefund(DebitCardRefundRecord refund)
     {
         ArgumentNullException.ThrowIfNull(refund);

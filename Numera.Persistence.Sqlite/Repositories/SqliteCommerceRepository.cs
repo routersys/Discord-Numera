@@ -943,6 +943,29 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         return reader.Read() ? ReadCheckoutConfirmation(reader) : null;
     }
 
+    public IReadOnlyList<CommercePaymentRecord> ListPaymentsAwaitingSettlementFinality(int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {PaymentColumns} FROM commerce_payments
+            WHERE merchant_settlement_finalized_at IS NULL
+              AND status IN ('PAID','PARTIALLY_REFUNDED','REFUNDED')
+            ORDER BY created_at, commerce_payment_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$limit", limit);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<CommercePaymentRecord> payments = [];
+
+        while (reader.Read())
+        {
+            payments.Add(ReadPayment(reader));
+        }
+
+        return payments;
+    }
+
     public void UpdateRefundConfirmation(CommerceRefundConfirmationRecord confirmation)
     {
         ArgumentNullException.ThrowIfNull(confirmation);

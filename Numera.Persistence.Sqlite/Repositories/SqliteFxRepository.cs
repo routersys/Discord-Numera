@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Numera.Application.Abstractions;
 using Numera.Domain.Banking;
@@ -907,6 +908,19 @@ internal sealed class SqliteFxRepository : IFxRepository
         {
             throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
         }
+    }
+
+    public bool AreSettlementLegsFinal(BusinessOperationId businessOperationId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COUNT(*) FROM fx_settlement_legs
+            WHERE business_operation_id = $operation AND status <> 'SETTLED';
+            """);
+
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(businessOperationId.Value));
+
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 0;
     }
 
     public FxSettlementLeg? FindSettlementLeg(FxSettlementLegId id)

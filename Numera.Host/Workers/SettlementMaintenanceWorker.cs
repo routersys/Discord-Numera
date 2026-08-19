@@ -12,6 +12,9 @@ internal interface ISettlementMaintenanceRunner
 
     Task<CommerceMaintenanceReport> ExpireCheckoutsAsync(CancellationToken cancellationToken);
 
+    Task<CommerceSettlementFinalityReport> FinalizeMerchantSettlementsAsync(
+        CancellationToken cancellationToken);
+
     Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken);
 
     Task<DormancyMaintenanceReport> ProcessDueDormancyAsync(CancellationToken cancellationToken);
@@ -46,6 +49,10 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
 
     public Task<CommerceMaintenanceReport> ExpireCheckoutsAsync(CancellationToken cancellationToken) =>
         commerce.ExpireCheckoutsAsync(cancellationToken);
+
+    public Task<CommerceSettlementFinalityReport> FinalizeMerchantSettlementsAsync(
+        CancellationToken cancellationToken) =>
+        commerce.FinalizeMerchantSettlementsAsync(cancellationToken);
 
     public Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken) =>
         expiries.ProcessDueAsync(cancellationToken);
@@ -92,6 +99,8 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
                 .ConfigureAwait(false);
             CommerceMaintenanceReport checkouts = await runner.ExpireCheckoutsAsync(cancellationToken)
                 .ConfigureAwait(false);
+            CommerceSettlementFinalityReport finality = await runner
+                .FinalizeMerchantSettlementsAsync(cancellationToken).ConfigureAwait(false);
             ExpiryMaintenanceReport expiries = await runner.ProcessDueExpiriesAsync(cancellationToken)
                 .ConfigureAwait(false);
             DormancyMaintenanceReport dormancy = await runner.ProcessDueDormancyAsync(cancellationToken)
@@ -100,8 +109,10 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
             int dormancyCount = dormancy.Assessed + dormancy.Closed;
 
             diagnostics.SettlementMaintenanceCompleted(
-                queued.Examined + cycles.Examined + checkouts.Examined + expiries.Total + dormancyCount,
-                queued.Settled + cycles.Settled + checkouts.Cancelled + expiries.Total + dormancyCount);
+                queued.Examined + cycles.Examined + checkouts.Examined + finality.Examined +
+                    expiries.Total + dormancyCount,
+                queued.Settled + cycles.Settled + checkouts.Cancelled + finality.Finalized +
+                    expiries.Total + dormancyCount);
         }
         catch (OperationCanceledException)
         {

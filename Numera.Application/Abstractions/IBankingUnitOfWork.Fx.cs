@@ -155,6 +155,8 @@ public interface IFxRepository
 
     FxSettlementLeg? FindSettlementLeg(FxSettlementLegId id);
 
+    bool AreSettlementLegsFinal(BusinessOperationId businessOperationId);
+
     IReadOnlyList<FxSettlementLegComponent> ListSettlementLegComponents(FxSettlementLegId legId);
 
     IReadOnlyList<FxSettlementLegComponent> ListClearingComponents(
