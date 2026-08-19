@@ -238,6 +238,13 @@ public sealed class DepositInsuranceTests
             return ResolutionCaseId.FromValue(EntityIdValue.FromBits(220));
         }
 
+        public void StockFund(long amount) => Execute($"""
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor,
+                held_minor, version, updated_at)
+            VALUES({Blob(41)}, {amount}, 0, 1, 1)
+            ON CONFLICT(ledger_account_id) DO UPDATE SET posted_balance_minor = {amount};
+            """);
+
         public void OpenPeriods() => Execute("""
             INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
                 starts_on, ends_on, status, closed_at, version)
@@ -346,6 +353,7 @@ public sealed class DepositInsuranceTests
     {
         await using Harness harness = Harness.Create();
 
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness);
 
         Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM deposit_insurance_schemes;"));
@@ -373,6 +381,7 @@ public sealed class DepositInsuranceTests
     public async Task EnrollmentCreatesTheCoverageReservation()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness);
         DepositAccountId account = await harness.OpenAccountAsync();
 
@@ -390,6 +399,7 @@ public sealed class DepositInsuranceTests
     public async Task ASecondEnrollmentOnTheSameAccountIsRejected()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness);
         DepositAccountId account = await harness.OpenAccountAsync();
 
@@ -405,9 +415,29 @@ public sealed class DepositInsuranceTests
     }
 
     [TestMethod]
+    public async Task AFundWithoutFreeCapacityRejectsTheEnrollment()
+    {
+        await using Harness harness = Harness.Create();
+        harness.StockFund(999_999);
+        await PublishSchemeAsync(harness);
+        DepositAccountId account = await harness.OpenAccountAsync();
+
+        Result<DepositInsuranceEnrollmentView> enrolled = await harness.Insurance.EnrollAsync(
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-cap"),
+            CancellationToken.None);
+
+        Assert.IsFalse(enrolled.IsSuccess);
+        Assert.AreEqual(
+            BankingErrorCodes.DepositInsuranceFundCapacityInsufficient, enrolled.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("deposit_insurance_enrollments"));
+        Assert.AreEqual(0L, harness.Count("deposit_insurance_reservations"));
+    }
+
+    [TestMethod]
     public async Task LiquidationPaysTheInsuredAmountIntoTheSettlementWallet()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness);
         harness.OpenPeriods();
         DepositAccountId account = await harness.OpenAccountAsync();
@@ -457,6 +487,7 @@ public sealed class DepositInsuranceTests
     public async Task ABridgeBankReceivesTheTransferredDepositClaims()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness);
         harness.OpenPeriods();
         DepositAccountId account = await harness.OpenAccountAsync();
@@ -501,6 +532,7 @@ public sealed class DepositInsuranceTests
     public async Task APricedSchemePostsThePremiumAcrossTheThreeBooks()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness, enrollmentFeeMinor: 500);
         harness.OpenPeriods();
         DepositAccountId account = await harness.OpenAccountAsync();
@@ -530,7 +562,7 @@ public sealed class DepositInsuranceTests
                 WHERE a.account_code = '4003';
                 """));
         Assert.AreEqual(
-            "500",
+            "100000500",
             harness.ReadText("""
                 SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
                 JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
@@ -543,6 +575,7 @@ public sealed class DepositInsuranceTests
     public async Task AnUnfundedPremiumRejectsTheEnrollmentWithoutEffect()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness, enrollmentFeeMinor: 500);
         harness.OpenPeriods();
         DepositAccountId account = await harness.OpenAccountAsync();
@@ -561,6 +594,7 @@ public sealed class DepositInsuranceTests
     public async Task CancellationReleasesTheReservation()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness);
         DepositAccountId account = await harness.OpenAccountAsync();
 
@@ -583,6 +617,7 @@ public sealed class DepositInsuranceTests
     public async Task OptionsListThePublishedSchemes()
     {
         await using Harness harness = Harness.Create();
+        harness.StockFund(100_000_000);
         await PublishSchemeAsync(harness);
         DepositAccountId account = await harness.OpenAccountAsync();
 

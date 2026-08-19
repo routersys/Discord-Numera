@@ -55,4 +55,7 @@ public static partial class BankingErrorCodes
 
     public static string InsuranceSettlementPayoutUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 221);
+
+    public static string DepositInsuranceFundCapacityInsufficient { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 175);
 }

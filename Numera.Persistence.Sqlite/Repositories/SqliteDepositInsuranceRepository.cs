@@ -475,6 +475,34 @@ internal sealed class SqliteDepositInsuranceRepository : IDepositInsuranceReposi
             : null;
     }
 
+    public long SumActiveReservationRemaining(DepositInsuranceFundId fundId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(reserved_minor - consumed_minor - released_minor), 0)
+            FROM deposit_insurance_reservations
+            WHERE deposit_insurance_fund_id = $fund AND status = 'ACTIVE';
+            """);
+
+        command.Parameters.AddWithValue("$fund", SqliteValueMapper.ToBlob(fundId.Value));
+
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    public long SumOutstandingWalletLiability(DepositInsuranceFundId fundId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(p.posted_balance_minor), 0)
+            FROM insurance_settlement_wallets AS w
+            JOIN ledger_balance_projections AS p
+                ON p.ledger_account_id = w.liability_ledger_account_id
+            WHERE w.deposit_insurance_fund_id = $fund;
+            """);
+
+        command.Parameters.AddWithValue("$fund", SqliteValueMapper.ToBlob(fundId.Value));
+
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
     public void AddClaim(DepositInsuranceClaimRecord claim)
     {
         ArgumentNullException.ThrowIfNull(claim);

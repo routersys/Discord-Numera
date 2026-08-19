@@ -794,6 +794,24 @@ public sealed partial class DepositInsuranceApplicationService : IDepositInsuran
                 ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundNotOperable);
         }
 
+        if (unitOfWork.LedgerAccounts.Find(fund.LiquidAssetLedgerAccountId) is not { } liquidAsset)
+        {
+            return Result<DepositInsuranceEnrollmentView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.DepositInsuranceFundNotOperable);
+        }
+
+        Int128 available =
+            (Int128)(unitOfWork.LedgerAccounts.FindProjection(liquidAsset.Id) ?? LedgerBalance.Empty)
+                .PostedBalance.Value
+            - unitOfWork.DepositInsurance.SumActiveReservationRemaining(fund.Id)
+            - unitOfWork.DepositInsurance.SumOutstandingWalletLiability(fund.Id);
+
+        if (available < version.CoverageLimit.Value)
+        {
+            return Result<DepositInsuranceEnrollmentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundCapacityInsufficient);
+        }
+
         UtcTimestamp now = clock.Now();
 
         BusinessOperation operation = BusinessOperation.Start(

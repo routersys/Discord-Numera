@@ -177,6 +177,10 @@ public interface IDepositInsuranceRepository
         DepositInsuranceClaimId? after,
         int limit);
 
+    long SumActiveReservationRemaining(DepositInsuranceFundId fundId);
+
+    long SumOutstandingWalletLiability(DepositInsuranceFundId fundId);
+
     void AddClaim(DepositInsuranceClaimRecord claim);
 
     void UpdateClaim(DepositInsuranceClaimRecord claim);
