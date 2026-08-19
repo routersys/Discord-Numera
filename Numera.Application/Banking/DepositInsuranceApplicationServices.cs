@@ -233,9 +233,19 @@ public sealed class DepositInsuranceAdministrationApplicationService
         foreach (LedgerAccountId accountId in accounts)
         {
             if (unitOfWork.LedgerAccounts.Find(accountId) is not { } account ||
-                account.BookId != command.AccountingBookId ||
                 account.CurrencyId != command.CurrencyId ||
                 !account.PostingAllowed)
+            {
+                return Result<DepositInsuranceFundView>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundAccountInvalid);
+            }
+
+            bool central = accountId == command.CentralBankSettlementLiabilityLedgerAccountId;
+
+            if (central
+                ? account.BookId == command.AccountingBookId ||
+                    account.Kind != LedgerAccountKind.CentralBankSettlementLiability
+                : account.BookId != command.AccountingBookId)
             {
                 return Result<DepositInsuranceFundView>.Failure(
                     ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundAccountInvalid);
@@ -510,7 +520,8 @@ public sealed record GetDepositInsuranceOptionsQuery(
 public sealed record EnrollDepositInsuranceCommand(
     AuthorizationContext Actor,
     DepositAccountId DepositAccountId,
-    string ProtectionClassCode);
+    string ProtectionClassCode,
+    string IdempotencyToken);
 
 public sealed record CancelDepositInsuranceCommand(
     AuthorizationContext Actor,
@@ -526,7 +537,8 @@ public sealed record TransferInsuranceSettlementWalletCommand(
     AuthorizationContext Actor,
     InsuranceSettlementWalletId InsuranceSettlementWalletId,
     DepositAccountId DestinationDepositAccountId,
-    long AmountMinor);
+    long AmountMinor,
+    string IdempotencyToken);
 
 public sealed record DepositInsuranceOptionItem(
     DepositInsuranceSchemeId SchemeId,
@@ -599,7 +611,7 @@ public interface IDepositInsuranceApplicationService
         CancellationToken cancellationToken);
 }
 
-public sealed class DepositInsuranceApplicationService : IDepositInsuranceApplicationService
+public sealed partial class DepositInsuranceApplicationService : IDepositInsuranceApplicationService
 {
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
@@ -782,14 +794,49 @@ public sealed class DepositInsuranceApplicationService : IDepositInsuranceApplic
                 ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundNotOperable);
         }
 
-        if (version.EnrollmentFee.IsPositive)
+        UtcTimestamp now = clock.Now();
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            EnrollOperationType,
+            fund.EconomyScopeId,
+            null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(EnrollOperationType, command.IdempotencyToken),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        if (version.EnrollmentFee.IsPositive &&
+            unitOfWork.Banks.Find(account.BankId) is not { Status: BankStatus.Operating })
         {
             return Result<DepositInsuranceEnrollmentView>.Failure(
-                ErrorCategory.InfrastructureUnavailable,
-                BankingErrorCodes.DepositInsurancePremiumUnavailable);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
         }
 
-        UtcTimestamp now = clock.Now();
+        Bank issuingBank = unitOfWork.Banks.Find(account.BankId)!;
+
+        DepositInsurancePremiumPaymentId? premiumPaymentId = null;
+
+        if (version.EnrollmentFee.IsPositive)
+        {
+            Result<DepositInsurancePremiumPaymentId> premium = PostPremium(
+                unitOfWork,
+                operation,
+                fund,
+                account,
+                issuingBank,
+                version.EnrollmentFee,
+                BusinessDateOf(now),
+                now);
+
+            if (!premium.IsSuccess)
+            {
+                return Result<DepositInsuranceEnrollmentView>.Failure(premium.Error!);
+            }
+
+            premiumPaymentId = premium.Value;
+        }
 
         DepositInsuranceEnrollmentRecord enrollment = new(
             DepositInsuranceEnrollmentId.FromValue(idGenerator.NextId()),
@@ -800,7 +847,7 @@ public sealed class DepositInsuranceApplicationService : IDepositInsuranceApplic
             version.Id,
             version.CoverageLimit,
             version.EnrollmentFee,
-            null,
+            premiumPaymentId,
             DepositInsuranceEnrollmentStatus.Active,
             now,
             null,
@@ -823,6 +870,23 @@ public sealed class DepositInsuranceApplicationService : IDepositInsuranceApplic
 
         DepositInsuranceReservationStatusCatalog.EnsureCreatable(reservation.Status);
         unitOfWork.DepositInsurance.AddReservation(reservation);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            EnrolledEventType,
+            EnrollmentPayload(enrollment.Id),
+            now));
+
+        unitOfWork.OperationResults.Add(new OperationResultRecord(
+            OperationResultId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            EnrollOperationType,
+            EnrollmentPayload(enrollment.Id),
+            now));
 
         return Result<DepositInsuranceEnrollmentView>.Success(new DepositInsuranceEnrollmentView(
             enrollment.Id,
@@ -946,7 +1010,7 @@ public sealed class DepositInsuranceApplicationService : IDepositInsuranceApplic
             wallet.Id, wallet.CurrencyId, balance.AvailableBalance, wallet.Status));
     }
 
-    private static Result<InsuranceSettlementWalletPayoutView> Transfer(
+    private Result<InsuranceSettlementWalletPayoutView> Transfer(
         IBankingUnitOfWork unitOfWork,
         TransferInsuranceSettlementWalletCommand command)
     {
@@ -977,10 +1041,88 @@ public sealed class DepositInsuranceApplicationService : IDepositInsuranceApplic
                 ErrorCategory.NotFound, BankingErrorCodes.InsuranceSettlementWalletNotFound);
         }
 
-        return Result<InsuranceSettlementWalletPayoutView>.Failure(
-            ErrorCategory.InfrastructureUnavailable,
-            BankingErrorCodes.InsuranceSettlementPayoutUnavailable);
+        if (unitOfWork.DepositInsurance.FindFund(wallet.FundId) is not
+            { Status: DepositInsuranceFundStatus.Active } fund)
+        {
+            return Result<InsuranceSettlementWalletPayoutView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundNotOperable);
+        }
+
+        if (unitOfWork.Banks.Find(destination.BankId) is not
+            { Status: BankStatus.Operating } destinationBank)
+        {
+            return Result<InsuranceSettlementWalletPayoutView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
+        }
+
+        if (destination.Permits(AccountOperation.ExternalCredit) != StatusPermission.Allowed)
+        {
+            return Result<InsuranceSettlementWalletPayoutView>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.DestinationAccountNotOperable);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            PayoutOperationType,
+            fund.EconomyScopeId,
+            null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(PayoutOperationType, command.IdempotencyToken),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        Result posted = PayoutWallet(
+            unitOfWork,
+            operation,
+            fund,
+            wallet,
+            destination,
+            destinationBank,
+            MoneyMinor.FromMinor(command.AmountMinor),
+            BusinessDateOf(now),
+            now);
+
+        if (!posted.IsSuccess)
+        {
+            return Result<InsuranceSettlementWalletPayoutView>.Failure(posted.Error!);
+        }
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            PaidOutEventType,
+            EnrollmentPayload(wallet.Id.Value),
+            now));
+
+        return Result<InsuranceSettlementWalletPayoutView>.Success(
+            new InsuranceSettlementWalletPayoutView(
+                InsuranceSettlementWalletPayoutId.FromValue(idGenerator.NextId()),
+                wallet.Id,
+                destination.Id,
+                MoneyMinor.FromMinor(command.AmountMinor)));
     }
+
+    internal const string EnrollOperationType = "DEPOSIT_INSURANCE_ENROLL";
+
+    internal const string PayoutOperationType = "DEPOSIT_INSURANCE_PAYOUT";
+
+    internal const string EnrolledEventType = "DEPOSIT_INSURANCE_ENROLLED";
+
+    internal const string PaidOutEventType = "DEPOSIT_INSURANCE_PAID_OUT";
+
+    private static string EnrollmentPayload(DepositInsuranceEnrollmentId id) =>
+        EnrollmentPayload(id.Value);
+
+    private static string EnrollmentPayload(Numera.Domain.Common.EntityIdValue id) =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $$"""{"id":"{{id}}"}""");
 
     private static Result<DepositAccount> ResolveOwnedAccount(
         IBankingUnitOfWork unitOfWork,

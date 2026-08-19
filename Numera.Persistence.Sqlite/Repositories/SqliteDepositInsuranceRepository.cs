@@ -371,6 +371,61 @@ internal sealed class SqliteDepositInsuranceRepository : IDepositInsuranceReposi
             : null;
     }
 
+    public void AddPremiumPayment(DepositInsurancePremiumPaymentRecord payment)
+    {
+        ArgumentNullException.ThrowIfNull(payment);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO deposit_insurance_premium_payments(deposit_insurance_premium_payment_id,
+                business_operation_id, deposit_insurance_fund_id, source_deposit_account_id,
+                source_bank_id, currency_id, amount_minor, posted_at)
+            VALUES($id, $operation, $fund, $source, $bank, $currency, $amount, $posted);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(payment.Id.Value));
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(payment.BusinessOperationId.Value));
+        command.Parameters.AddWithValue("$fund", SqliteValueMapper.ToBlob(payment.FundId.Value));
+        command.Parameters.AddWithValue(
+            "$source", SqliteValueMapper.ToBlob(payment.SourceDepositAccountId.Value));
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(payment.SourceBankId.Value));
+        command.Parameters.AddWithValue(
+            "$currency", SqliteValueMapper.ToBlob(payment.CurrencyId.Value));
+        command.Parameters.AddWithValue("$amount", payment.Amount.Value);
+        command.Parameters.AddWithValue("$posted", payment.PostedAt.UnixMilliseconds);
+        command.ExecuteNonQuery();
+    }
+
+    public void AddWalletPayout(InsuranceSettlementWalletPayoutRecord payout)
+    {
+        ArgumentNullException.ThrowIfNull(payout);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO insurance_settlement_wallet_payouts(insurance_settlement_wallet_payout_id,
+                business_operation_id, insurance_settlement_wallet_id, deposit_insurance_fund_id,
+                destination_deposit_account_id, destination_bank_id, currency_id, amount_minor,
+                completed_at)
+            VALUES($id, $operation, $wallet, $fund, $destination, $bank, $currency, $amount,
+                $completed);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(payout.Id.Value));
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(payout.BusinessOperationId.Value));
+        command.Parameters.AddWithValue(
+            "$wallet", SqliteValueMapper.ToBlob(payout.InsuranceSettlementWalletId.Value));
+        command.Parameters.AddWithValue("$fund", SqliteValueMapper.ToBlob(payout.FundId.Value));
+        command.Parameters.AddWithValue(
+            "$destination", SqliteValueMapper.ToBlob(payout.DestinationDepositAccountId.Value));
+        command.Parameters.AddWithValue(
+            "$bank", SqliteValueMapper.ToBlob(payout.DestinationBankId.Value));
+        command.Parameters.AddWithValue(
+            "$currency", SqliteValueMapper.ToBlob(payout.CurrencyId.Value));
+        command.Parameters.AddWithValue("$amount", payout.Amount.Value);
+        command.Parameters.AddWithValue("$completed", payout.CompletedAt.UnixMilliseconds);
+        command.ExecuteNonQuery();
+    }
+
     public void AddSettlementWallet(InsuranceSettlementWalletRecord wallet)
     {
         ArgumentNullException.ThrowIfNull(wallet);

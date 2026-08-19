@@ -73,6 +73,27 @@ public sealed record InsuranceSettlementWalletRecord(
     UtcTimestamp CreatedAt,
     long Version);
 
+public sealed record DepositInsurancePremiumPaymentRecord(
+    DepositInsurancePremiumPaymentId Id,
+    BusinessOperationId BusinessOperationId,
+    DepositInsuranceFundId FundId,
+    DepositAccountId SourceDepositAccountId,
+    BankId SourceBankId,
+    CurrencyId CurrencyId,
+    MoneyMinor Amount,
+    UtcTimestamp PostedAt);
+
+public sealed record InsuranceSettlementWalletPayoutRecord(
+    InsuranceSettlementWalletPayoutId Id,
+    BusinessOperationId BusinessOperationId,
+    InsuranceSettlementWalletId InsuranceSettlementWalletId,
+    DepositInsuranceFundId FundId,
+    DepositAccountId DestinationDepositAccountId,
+    BankId DestinationBankId,
+    CurrencyId CurrencyId,
+    MoneyMinor Amount,
+    UtcTimestamp CompletedAt);
+
 public sealed record DepositInsuranceClaimRecord(
     DepositInsuranceClaimId Id,
     ResolutionCaseId ResolutionCaseId,
@@ -142,6 +163,10 @@ public interface IDepositInsuranceRepository
     DepositInsuranceReservationRecord? FindReservation(DepositInsuranceEnrollmentId enrollmentId);
 
     void AddSettlementWallet(InsuranceSettlementWalletRecord wallet);
+
+    void AddPremiumPayment(DepositInsurancePremiumPaymentRecord payment);
+
+    void AddWalletPayout(InsuranceSettlementWalletPayoutRecord payout);
 
     InsuranceSettlementWalletRecord? FindSettlementWallet(
         CustomerAccountId customerAccountId,

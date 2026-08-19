@@ -46,9 +46,9 @@ public sealed class DepositInsuranceTests
 
         public CurrencyId Currency { get; } = CurrencyId.FromValue(EntityIdValue.FromBits(2));
 
-        public PartyId FundParty { get; } = PartyId.FromValue(EntityIdValue.FromBits(3));
+        public PartyId FundParty { get; } = PartyId.FromValue(EntityIdValue.FromBits(210));
 
-        public AccountingBookId Book { get; } = AccountingBookId.FromValue(EntityIdValue.FromBits(4));
+        public AccountingBookId Book { get; } = AccountingBookId.FromValue(EntityIdValue.FromBits(211));
 
         public static Harness Create()
         {
@@ -118,29 +118,45 @@ public sealed class DepositInsuranceTests
             VALUES({Blob(7)}, {Blob(4)}, NULL, '2000', 'DEMAND_DEPOSIT_CONTROL', 'LIABILITY', 'CREDIT',
                 {Blob(2)}, 0, NULL, NULL, 'ACTIVE', 1, 1);
 
-            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
-                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
-                owner_reference_type, owner_reference_id, status, created_at, version)
-            VALUES({Blob(40)}, {Blob(4)}, NULL, '4001', 'CENTRAL_BANK_SETTLEMENT_LIABILITY', 'LIABILITY', 'CREDIT',
-                {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+            INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+            VALUES({Blob(200)}, 'GOVERNMENT', '中央銀行主体', 'ACTIVE', 1, 1),
+                ({Blob(210)}, 'SYSTEM', '保険基金主体', 'ACTIVE', 1, 1);
+
+            INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                created_at, version)
+            VALUES({Blob(201)}, {Blob(200)}, 'CENTRAL_BANK', 'OPEN', 1, 1),
+                ({Blob(211)}, {Blob(210)}, 'SYSTEM', 'OPEN', 1, 1);
+
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            VALUES({Blob(202)}, {Blob(201)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1),
+                ({Blob(212)}, {Blob(211)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
 
             INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
                 account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
                 owner_reference_type, owner_reference_id, status, created_at, version)
-            VALUES({Blob(41)}, {Blob(4)}, NULL, '4002', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
-                {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+            VALUES
+                ({Blob(40)}, {Blob(201)}, NULL, '4001', 'CENTRAL_BANK_SETTLEMENT_LIABILITY',
+                    'LIABILITY', 'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(41)}, {Blob(211)}, NULL, '4002', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET',
+                    'DEBIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(42)}, {Blob(211)}, NULL, '4003', 'FEE_REVENUE', 'REVENUE',
+                    'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(43)}, {Blob(211)}, NULL, '4004', 'RESOLUTION_LOSS_EXPENSE', 'EXPENSE',
+                    'DEBIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(44)}, {Blob(4)}, NULL, '4005', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(203)}, {Blob(201)}, NULL, '2100', 'CENTRAL_BANK_SETTLEMENT_LIABILITY',
+                    'LIABILITY', 'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
 
-            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
-                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
-                owner_reference_type, owner_reference_id, status, created_at, version)
-            VALUES({Blob(42)}, {Blob(4)}, NULL, '4003', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
-                {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+            INSERT INTO central_bank_settlement_accounts(central_bank_settlement_account_id, bank_id,
+                currency_id, central_bank_ledger_account_id, status, opened_at, closed_at, version)
+            VALUES({Blob(204)}, {Blob(5)}, {Blob(2)}, {Blob(203)}, 'ACTIVE', 1, NULL, 1);
 
-            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
-                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
-                owner_reference_type, owner_reference_id, status, created_at, version)
-            VALUES({Blob(43)}, {Blob(4)}, NULL, '4004', 'RESOLUTION_LOSS_EXPENSE', 'EXPENSE', 'DEBIT',
-                {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+            INSERT INTO settlement_participations(settlement_participation_id, bank_id, mode,
+                settlement_agent_bank_id, central_bank_settlement_account_id, status, effective_from,
+                effective_to, version)
+            VALUES({Blob(205)}, {Blob(5)}, 'DIRECT', NULL, {Blob(204)}, 'ACTIVE', 1, NULL, 1);
 
             INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
                 minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
@@ -202,6 +218,23 @@ public sealed class DepositInsuranceTests
             command.CommandText = sql;
             return command.ExecuteScalar() as string ?? string.Empty;
         }
+
+        public void OpenPeriods() => Execute("""
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            SELECT randomblob(16), accounting_book_id, '2026', '2000-01-01', '2100-12-31', 'OPEN',
+                NULL, 1
+            FROM accounting_books
+            WHERE accounting_book_id NOT IN (SELECT accounting_book_id FROM accounting_periods);
+            """);
+
+        public void Fund(DepositAccountId accountId, long amount) => Execute($"""
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor,
+                held_minor, version, updated_at)
+            SELECT ledger_account_id, {amount}, 0, 1, 1 FROM deposit_accounts
+            WHERE deposit_account_id = x'{Convert.ToHexString(accountId.Value.ToByteArray())}'
+            ON CONFLICT(ledger_account_id) DO UPDATE SET posted_balance_minor = {amount};
+            """);
 
         public async Task<DepositAccountId> OpenAccountAsync()
         {
@@ -325,7 +358,7 @@ public sealed class DepositInsuranceTests
         DepositAccountId account = await harness.OpenAccountAsync();
 
         Result<DepositInsuranceEnrollmentView> enrolled = await harness.Insurance.EnrollAsync(
-            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD"), CancellationToken.None);
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-1"), CancellationToken.None);
 
         Assert.IsTrue(enrolled.IsSuccess, enrolled.Error?.Code);
         Assert.AreEqual(DepositInsuranceEnrollmentStatus.Active, enrolled.Value.Status);
@@ -342,29 +375,74 @@ public sealed class DepositInsuranceTests
         DepositAccountId account = await harness.OpenAccountAsync();
 
         Assert.IsTrue((await harness.Insurance.EnrollAsync(
-            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD"),
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-2"),
             CancellationToken.None)).IsSuccess);
 
         Result<DepositInsuranceEnrollmentView> second = await harness.Insurance.EnrollAsync(
-            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD"), CancellationToken.None);
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-3"), CancellationToken.None);
 
         Assert.IsFalse(second.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.DepositInsuranceAlreadyEnrolled, second.Error!.Code);
     }
 
     [TestMethod]
-    public async Task APricedSchemeIsRejectedWhilePremiumPostingIsUnavailable()
+    public async Task APricedSchemePostsThePremiumAcrossTheThreeBooks()
     {
         await using Harness harness = Harness.Create();
         await PublishSchemeAsync(harness, enrollmentFeeMinor: 500);
+        harness.OpenPeriods();
+        DepositAccountId account = await harness.OpenAccountAsync();
+        harness.Fund(account, 10_000);
+
+        Result<DepositInsuranceEnrollmentView> enrolled = await harness.Insurance.EnrollAsync(
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-4"),
+            CancellationToken.None);
+
+        Assert.IsTrue(enrolled.IsSuccess, enrolled.Error?.Code);
+        Assert.AreEqual(1L, harness.Count("deposit_insurance_premium_payments"));
+        Assert.AreEqual(
+            "500",
+            harness.ReadText("SELECT CAST(amount_minor AS TEXT) FROM deposit_insurance_premium_payments;"));
+        Assert.AreEqual(
+            "9500",
+            harness.ReadText($"""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                WHERE d.deposit_account_id = x'{Convert.ToHexString(account.Value.ToByteArray())}';
+                """));
+        Assert.AreEqual(
+            "500",
+            harness.ReadText("""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_code = '4003';
+                """));
+        Assert.AreEqual(
+            "500",
+            harness.ReadText("""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_code = '4002';
+                """));
+        Assert.AreEqual(3L, harness.Count("accounting_transactions"));
+    }
+
+    [TestMethod]
+    public async Task AnUnfundedPremiumRejectsTheEnrollmentWithoutEffect()
+    {
+        await using Harness harness = Harness.Create();
+        await PublishSchemeAsync(harness, enrollmentFeeMinor: 500);
+        harness.OpenPeriods();
         DepositAccountId account = await harness.OpenAccountAsync();
 
         Result<DepositInsuranceEnrollmentView> enrolled = await harness.Insurance.EnrollAsync(
-            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD"), CancellationToken.None);
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-5"),
+            CancellationToken.None);
 
         Assert.IsFalse(enrolled.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.DepositInsurancePremiumUnavailable, enrolled.Error!.Code);
+        Assert.AreEqual(BankingErrorCodes.AvailableBalanceInsufficient, enrolled.Error!.Code);
         Assert.AreEqual(0L, harness.Count("deposit_insurance_enrollments"));
+        Assert.AreEqual(0L, harness.Count("deposit_insurance_premium_payments"));
     }
 
     [TestMethod]
@@ -375,7 +453,7 @@ public sealed class DepositInsuranceTests
         DepositAccountId account = await harness.OpenAccountAsync();
 
         Assert.IsTrue((await harness.Insurance.EnrollAsync(
-            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD"),
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-5"),
             CancellationToken.None)).IsSuccess);
 
         Result cancelled = await harness.Insurance.CancelAsync(
