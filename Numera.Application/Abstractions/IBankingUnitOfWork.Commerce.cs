@@ -361,11 +361,24 @@ public interface ICommerceRepository
 
     long SumReturnedQuantity(CommerceOrderLineId commerceOrderLineId);
 
+    long SumCompletedReturnedQuantity(CommerceOrderLineId commerceOrderLineId);
+
+    CommerceFulfillmentRecord? FindFulfillmentByLine(CommerceOrderLineId commerceOrderLineId);
+
+    CommerceFulfillmentReversalRecord? FindFulfillmentReversalByFulfillment(
+        CommerceFulfillmentId commerceFulfillmentId);
+
     void AddFulfillment(CommerceFulfillmentRecord fulfillment);
 
     void UpdateFulfillment(CommerceFulfillmentRecord fulfillment);
 
     CommerceFulfillmentRecord? FindFulfillment(CommerceFulfillmentId id);
+
+    IReadOnlyList<CommerceFulfillmentRecord> ListDueFulfillments(UtcTimestamp now, int limit);
+
+    IReadOnlyList<CommerceFulfillmentReversalRecord> ListDueFulfillmentReversals(
+        UtcTimestamp now,
+        int limit);
 
     void AddFulfillmentReversal(CommerceFulfillmentReversalRecord reversal);
 

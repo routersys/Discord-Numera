@@ -1157,6 +1157,72 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    public long SumCompletedReturnedQuantity(CommerceOrderLineId commerceOrderLineId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(l.quantity), 0) FROM commerce_return_lines l
+            JOIN commerce_returns r ON r.commerce_return_id = l.commerce_return_id
+            WHERE l.commerce_order_line_id = $line AND r.status = 'COMPLETED';
+            """);
+
+        command.Parameters.AddWithValue("$line", SqliteValueMapper.ToBlob(commerceOrderLineId.Value));
+
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    public CommerceFulfillmentRecord? FindFulfillmentByLine(CommerceOrderLineId commerceOrderLineId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {FulfillmentColumns} FROM commerce_fulfillments
+            WHERE commerce_order_line_id = $line ORDER BY created_at LIMIT 1;
+            """);
+
+        command.Parameters.AddWithValue("$line", SqliteValueMapper.ToBlob(commerceOrderLineId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadFulfillment(reader) : null;
+    }
+
+    private static CommerceFulfillmentRecord ReadFulfillment(SqliteDataReader reader) => new(
+        CommerceFulfillmentId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+        CommerceOrderLineId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+        MerchantFulfillmentPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+        CommerceFulfillmentStatusCatalog.ParseToken(reader.GetString(3)),
+        reader.GetInt32(4),
+        SqliteValueMapper.ReadNullableTimestamp(reader, 5),
+        reader.IsDBNull(6) ? null : reader.GetString(6),
+        SqliteValueMapper.ReadTimestamp(reader, 7),
+        reader.GetInt64(8));
+
+    private static CommerceFulfillmentReversalRecord ReadFulfillmentReversal(
+        SqliteDataReader reader) => new(
+        CommerceFulfillmentReversalId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+        CommerceFulfillmentId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+        CommerceReturnLineId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+        CommerceFulfillmentReversalStatusCatalog.ParseToken(reader.GetString(3)),
+        reader.GetInt32(4),
+        SqliteValueMapper.ReadNullableTimestamp(reader, 5),
+        reader.IsDBNull(6) ? null : reader.GetString(6),
+        SqliteValueMapper.ReadTimestamp(reader, 7),
+        reader.GetInt64(8));
+
+    public CommerceFulfillmentReversalRecord? FindFulfillmentReversalByFulfillment(
+        CommerceFulfillmentId commerceFulfillmentId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {ReversalColumns} FROM commerce_fulfillment_reversals
+            WHERE commerce_fulfillment_id = $fulfillment LIMIT 1;
+            """);
+
+        command.Parameters.AddWithValue(
+            "$fulfillment", SqliteValueMapper.ToBlob(commerceFulfillmentId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadFulfillmentReversal(reader) : null;
+    }
+
     public void AddFulfillment(CommerceFulfillmentRecord fulfillment)
     {
         ArgumentNullException.ThrowIfNull(fulfillment);
@@ -1185,6 +1251,56 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
 
         BindFulfillment(command, fulfillment);
         command.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<CommerceFulfillmentRecord> ListDueFulfillments(UtcTimestamp now, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {FulfillmentColumns} FROM commerce_fulfillments
+            WHERE status IN ('PENDING','FAILED_RETRYABLE')
+              AND (next_attempt_at IS NULL OR next_attempt_at <= $now)
+            ORDER BY next_attempt_at, commerce_fulfillment_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<CommerceFulfillmentRecord> due = [];
+
+        while (reader.Read())
+        {
+            due.Add(ReadFulfillment(reader));
+        }
+
+        return due;
+    }
+
+    public IReadOnlyList<CommerceFulfillmentReversalRecord> ListDueFulfillmentReversals(
+        UtcTimestamp now,
+        int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {ReversalColumns} FROM commerce_fulfillment_reversals
+            WHERE status IN ('PENDING','FAILED_RETRYABLE')
+              AND (next_attempt_at IS NULL OR next_attempt_at <= $now)
+            ORDER BY next_attempt_at, commerce_fulfillment_reversal_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$now", now.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<CommerceFulfillmentReversalRecord> due = [];
+
+        while (reader.Read())
+        {
+            due.Add(ReadFulfillmentReversal(reader));
+        }
+
+        return due;
     }
 
     public CommerceFulfillmentRecord? FindFulfillment(CommerceFulfillmentId id)

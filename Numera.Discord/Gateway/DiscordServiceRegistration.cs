@@ -21,6 +21,7 @@ public static class DiscordServiceRegistration
             provider.GetRequiredService<DiscordSocketClient>(),
             DiscordClientConfiguration.CreateInteractionServiceConfig()));
 
+        services.AddSingleton<Numera.Application.Abstractions.IDiscordRoleGateway, DiscordRoleGateway>();
         services.AddSingleton<ITextCatalog>(static _ => CanonicalTextCatalog.Create());
         services.AddSingleton(static provider => new ErrorRenderer(provider.GetRequiredService<ITextCatalog>()));
         services.AddSingleton<IDiscordResponseComposer, CatalogResponseComposer>();

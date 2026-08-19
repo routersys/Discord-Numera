@@ -59,6 +59,10 @@ public sealed class CommerceCatalogTests
 
         public CommerceMaintenanceService Maintenance { get; private set; } = null!;
 
+        public RecordingRoleGateway Roles { get; private set; } = null!;
+
+        public CommerceFulfillmentService Fulfillments { get; private set; } = null!;
+
         public BankCardApplicationService Cards { get; private set; } = null!;
 
         public ExpiryMaintenanceService Expiries { get; private set; } = null!;
@@ -113,6 +117,8 @@ public sealed class CommerceCatalogTests
                 harness.Clock,
                 ids);
             harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock, ids);
+            harness.Roles = new RecordingRoleGateway();
+            harness.Fulfillments = new CommerceFulfillmentService(gateway, harness.Roles, harness.Clock);
             harness.Cards = new BankCardApplicationService(
                 gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
             harness.Expiries = new ExpiryMaintenanceService(gateway, harness.Clock);
@@ -222,6 +228,14 @@ public sealed class CommerceCatalogTests
             command.CommandText = $"SELECT COUNT(*) FROM {table};";
             return (long)(command.ExecuteScalar() ?? 0L);
         }
+
+        public CommerceOrderId OrderId() =>
+            CommerceOrderId.FromValue(EntityIdValue.FromBytes(Convert.FromHexString(
+                ReadText("SELECT hex(commerce_order_id) FROM commerce_orders LIMIT 1;"))));
+
+        public CommerceOrderLineId OrderLineId() =>
+            CommerceOrderLineId.FromValue(EntityIdValue.FromBytes(Convert.FromHexString(
+                ReadText("SELECT hex(commerce_order_line_id) FROM commerce_order_lines LIMIT 1;"))));
 
         public DepositAccountId HomeAccountOf(CustomerAccountId customerAccountId) =>
             AccountOf(customerAccountId, Blob(5));
@@ -1718,6 +1732,112 @@ public sealed class CommerceCatalogTests
                 SELECT CAST(COUNT(*) AS TEXT) FROM commerce_payments
                 WHERE merchant_settlement_finalized_at IS NULL;
                 """));
+    }
+
+    [TestMethod]
+    public async Task ACompletedReturnRestoresInventoryAndEnqueuesTheRoleReversal()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness, catalogScope: "LOCAL_GUILD");
+        MerchantProductView product = await CreateActiveProductAsync(
+            harness, profile.Id, inventoryMode: "FINITE", saleScopeOverride: "LOCAL_GUILD");
+
+        Assert.IsTrue((await harness.Merchants.PublishFulfillmentPolicyAsync(
+            new PublishMerchantFulfillmentPolicyCommand(
+                Merchant(), product.Id, "DISCORD_ROLE", "ON_CAPTURE", "555000111"),
+            CancellationToken.None)).IsSuccess);
+
+        await PrepareBuyerAsync(harness, "return-1");
+
+        Assert.IsTrue((await CaptureAsync(harness, product.Id, "return-1")).IsSuccess);
+        Assert.AreEqual("4", harness.ReadText(
+            "SELECT CAST(on_hand_quantity AS TEXT) FROM merchant_inventory_positions;"));
+
+        Result<CommerceReturnView> requested = await harness.Commerce.RequestCommerceReturnAsync(
+            new RequestCommerceReturnCommand(
+                Buyer(), harness.OrderId(), harness.OrderLineId(), 1, "DEFECT"),
+            CancellationToken.None);
+
+        Assert.IsTrue(requested.IsSuccess, requested.Error?.Code);
+
+        Assert.IsTrue((await harness.Merchants.DecideReturnAsync(
+            new DecideCommerceReturnCommand(
+                Merchant(), requested.Value.Id, CommerceReturnStatus.Approved, null),
+            CancellationToken.None)).IsSuccess);
+
+        Result<CommerceReturnView> completed = await harness.Merchants.DecideReturnAsync(
+            new DecideCommerceReturnCommand(
+                Merchant(), requested.Value.Id, CommerceReturnStatus.Completed, null),
+            CancellationToken.None);
+
+        Assert.IsTrue(completed.IsSuccess, completed.Error?.Code);
+        Assert.AreEqual(CommerceReturnStatus.Completed, completed.Value.Status);
+        Assert.AreEqual("5", harness.ReadText(
+            "SELECT CAST(on_hand_quantity AS TEXT) FROM merchant_inventory_positions;"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM merchant_inventory_movements
+                WHERE movement_kind = 'REFUND_RETURN' AND quantity_delta = 1;
+                """));
+        Assert.AreEqual(1L, harness.Count("commerce_fulfillment_reversals"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM outbox_events
+                WHERE event_type = 'COMMERCE_FULFILLMENT_REVERSAL_ENQUEUED';
+                """));
+    }
+
+    [TestMethod]
+    public async Task TheFulfillmentWorkerGrantsTheRoleAndThenRevokesItOnReturn()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness, catalogScope: "LOCAL_GUILD");
+        MerchantProductView product = await CreateActiveProductAsync(
+            harness, profile.Id, inventoryMode: "FINITE", saleScopeOverride: "LOCAL_GUILD");
+
+        Assert.IsTrue((await harness.Merchants.PublishFulfillmentPolicyAsync(
+            new PublishMerchantFulfillmentPolicyCommand(
+                Merchant(), product.Id, "DISCORD_ROLE", "ON_CAPTURE", "555000111"),
+            CancellationToken.None)).IsSuccess);
+
+        await PrepareBuyerAsync(harness, "fulfil-1");
+
+        Assert.IsTrue((await CaptureAsync(harness, product.Id, "fulfil-1")).IsSuccess);
+
+        CommerceFulfillmentReport granted =
+            await harness.Fulfillments.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, granted.Examined);
+        Assert.AreEqual(1, granted.Succeeded);
+        CollectionAssert.AreEqual(new[] { "GRANT:555000111" }, harness.Roles.Calls);
+        Assert.AreEqual("SUCCEEDED", harness.ReadText("SELECT status FROM commerce_fulfillments;"));
+
+        Result<CommerceReturnView> requested = await harness.Commerce.RequestCommerceReturnAsync(
+            new RequestCommerceReturnCommand(
+                Buyer(), harness.OrderId(), harness.OrderLineId(), 1, "DEFECT"),
+            CancellationToken.None);
+
+        Assert.IsTrue(requested.IsSuccess, requested.Error?.Code);
+
+        Assert.IsTrue((await harness.Merchants.DecideReturnAsync(
+            new DecideCommerceReturnCommand(
+                Merchant(), requested.Value.Id, CommerceReturnStatus.Approved, null),
+            CancellationToken.None)).IsSuccess);
+        Assert.IsTrue((await harness.Merchants.DecideReturnAsync(
+            new DecideCommerceReturnCommand(
+                Merchant(), requested.Value.Id, CommerceReturnStatus.Completed, null),
+            CancellationToken.None)).IsSuccess);
+
+        CommerceFulfillmentReport revoked =
+            await harness.Fulfillments.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, revoked.Succeeded);
+        CollectionAssert.AreEqual(
+            new[] { "GRANT:555000111", "REVOKE:555000111" }, harness.Roles.Calls);
+        Assert.AreEqual(
+            "SUCCEEDED", harness.ReadText("SELECT status FROM commerce_fulfillment_reversals;"));
     }
 
     [TestMethod]

@@ -88,7 +88,7 @@ public sealed record PublishMerchantFulfillmentPolicyCommand(
 public sealed record DecideCommerceReturnCommand(
     AuthorizationContext Actor,
     CommerceReturnId CommerceReturnId,
-    bool Approved,
+    CommerceReturnStatus Decision,
     string? ReasonCode);
 
 public sealed record ReviewCommerceRefundCommand(
@@ -1171,9 +1171,14 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
             return Result<CommerceReturnView>.Failure(authorized.Error!);
         }
 
-        CommerceReturnStatus target = command.Approved
-            ? CommerceReturnStatus.Approved
-            : CommerceReturnStatus.Rejected;
+        CommerceReturnStatus target = command.Decision;
+
+        if (target is not (CommerceReturnStatus.Approved or CommerceReturnStatus.Rejected
+            or CommerceReturnStatus.Cancelled or CommerceReturnStatus.Completed))
+        {
+            return Result<CommerceReturnView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CommerceReturnStateInvalid);
+        }
 
         if (!CommerceReturnStatusCatalog.IsAllowed(commerceReturn.Status, target))
         {
@@ -1184,7 +1189,7 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
         IReadOnlyList<CommerceReturnLineRecord> lines =
             unitOfWork.Commerce.ListReturnLines(commerceReturn.Id);
 
-        if (command.Approved)
+        if (target == CommerceReturnStatus.Approved)
         {
             foreach (CommerceReturnLineRecord line in lines)
             {
@@ -1204,6 +1209,32 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
             }
         }
 
+        UtcTimestamp now = clock.Now();
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            ReturnDecisionOperationType,
+            unitOfWork.DepositAccounts.Find(authorized.Value.SettlementDepositAccountId) is { } settlement &&
+                unitOfWork.Banks.Find(settlement.BankId) is { } settlementBank
+                    ? settlementBank.EconomyScopeId
+                    : default,
+            null,
+            idGenerator.NextId(),
+            Numera.Domain.Accounting.IdempotencyKey.Create(
+                ReturnDecisionOperationType,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{commerceReturn.Id.Value}-{target.ToToken()}")),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        if (target == CommerceReturnStatus.Completed &&
+            Complete(unitOfWork, commerceReturn, lines, command, operation, now) is { } completionError)
+        {
+            return Result<CommerceReturnView>.Failure(completionError);
+        }
+
         CommerceReturnStatusCatalog.EnsureTransition(commerceReturn.Status, target);
 
         CommerceReturnRecord updated = commerceReturn with
@@ -1216,8 +1247,124 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
 
         unitOfWork.Commerce.UpdateReturn(updated);
 
+        unitOfWork.BankAdministration.AddAuditRecord(
+            AuditRecordId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            ReturnDecisionOperationType,
+            "commerce_returns",
+            updated.Id.Value,
+            command.ReasonCode,
+            now);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
         return Result<CommerceReturnView>.Success(ToView(updated, lines));
     }
+
+    internal const string ReturnDecisionOperationType = "COMMERCE_RETURN_DECISION";
+
+    private ApplicationError? Complete(
+        IBankingUnitOfWork unitOfWork,
+        CommerceReturnRecord commerceReturn,
+        IReadOnlyList<CommerceReturnLineRecord> lines,
+        DecideCommerceReturnCommand command,
+        BusinessOperation operation,
+        UtcTimestamp now)
+    {
+        foreach (CommerceReturnLineRecord line in lines)
+        {
+            if (unitOfWork.Commerce.FindOrderLine(line.CommerceOrderLineId) is not { } orderLine)
+            {
+                return ApplicationError.Create(
+                    ErrorCategory.NotFound, BankingErrorCodes.CommerceOrderNotFound);
+            }
+
+            long completed =
+                unitOfWork.Commerce.SumCompletedReturnedQuantity(line.CommerceOrderLineId) +
+                line.Quantity;
+
+            if (completed > orderLine.Quantity)
+            {
+                return ApplicationError.Create(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommerceReturnQuantityExceeded);
+            }
+
+            if (unitOfWork.Commerce.FindProduct(orderLine.MerchantProductId) is not { } product)
+            {
+                return ApplicationError.Create(
+                    ErrorCategory.NotFound, BankingErrorCodes.MerchantProductNotFound);
+            }
+
+            if (product.InventoryMode == MerchantVocabulary.InventoryFinite &&
+                unitOfWork.Commerce.FindInventory(product.Id) is { } inventory)
+            {
+                unitOfWork.Commerce.UpdateInventory(inventory with
+                {
+                    OnHandQuantity = inventory.OnHandQuantity + line.Quantity,
+                    Version = inventory.Version + 1,
+                });
+
+                unitOfWork.Commerce.AddInventoryMovement(new MerchantInventoryMovementRecord(
+                    MerchantInventoryMovementId.FromValue(idGenerator.NextId()),
+                    product.Id,
+                    commerceReturn.CommerceOrderId,
+                    line.Id,
+                    MerchantVocabulary.MovementRefundReturn,
+                    line.Quantity,
+                    command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+                    now));
+            }
+
+            if (completed == orderLine.Quantity)
+            {
+                Reverse(unitOfWork, line, operation, now);
+            }
+        }
+
+        return null;
+    }
+
+    private void Reverse(
+        IBankingUnitOfWork unitOfWork,
+        CommerceReturnLineRecord line,
+        BusinessOperation operation,
+        UtcTimestamp now)
+    {
+        if (unitOfWork.Commerce.FindFulfillmentByLine(line.CommerceOrderLineId) is not { } fulfillment ||
+            unitOfWork.Commerce.FindFulfillmentPolicy(fulfillment.FulfillmentPolicyVersionId)
+                is not { FulfillmentKind: MerchantVocabulary.FulfillmentDiscordRole } ||
+            unitOfWork.Commerce.FindFulfillmentReversalByFulfillment(fulfillment.Id) is not null)
+        {
+            return;
+        }
+
+        CommerceFulfillmentReversalRecord reversal = new(
+            CommerceFulfillmentReversalId.FromValue(idGenerator.NextId()),
+            fulfillment.Id,
+            line.Id,
+            CommerceFulfillmentReversalStatus.Pending,
+            AttemptCount: 0,
+            NextAttemptAt: now,
+            FailureCode: null,
+            now,
+            VersionedEntity.InitialVersion);
+
+        CommerceFulfillmentReversalStatusCatalog.EnsureCreatable(reversal.Status);
+        unitOfWork.Commerce.AddFulfillmentReversal(reversal);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            ReversalEventType,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $$"""{"commerce_fulfillment_reversal_id":"{{reversal.Id.Value}}"}"""),
+            now));
+    }
+
+    internal const string ReversalEventType = "COMMERCE_FULFILLMENT_REVERSAL_ENQUEUED";
 
     internal const string RefundedEventType = "COMMERCE_PAYMENT_REFUNDED";
 
