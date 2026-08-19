@@ -47,6 +47,8 @@ public static class DiscordServiceRegistration
             new Rendering.ManifestCardFontProvider(
                 Path.Combine(AppContext.BaseDirectory, "assets", "fonts")));
         services.AddSingleton<Rendering.IBankCardRenderer, Rendering.BankCardRenderer>();
+        services.AddSingleton<Rendering.IFxChartRenderer, Rendering.FxChartRenderer>();
+        services.AddSingleton<Application.Abstractions.IFxChartImageRenderer, Rendering.SkiaFxChartImageRenderer>();
         services.AddSingleton<Numera.Application.Abstractions.IBankCardImageRenderer, Rendering.SkiaBankCardImageRenderer>();
         services.AddSingleton<Endpoints.BankCardEndpoints>();
         services.AddSingleton<Endpoints.FxEndpoints>();

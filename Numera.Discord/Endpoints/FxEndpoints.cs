@@ -18,6 +18,8 @@ public sealed class FxEndpoints : IEconomyEndpoint
     private const int FiveMinuteBucket = 300;
     private const int HourBucket = 3600;
 
+    private const int ChartMinorUnitDigits = 4;
+
     private const string TypeLimit = "LIMIT";
 
     private const string TypeMarketIoc = "MARKET_IOC";
@@ -27,19 +29,23 @@ public sealed class FxEndpoints : IEconomyEndpoint
     private readonly IFxApplicationService markets;
     private readonly ICustomerAccountApplicationService customers;
     private readonly ITextCatalog catalog;
+    private readonly IFxChartImageRenderer charts;
 
     public FxEndpoints(
         IFxApplicationService markets,
         ICustomerAccountApplicationService customers,
-        ITextCatalog catalog)
+        ITextCatalog catalog,
+        IFxChartImageRenderer charts)
     {
         ArgumentNullException.ThrowIfNull(markets);
         ArgumentNullException.ThrowIfNull(customers);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(charts);
 
         this.markets = markets;
         this.customers = customers;
         this.catalog = catalog;
+        this.charts = charts;
     }
 
     [EconomySlashCommand("market", "為替市場の概要を表示します。")]
@@ -177,16 +183,28 @@ public sealed class FxEndpoints : IEconomyEndpoint
             return EndpointFailures.From(result.Error!);
         }
 
-        return result.Value.Buckets.Count == 0
+        if (result.Value.Buckets.Count == 0)
+        {
+            return DiscordEndpointResponse.Message(
+                ViewKeys.FxChartEmpty, new Dictionary<string, string>(StringComparer.Ordinal));
+        }
+
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["count"] = result.Value.Buckets.Count.ToString(CultureInfo.InvariantCulture),
+            ["interval"] = bucket.ToString(CultureInfo.InvariantCulture),
+        };
+
+        FxChartImage? image = charts.TryRender(new FxChartRenderModel(
+            market, bucket, result.Value.Buckets, ChartMinorUnitDigits));
+
+        return image is { } rendered
             ? DiscordEndpointResponse.Message(
-                ViewKeys.FxChartEmpty, new Dictionary<string, string>(StringComparer.Ordinal))
-            : DiscordEndpointResponse.Message(
                 ViewKeys.FxChart,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["count"] = result.Value.Buckets.Count.ToString(CultureInfo.InvariantCulture),
-                    ["interval"] = bucket.ToString(CultureInfo.InvariantCulture),
-                });
+                data,
+                DiscordResponseBody.WithAttachment(
+                    new DiscordResponseAttachment(rendered.FileName, rendered.Content)))
+            : DiscordEndpointResponse.Message(ViewKeys.FxChart, data);
     }
 
     [EconomySlashCommand("orders", "自分の為替注文を一覧します。")]
