@@ -8,7 +8,7 @@ public sealed class SurfaceTests
     private const int DomainBudget = 405;
     private const int ApplicationBudget = 517;
     private const int PersistenceBudget = 86;
-    private const int DiscordBudget = 51;
+    private const int DiscordBudget = 53;
 
     private static void AssertWithinBudget(Assembly assembly, int budget)
     {

@@ -9,7 +9,7 @@ using Numera.Domain.Banking;
 namespace Numera.Discord.Endpoints;
 
 [EconomyCommandGroup("manage", "経済圏を管理します。")]
-public sealed class ManageBankEndpoints : IEconomyEndpoint
+public sealed partial class ManageBankEndpoints : IEconomyEndpoint
 {
     private const string AssetPublicLogo = "PUBLIC_LOGO";
     private const string AssetPublicBanner = "PUBLIC_BANNER";
@@ -20,16 +20,20 @@ public sealed class ManageBankEndpoints : IEconomyEndpoint
 
     private readonly IBankAdministrationApplicationService banks;
     private readonly ITextCatalog catalog;
+    private readonly Sessions.InteractionSessionService sessions;
 
     public ManageBankEndpoints(
         IBankAdministrationApplicationService banks,
-        ITextCatalog catalog)
+        ITextCatalog catalog,
+        Sessions.InteractionSessionService sessions)
     {
         ArgumentNullException.ThrowIfNull(banks);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(sessions);
 
         this.banks = banks;
         this.catalog = catalog;
+        this.sessions = sessions;
     }
 
     [EconomySlashCommand("bank-create", "銀行設立ウィザードを開始します。")]
@@ -37,9 +41,22 @@ public sealed class ManageBankEndpoints : IEconomyEndpoint
     public async Task<DiscordEndpointResponse> BankCreateAsync(
         DiscordEndpointContext context,
         [EconomyOption("institution-code", "金融機関コードを入力します。", true)] string institutionCode,
+        [EconomyOption("central-bank-book", "中央銀行の会計帳簿 ID を入力します。", true)]
+        string centralBankBook,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        if (sessions.FindEconomyScope(context.GuildId) is not { } scope)
+        {
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
+        if (!Numera.Domain.Common.EntityIdValue.TryParse(centralBankBook, out _))
+        {
+            return EndpointFailures.From(
+                ErrorCategory.Validation, BankingErrorCodes.CentralBankBookUnavailable);
+        }
 
         Result<BankDraftView> result = await banks
             .StartCreateBankAsync(
@@ -47,15 +64,49 @@ public sealed class ManageBankEndpoints : IEconomyEndpoint
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return result.IsSuccess
-            ? DiscordEndpointResponse.Message(
-                ViewKeys.ManageBankDraft,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["institutionCode"] = result.Value.InstitutionCode,
-                    ["steps"] = string.Join(" → ", result.Value.Steps),
-                })
-            : EndpointFailures.From(result.Error!);
+        if (!result.IsSuccess)
+        {
+            return EndpointFailures.From(result.Error!);
+        }
+
+        Result<Sessions.InteractionSessionTicket> ticket = await sessions
+            .OpenAsync(
+                new Sessions.OpenInteractionSessionRequest(
+                    context.UserId,
+                    context.GuildId,
+                    scope,
+                    Sessions.BankCreateFlow.FlowType,
+                    Sessions.BankCreateFlow.IdentityState,
+                    Sessions.BankCreatePayloadCodec.Write(
+                        Sessions.BankCreatePayloadCodec.Empty with
+                        {
+                            InstitutionCode = result.Value.InstitutionCode,
+                            CentralBankAccountingBookId = centralBankBook,
+                        })),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!ticket.IsSuccess)
+        {
+            return EndpointFailures.From(ticket.Error!);
+        }
+
+        return DiscordEndpointResponse.Message(
+            ViewKeys.ManageBankDraft,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["institutionCode"] = result.Value.InstitutionCode,
+                ["steps"] = string.Join(" → ", result.Value.Steps),
+            },
+            DiscordResponseBody.WithComponents(new DiscordResponseComponents(
+                null,
+                [
+                    new DiscordResponseButton(
+                        DiscordCustomId.Button(
+                            Sessions.BankCreateFlow.InputAction, ticket.Value.RawToken),
+                        ViewKeys.ManageBankCreateInputLabel,
+                        DiscordButtonStyle.Primary),
+                ])));
     }
 
     [EconomySlashCommand("bank-edit", "銀行の口座開設方針を更新します。")]

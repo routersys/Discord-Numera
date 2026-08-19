@@ -76,6 +76,7 @@ public sealed class EndpointSurfaceTests
                 "ManageModule",
                 "NumeraDiscordEndpointsBankEndpointsInteractionsModule",
                 "NumeraDiscordEndpointsHelpEndpointsModule",
+                "NumeraDiscordEndpointsManageBankEndpointsInteractionsModule",
                 "NumeraDiscordEndpointsManagePanelEndpointsInteractionsModule",
                 "ShopModule",
                 "SystemModule",
@@ -134,12 +135,21 @@ public sealed class EndpointSurfaceTests
     public void TheTransferFlowDeclaresItsComponentsAndModal()
     {
         CollectionAssert.AreEqual(
-            new[] { "panel-action", "panel-category", "transfer-execute", "transfer-input", "transfer-source" },
+            new[]
+            {
+                "bank-create-commit",
+                "bank-create-input",
+                "panel-action",
+                "panel-category",
+                "transfer-execute",
+                "transfer-input",
+                "transfer-source",
+            },
             EconomyCommandManifest.ComponentActions.Order(StringComparer.Ordinal).ToArray());
 
         CollectionAssert.AreEqual(
-            new[] { "transfer" },
-            EconomyCommandManifest.ModalActions.ToArray());
+            new[] { "bank-create", "transfer" },
+            EconomyCommandManifest.ModalActions.Order(StringComparer.Ordinal).ToArray());
     }
 
     [TestMethod]

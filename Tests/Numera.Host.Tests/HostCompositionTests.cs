@@ -59,6 +59,8 @@ public sealed class HostCompositionTests
         CollectionAssert.AreEqual(
             new[]
             {
+                "bank:v1:btn:bank-create-commit:*",
+                "bank:v1:btn:bank-create-input:*",
                 "bank:v1:btn:transfer-execute:*",
                 "bank:v1:btn:transfer-input:*",
                 "bank:v1:sel:panel-action:*",
@@ -69,12 +71,28 @@ public sealed class HostCompositionTests
                 .Order(StringComparer.Ordinal)
                 .ToArray());
 
-        ModalCommandInfo modal = interactions.ModalCommands.Single();
+        CollectionAssert.AreEqual(
+            new[] { "bank:v1:modal:bank-create:*", "bank:v1:modal:transfer:*" },
+            interactions.ModalCommands.Select(static command => command.Name)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
 
-        Assert.AreEqual("bank:v1:modal:transfer:*", modal.Name);
+        ModalCommandInfo modal = interactions.ModalCommands
+            .Single(static command => string.Equals(
+                command.Name, "bank:v1:modal:transfer:*", StringComparison.Ordinal));
+
         CollectionAssert.AreEqual(
             new[] { "bank-code", "branch-code", "account-number", "amount", "memo" },
             modal.Modal.TextInputComponents.Select(static component => component.CustomId).ToArray());
+
+        ModalCommandInfo bankCreate = interactions.ModalCommands
+            .Single(static command => string.Equals(
+                command.Name, "bank:v1:modal:bank-create:*", StringComparison.Ordinal));
+
+        CollectionAssert.AreEqual(
+            new[] { "bank-name", "branch-code", "branch-name", "product-code", "product-name" },
+            bankCreate.Modal.TextInputComponents
+                .Select(static component => component.CustomId).ToArray());
     }
 
     [TestMethod]

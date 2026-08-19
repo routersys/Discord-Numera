@@ -17,6 +17,15 @@ internal static class ViewKeys
     public const string ManageCurrencyBurned = "view.manage.currency_burned";
     public const string BankAccountClosing = "view.bank.closing";
     public const string ManagePanel = "view.manage.panel";
+    public const string ManageBankCreateModal = "view.manage.bank_create.modal";
+    public const string ManageBankCreateReview = "view.manage.bank_create.review";
+    public const string ManageBankCreateInputLabel = "view.manage.bank_create.input_label";
+    public const string ManageBankCreateCommitLabel = "view.manage.bank_create.commit_label";
+    public const string FieldInstitution = "institution";
+    public const string FieldBankName = "bank_name";
+    public const string FieldProduct = "product";
+    public const string FieldOpeningPolicy = "opening_policy";
+
     public const string ManagePanelPlaceholder = "view.manage.panel.placeholder";
     public const string ManagePanelCategory = "view.manage.panel.category";
     public const string ManagePanelActionPlaceholder = "view.manage.panel.action.placeholder";
@@ -169,6 +178,23 @@ public static partial class CanonicalTextCatalog
                 "{amount} を償却しました。発行済のベースマネーは {baseMoneySupply} です。",
             [ViewKeys.BankAccountClosing + ".title"] = "解約を申し込みました",
             [ViewKeys.BankAccountClosing + ".description"] = "口座の解約手続を開始しました。",
+            [ViewKeys.ManageBankCreateModal + ".title"] = "銀行の基本情報",
+            [ViewKeys.ManageBankCreateModal + ".description"] = "銀行名と本店と預金商品を入力します。",
+            [ViewKeys.ManageBankCreateInputLabel] = "基本情報を入力",
+            [ViewKeys.ManageBankCreateCommitLabel] = "この内容で設立",
+            [ViewKeys.ManageBankCreateReview + ".title"] = "設立内容の確認",
+            [ViewKeys.ManageBankCreateReview + ".description"] =
+                "内容を確認して設立を確定してください。口座開設方針は設立後に /manage bank-edit で変更できます。",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCreateReview, ViewKeys.FieldInstitution)] = "金融機関コード",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldInstitution)] = "{institutionCode}",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCreateReview, ViewKeys.FieldBankName)] = "銀行名",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldBankName)] = "{bankName}",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCreateReview, ViewKeys.FieldBranch)] = "本店",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldBranch)] = "{branchCode} {branchName}",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCreateReview, ViewKeys.FieldProduct)] = "預金商品",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldProduct)] = "{productCode} {productName}",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCreateReview, ViewKeys.FieldOpeningPolicy)] = "口座開設",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldOpeningPolicy)] = "受付する",
             [ViewKeys.ManagePanelPlaceholder] = "管理項目を選択",
             [ViewKeys.ManagePanelCategory + ".title"] = "{category}",
             [ViewKeys.ManagePanelCategory + ".description"] = "操作を選択してください。",
