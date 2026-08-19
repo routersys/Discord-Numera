@@ -18,7 +18,8 @@ public sealed partial class PaymentApplicationService
         HoldId HoldId,
         MoneyMinor PurchaseFee,
         FeeScheduleVersionId FeeScheduleVersionId,
-        BusinessOperationId BusinessOperationId);
+        BusinessOperationId BusinessOperationId,
+        SettlementMode SettlementMode);
 
     internal Result<MerchantPurchaseReservation> ReserveMerchantPurchase(
         IBankingUnitOfWork unitOfWork,
@@ -58,7 +59,15 @@ public sealed partial class PaymentApplicationService
                 ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
         }
 
-        if (destination.BankId != source.BankId)
+        Result<PaymentRoute> routed = PaymentRoutePolicy.Resolve(
+            unitOfWork, bank.EconomyScopeId, destination.BankId != source.BankId, amount);
+
+        if (!routed.IsSuccess)
+        {
+            return Result<MerchantPurchaseReservation>.Failure(routed.Error!);
+        }
+
+        if (routed.Value.Mode == SettlementMode.Rtgs)
         {
             return Result<MerchantPurchaseReservation>.Failure(
                 ErrorCategory.InfrastructureUnavailable,
@@ -139,9 +148,9 @@ public sealed partial class PaymentApplicationService
             source.CurrencyId,
             amount,
             MerchantPaymentMethod,
-            SettlementMode.Internal,
-            BeneficiaryPostingPolicy.ImmediateAfterAcceptance,
-            paymentNetworkPolicyVersionId: null,
+            routed.Value.Mode,
+            routed.Value.PostingPolicy,
+            routed.Value.PolicyVersionId,
             memo: null,
             now);
 
@@ -164,12 +173,19 @@ public sealed partial class PaymentApplicationService
         unitOfWork.PaymentOrders.Add(order);
 
         return Result<MerchantPurchaseReservation>.Success(new MerchantPurchaseReservation(
-            order.Id, hold.Id, fee.Value.Quote.Amount, feeScheduleVersionId, operation.Id));
+            order.Id,
+            hold.Id,
+            fee.Value.Quote.Amount,
+            feeScheduleVersionId,
+            operation.Id,
+            routed.Value.Mode));
     }
 
     internal Result<PaymentOrderView> PostMerchantPurchase(
         IBankingUnitOfWork unitOfWork,
-        PaymentOrderId paymentOrderId,
+        MerchantPurchaseReservation reservation,
         IdempotencyKey idempotencyKey) =>
-        PostTransfer(unitOfWork, paymentOrderId, idempotencyKey);
+        reservation.SettlementMode == SettlementMode.Internal
+            ? PostTransfer(unitOfWork, reservation.OrderId, idempotencyKey)
+            : PostClearingDebit(unitOfWork, reservation.OrderId);
 }

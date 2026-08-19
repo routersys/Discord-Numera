@@ -20,6 +20,8 @@ public sealed class CommerceCatalogTests
     private const string Institution = "NUM0060";
     private const ulong ForeignGuildId = 961UL;
     private const string ForeignInstitution = "NUM0061";
+
+    private const string PartnerInstitution = "NUM0062";
     private const ulong LiquidityUser = 760_000_000_000_000_003UL;
     private const ulong MerchantUser = 760_000_000_000_000_001UL;
     private const ulong BuyerUser = 760_000_000_000_000_002UL;
@@ -262,6 +264,126 @@ public sealed class CommerceCatalogTests
 
             Assert.IsTrue(opened.IsSuccess, opened.Error?.Code);
 
+            return opened.Value.Id;
+        }
+
+        public void SeedPartnerBank() => Execute($"""
+            INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+            VALUES({Blob(90)}, 'BANK', '提携銀行主体', 'ACTIVE', 1, 1),
+                ({Blob(99)}, 'SYSTEM', '決済網主体', 'ACTIVE', 1, 1);
+
+            INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                created_at, version)
+            VALUES({Blob(91)}, {Blob(90)}, 'COMMERCIAL_BANK', 'OPEN', 1, 1),
+                ({Blob(100)}, {Blob(99)}, 'SYSTEM', 'OPEN', 1, 1);
+
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            VALUES({Blob(92)}, {Blob(91)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+            INSERT INTO banks(bank_id, economy_scope_id, party_id, institution_code, name, bank_kind,
+                resolution_case_id, status, general_ledger_book_id, current_policy_version_id,
+                current_fee_schedule_version_id, created_at, version)
+            VALUES({Blob(93)}, {Blob(1)}, {Blob(90)}, '{PartnerInstitution}', '提携銀行', 'NORMAL', NULL,
+                'OPERATING', {Blob(91)}, NULL, NULL, 1, 1);
+
+            INSERT INTO branches(branch_id, bank_id, branch_code, name, status, created_at, closed_at,
+                version)
+            VALUES({Blob(94)}, {Blob(93)}, '001', '本店', 'ACTIVE', 1, NULL, 1);
+
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES
+                ({Blob(95)}, {Blob(91)}, NULL, '2000', 'DEMAND_DEPOSIT_CONTROL', 'LIABILITY', 'CREDIT',
+                    {Blob(2)}, 0, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(96)}, {Blob(91)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(101)}, {Blob(4)}, NULL, '2400', 'CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(102)}, {Blob(91)}, NULL, '1400', 'CLEARING_RECEIVABLE', 'ASSET', 'DEBIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(103)}, {Blob(91)}, NULL, '2450', 'INCOMING_SETTLEMENT_SUSPENSE', 'LIABILITY',
+                    'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(110)}, {Blob(4)}, NULL, '1400', 'CLEARING_RECEIVABLE', 'ASSET', 'DEBIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(111)}, {Blob(91)}, NULL, '2400', 'CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(104)}, {Blob(100)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+            INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
+                minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
+                reopen_closed_account_allowed, public_receiving_enabled_default, cash_card_enabled,
+                debit_card_enabled, integrated_cash_debit_default, automatic_bank_card_issue_mode,
+                cash_atm_enabled, cash_card_validity_months, debit_card_validity_months,
+                per_transfer_limit_minor, daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
+                maximum_active_holds_minor, effective_from, effective_to, version)
+            VALUES({Blob(97)}, {Blob(93)}, 1, 0, 0, 0, 1, 1, 1, 1, 1, 'NONE', 1, 12, 12,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1);
+
+            INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                effective_to, version)
+            VALUES({Blob(98)}, {Blob(93)}, 1, NULL, 1);
+
+            INSERT INTO fee_rules(fee_rule_id, fee_schedule_version_id, fee_type, priority, channel,
+                account_product_id, atm_network_id, counterparty_bank_id, amount_min_minor,
+                amount_max_minor, day_class, local_start_minute, local_end_minute, fixed_minor,
+                basis_points, minimum_minor, maximum_minor, waiver_counter_key,
+                free_occurrences_per_business_month)
+            VALUES({Blob(105)}, {Blob(98)}, 'DEBIT_PURCHASE', 0, 'ANY', NULL, NULL, NULL, 0, NULL,
+                'ANY', NULL, NULL, 0, 0, 0, NULL, NULL, 0);
+
+            UPDATE banks
+            SET current_policy_version_id = {Blob(97)},
+                current_fee_schedule_version_id = {Blob(98)},
+                version = version + 1
+            WHERE bank_id = {Blob(93)};
+
+            INSERT INTO account_products(product_id, bank_id, product_code, name, deposit_class,
+                version_application_policy, status, created_at, version)
+            VALUES({Blob(106)}, {Blob(93)}, 'STD', '普通預金', 'DEMAND', 'FOLLOW_LATEST', 'ACTIVE', 1, 1);
+
+            INSERT INTO account_product_versions(product_version_id, product_id, version, effective_from,
+                effective_to, annual_rate_ppt, day_count_basis, minimum_balance_minor,
+                maximum_balance_minor, daily_outgoing_limit_minor, per_transaction_limit_minor,
+                transfer_capabilities, deposit_insurance_class_code, overdraft_policy, created_at)
+            VALUES({Blob(107)}, {Blob(106)}, 1, 1, NULL, 1000000000, 'ACTUAL_365_FIXED', 0, NULL, NULL,
+                NULL, 'INTERNAL', 'STANDARD', 'NONE', 1);
+
+            INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code,
+                operator_party_id, accounting_book_id, liquid_asset_ledger_account_id, status,
+                current_policy_version_id, version)
+            VALUES({Blob(108)}, {Blob(1)}, 'CMRNET', {Blob(99)}, {Blob(100)}, {Blob(104)}, 'DRAFT',
+                NULL, 1);
+
+            INSERT INTO payment_network_policy_versions(payment_network_policy_version_id,
+                payment_network_id, settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor,
+                clearing_cycle_interval_seconds, precredit_enabled, precredit_prefund_ratio_bps,
+                per_bank_precredit_exposure_limit_minor, created_at, version)
+            VALUES({Blob(109)}, {Blob(108)}, 'CLEARING', 'AFTER_FINAL_SETTLEMENT', NULL, 3600, 0,
+                10000, 0, 1, 1);
+
+            UPDATE payment_networks
+            SET status = 'ACTIVE', current_policy_version_id = {Blob(109)}, version = version + 1
+            WHERE payment_network_id = {Blob(108)};
+            """);
+
+        public async Task<DepositAccountId> OpenPartnerAccountAsync(
+            ulong discordUserId,
+            string handle)
+        {
+            Result<CustomerAccountView> registered = await Registration.RegisterCustomerAccountAsync(
+                new RegisterCustomerAccountCommand(GuildId, discordUserId, handle, "利用者"),
+                CancellationToken.None);
+
+            Result<AccountOpeningView> opened = await Accounts.OpenDepositAccountAsync(
+                new OpenDepositAccountCommand(GuildId, registered.Value.Id, PartnerInstitution),
+                CancellationToken.None);
+
+            Assert.IsTrue(opened.IsSuccess, opened.Error?.Code);
             return opened.Value.Id;
         }
 
@@ -519,9 +641,12 @@ public sealed class CommerceCatalogTests
     private static async Task<MerchantProfileView> CreateProfileAsync(
         Harness harness,
         string catalogScope = "GLOBAL",
-        string paymentScope = "GLOBAL")
+        string paymentScope = "GLOBAL",
+        bool settleAtPartner = false)
     {
-        DepositAccountId settlement = await harness.OpenAccountAsync(MerchantUser, "seller");
+        DepositAccountId settlement = settleAtPartner
+            ? await harness.OpenPartnerAccountAsync(MerchantUser, "seller")
+            : await harness.OpenAccountAsync(MerchantUser, "seller");
 
         Result<MerchantProfileView> created = await harness.Merchants.CreateAsync(
             new CreateMerchantProfileCommand(
@@ -1019,9 +1144,11 @@ public sealed class CommerceCatalogTests
             Harness harness,
             string token,
             long funding = 100_000L,
-            string inventoryMode = "UNLIMITED")
+            string inventoryMode = "UNLIMITED",
+            bool settleAtPartner = false)
     {
-        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProfileView profile = await CreateProfileAsync(
+            harness, settleAtPartner: settleAtPartner);
         MerchantProductView product =
             await CreateActiveProductAsync(harness, profile.Id, inventoryMode);
         DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
@@ -1119,6 +1246,36 @@ public sealed class CommerceCatalogTests
             harness.ReadText("""
                 SELECT CAST(COUNT(*) AS TEXT) FROM commerce_orders
                 WHERE refund_eligible_until IS NOT NULL AND return_request_eligible_until IS NOT NULL;
+                """));
+    }
+
+    [TestMethod]
+    public async Task AnInterbankCaptureClearsInsteadOfCreditingTheMerchant()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedPartnerBank();
+
+        (CommerceCheckoutConfirmationId confirmation, DepositAccountId buyer) =
+            await ConfirmableAsync(harness, "capture-interbank", settleAtPartner: true);
+
+        Result<CommercePaymentView> captured = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsTrue(captured.IsSuccess, captured.Error?.Code);
+        Assert.AreEqual(1L, harness.Count("clearing_instructions"));
+        Assert.AreEqual(1L, harness.Count("debit_card_captures"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM payment_orders
+                WHERE settlement_mode = 'CLEARING' AND method = 'DEBIT_CARD_MERCHANT';
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'CLEARING_PAYABLE' AND p.posted_balance_minor > 0;
                 """));
     }
 

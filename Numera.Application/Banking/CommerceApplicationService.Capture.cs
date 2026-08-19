@@ -260,7 +260,7 @@ public sealed partial class CommerceApplicationService
         }
 
         Result<PaymentOrderView> posted = payments.PostMerchantPurchase(
-            unitOfWork, reservation.OrderId, context.IdempotencyKey);
+            unitOfWork, reservation, context.IdempotencyKey);
 
         if (!posted.IsSuccess)
         {
