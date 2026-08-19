@@ -18,6 +18,9 @@ public sealed class CommerceCatalogTests
     private const ulong GuildId = 960UL;
     private const ulong OtherGuildId = 961UL;
     private const string Institution = "NUM0060";
+    private const ulong ForeignGuildId = 961UL;
+    private const string ForeignInstitution = "NUM0061";
+    private const ulong LiquidityUser = 760_000_000_000_000_003UL;
     private const ulong MerchantUser = 760_000_000_000_000_001UL;
     private const ulong BuyerUser = 760_000_000_000_000_002UL;
 
@@ -60,6 +63,8 @@ public sealed class CommerceCatalogTests
 
         public DormancyMaintenanceService Dormancy { get; private set; } = null!;
 
+        public FxApplicationService Markets { get; private set; } = null!;
+
         public static Harness Create()
         {
             string root = Path.Combine(Path.GetTempPath(), "numera-commerce", Guid.NewGuid().ToString("n"));
@@ -101,6 +106,8 @@ public sealed class CommerceCatalogTests
                 gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
             harness.Expiries = new ExpiryMaintenanceService(gateway, harness.Clock);
             harness.Dormancy = new DormancyMaintenanceService(gateway, harness.Clock, ids);
+            harness.Markets = new FxApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
 
             return harness;
         }
@@ -253,8 +260,142 @@ public sealed class CommerceCatalogTests
                 new OpenDepositAccountCommand(GuildId, registered.Value.Id, Institution),
                 CancellationToken.None);
 
+            Assert.IsTrue(opened.IsSuccess, opened.Error?.Code);
+
             return opened.Value.Id;
         }
+
+        public async Task<DepositAccountId> OpenForeignAccountAsync(CustomerAccountId customerAccountId)
+        {
+            Result<AccountOpeningView> opened = await Accounts.OpenDepositAccountAsync(
+                new OpenDepositAccountCommand(ForeignGuildId, customerAccountId, ForeignInstitution),
+                CancellationToken.None);
+
+            Assert.IsTrue(opened.IsSuccess, opened.Error?.Code);
+
+            return opened.Value.Id;
+        }
+
+        public CustomerAccountId CustomerOf(DepositAccountId depositAccountId) =>
+            CustomerAccountId.FromValue(EntityIdValue.FromBytes(
+                Convert.FromHexString(ReadText($"""
+                    SELECT hex(customer_account_id) FROM deposit_accounts
+                    WHERE deposit_account_id = x'{Convert.ToHexString(
+                        depositAccountId.Value.ToByteArray())}';
+                    """))));
+
+        public void SeedCrossCurrency() => Execute($"""
+            INSERT INTO guild_economies(economy_scope_id, guild_id, canonical_timezone, status, version)
+            VALUES({Blob(70)}, '{ForeignGuildId}', 'Asia/Tokyo', 'ACTIVE', 1);
+
+            INSERT INTO currencies(currency_id, economy_scope_id, status, minor_unit_digits,
+                base_money_supply_cap_minor, created_at, retired_at, version)
+            VALUES({Blob(71)}, {Blob(70)}, 'ACTIVE', 2, NULL, 1, NULL, 1);
+
+            INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+            VALUES({Blob(72)}, 'BANK', '外貨銀行主体', 'ACTIVE', 1, 1);
+
+            INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                created_at, version)
+            VALUES({Blob(73)}, {Blob(72)}, 'COMMERCIAL_BANK', 'OPEN', 1, 1);
+
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            VALUES({Blob(74)}, {Blob(73)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+            INSERT INTO banks(bank_id, economy_scope_id, party_id, institution_code, name, bank_kind,
+                resolution_case_id, status, general_ledger_book_id, current_policy_version_id,
+                current_fee_schedule_version_id, created_at, version)
+            VALUES({Blob(75)}, {Blob(70)}, {Blob(72)}, '{ForeignInstitution}', '外貨銀行', 'NORMAL', NULL,
+                'OPERATING', {Blob(73)}, NULL, NULL, 1, 1);
+
+            INSERT INTO branches(branch_id, bank_id, branch_code, name, status, created_at, closed_at,
+                version)
+            VALUES({Blob(76)}, {Blob(75)}, '001', '本店', 'ACTIVE', 1, NULL, 1);
+
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES
+                ({Blob(77)}, {Blob(73)}, NULL, '2000', 'DEMAND_DEPOSIT_CONTROL', 'LIABILITY', 'CREDIT',
+                    {Blob(71)}, 0, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(78)}, {Blob(73)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
+                    {Blob(71)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+            INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
+                minimum_customer_account_age_days, minimum_initial_funding_minor, requires_manual_approval,
+                reopen_closed_account_allowed, public_receiving_enabled_default, cash_card_enabled,
+                debit_card_enabled, integrated_cash_debit_default, automatic_bank_card_issue_mode,
+                cash_atm_enabled, cash_card_validity_months, debit_card_validity_months,
+                per_transfer_limit_minor, daily_outgoing_limit_minor, per_atm_withdrawal_limit_minor,
+                daily_atm_withdrawal_limit_minor, daily_atm_transfer_limit_minor,
+                daily_debit_purchase_limit_minor, daily_fx_order_notional_limit_minor,
+                maximum_active_holds_minor, effective_from, effective_to, version)
+            VALUES({Blob(79)}, {Blob(75)}, 1, 0, 0, 0, 1, 1, 1, 1, 1, 'NONE', 1, 12, 12,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1);
+
+            INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                effective_to, version)
+            VALUES({Blob(80)}, {Blob(75)}, 1, NULL, 1);
+
+            UPDATE banks
+            SET current_policy_version_id = {Blob(79)},
+                current_fee_schedule_version_id = {Blob(80)},
+                version = version + 1
+            WHERE bank_id = {Blob(75)};
+
+            INSERT INTO account_products(product_id, bank_id, product_code, name, deposit_class,
+                version_application_policy, status, created_at, version)
+            VALUES({Blob(81)}, {Blob(75)}, 'DEMAND01', '普通預金', 'DEMAND', 'FOLLOW_LATEST', 'ACTIVE', 1, 1);
+
+            INSERT INTO account_product_versions(product_version_id, product_id, version, effective_from,
+                effective_to, annual_rate_ppt, day_count_basis, minimum_balance_minor,
+                maximum_balance_minor, daily_outgoing_limit_minor, per_transaction_limit_minor,
+                transfer_capabilities, deposit_insurance_class_code, overdraft_policy, created_at)
+            VALUES({Blob(82)}, {Blob(81)}, 1, 1, NULL, 1000000000, 'ACTUAL_365_FIXED', 0, NULL, NULL, NULL,
+                'INTERNAL', 'STANDARD', 'NONE', 1);
+
+            INSERT INTO fx_markets(market_id, base_currency_id, quote_currency_id, operator_party_id,
+                current_policy_version_id, price_scale, tick_size_price_units, lot_size_base_minor,
+                next_order_sequence_no, next_trade_sequence_no, status, version)
+            VALUES({Blob(83)}, {Blob(2)}, {Blob(71)}, {Blob(3)}, {Blob(84)}, 100, 1, 100, 1, 1,
+                'ACTIVE', 1);
+
+            INSERT INTO fx_market_policy_versions(fx_market_policy_version_id, market_id, maker_fee_bps,
+                taker_fee_bps, maximum_market_slippage_bps, effective_from, created_at, version)
+            VALUES({Blob(84)}, {Blob(83)}, 0, 0, 1000, 1, 1, 1);
+
+            INSERT INTO fx_market_summaries(market_id, last_trade_price_units, last_trade_sequence_no,
+                summary_version, order_book_version, updated_at)
+            VALUES({Blob(83)}, NULL, NULL, 1, 1, 1);
+
+            INSERT INTO currency_trust_policy_versions(currency_trust_policy_version_id,
+                economy_scope_id, established_min_age_seconds, established_min_trade_days,
+                established_min_counterparties, trusted_min_age_seconds, trusted_min_trade_days,
+                trusted_min_counterparties, reserve_min_age_seconds, reserve_min_trade_days,
+                reserve_min_counterparties, status, created_at, published_at, retired_at, version)
+            VALUES({Blob(85)}, {Blob(1)}, 604800, 3, 2, 2592000, 10, 3, 7776000, 30, 5,
+                'PUBLISHED', 1, 1, NULL, 1);
+
+            INSERT INTO authorization_decisions(authorization_decision_id, target_type, target_id,
+                scope_guild_id, authority_kind, actor_discord_user_id, actor_customer_account_id,
+                decision_kind, reason_code, occurred_at, supersedes_decision_id)
+            VALUES
+                ({Blob(86)}, 'CURRENCY_TRUST_DESIGNATION', {Blob(88)}, NULL, 'SYSTEM_OWNER', '1', NULL,
+                    'APPROVE', NULL, 1, NULL),
+                ({Blob(87)}, 'CURRENCY_TRUST_DESIGNATION', {Blob(89)}, NULL, 'SYSTEM_OWNER', '1', NULL,
+                    'APPROVE', NULL, 1, NULL);
+
+            INSERT INTO currency_trust_designations(currency_trust_designation_id, currency_id,
+                currency_trust_policy_version_id, trust_tier, status, authorization_decision_id,
+                qualified_age_seconds, qualified_trade_days, qualified_counterparties, effective_from,
+                terminal_at, version)
+            VALUES
+                ({Blob(88)}, {Blob(2)}, {Blob(85)}, 'ESTABLISHED', 'ACTIVE', {Blob(86)},
+                    604800, 3, 2, 1, NULL, 1),
+                ({Blob(89)}, {Blob(71)}, {Blob(85)}, 'ESTABLISHED', 'ACTIVE', {Blob(87)},
+                    604800, 3, 2, 1, NULL, 1);
+            """);
 
         public void SeedStandaloneHold(DepositAccountId accountId, long amount, long expiresAt)
         {
@@ -439,6 +580,236 @@ public sealed class CommerceCatalogTests
             "SELECT status FROM merchant_aftercare_policy_versions;"));
         Assert.AreEqual(1L, harness.Count(
             "merchant_profiles WHERE current_aftercare_policy_version_id IS NOT NULL"));
+    }
+
+    private static async Task<MerchantProfileView> CreateForeignProfileAsync(Harness harness)
+    {
+        DepositAccountId home = await harness.OpenAccountAsync(MerchantUser, "seller");
+        DepositAccountId settlement = await harness.OpenForeignAccountAsync(harness.CustomerOf(home));
+
+        Result<MerchantProfileView> created = await harness.Merchants.CreateAsync(
+            new CreateMerchantProfileCommand(
+                Merchant(), settlement, "ヌメラ商店", "GLOBAL", "GLOBAL", "FX_FOK", 50, 3600, 7200, true),
+            CancellationToken.None);
+
+        Assert.IsTrue(created.IsSuccess, created.Error?.Code);
+        return created.Value;
+    }
+
+    private static async Task ProvideLiquidityAsync(Harness harness, long baseMinor, long priceUnits)
+    {
+        DepositAccountId home = await harness.OpenAccountAsync(LiquidityUser, "maker");
+        CustomerAccountId customer = harness.CustomerOf(home);
+        DepositAccountId foreign = await harness.OpenForeignAccountAsync(customer);
+
+        harness.Fund(home, 1_000_000);
+        harness.Fund(foreign, 1_000_000);
+
+        Result<FxOrderView> resting = await harness.Markets.PlaceFxOrderAsync(
+            new PlaceFxOrderCommand(
+                new AuthorizationContext(AuthorizationLevel.Customer, LiquidityUser, GuildId),
+                FxMarketId.FromValue(EntityIdValue.FromBits(83)),
+                customer,
+                FxOrderSide.BuyBase,
+                FxOrderType.Limit,
+                baseMinor,
+                priceUnits,
+                null,
+                foreign,
+                home,
+                IdempotencyKey.Create("commerce-fx", "liquidity-1")),
+            CancellationToken.None);
+
+        Assert.IsTrue(resting.IsSuccess, resting.Error?.Code);
+    }
+
+    private static async Task<CommerceOrderId> ForeignOrderAsync(Harness harness, long unitPrice)
+    {
+        MerchantProfileView profile = await CreateForeignProfileAsync(harness);
+
+        Result<MerchantProductView> product = await harness.Merchants.CreateProductAsync(
+            new CreateMerchantProductCommand(
+                Merchant(), profile.Id, "SKU-XC", "外貨商品", "説明", "UNLIMITED", "INHERIT"),
+            CancellationToken.None);
+
+        Assert.IsTrue(product.IsSuccess, product.Error?.Code);
+
+        Result<MerchantProductPriceVersionView> price = await harness.Merchants.PublishPriceAsync(
+            new PublishMerchantProductPriceCommand(Merchant(), product.Value.Id, unitPrice),
+            CancellationToken.None);
+
+        Assert.IsTrue(price.IsSuccess, price.Error?.Code);
+
+        Result<MerchantProductView> activated = await harness.Merchants.SetProductStateAsync(
+            new SetMerchantProductStateCommand(Merchant(), product.Value.Id, MerchantProductStatus.Active),
+            CancellationToken.None);
+
+        Assert.IsTrue(activated.IsSuccess, activated.Error?.Code);
+
+        Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Value.Id, 1, "checkout-xc"),
+            CancellationToken.None);
+
+        Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
+
+        return checkout.Value.CommerceOrderId;
+    }
+
+    [TestMethod]
+    public async Task ACrossCurrencyCheckoutQuotesTheSourceFromTheOrderBook()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCrossCurrency();
+        await ProvideLiquidityAsync(harness, 10_000, 150);
+
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        Result<BankCardView> card = await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                harness.CustomerOf(buyer),
+                buyer,
+                BankCardForm.IntegratedCashDebit,
+                IdempotencyKey.Create("commerce", "card-xc")),
+            CancellationToken.None);
+
+        Assert.IsTrue(card.IsSuccess, card.Error?.Code);
+
+        CommerceOrderId orderId = await ForeignOrderAsync(harness, 1_500);
+
+        Result<CommerceCheckoutConfirmationView> confirmation = await harness.Commerce
+            .ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(Buyer(), orderId, harness.DebitCardOf(buyer), 50),
+                CancellationToken.None);
+
+        Assert.IsTrue(confirmation.IsSuccess, confirmation.Error?.Code);
+        Assert.AreNotEqual(
+            confirmation.Value.SourceCurrencyId, confirmation.Value.PresentmentCurrencyId);
+        Assert.AreEqual(1_000L, confirmation.Value.EstimatedSourcePrincipal.Value);
+        Assert.AreEqual(0L, confirmation.Value.EstimatedFxFee.Value);
+        Assert.AreEqual(1_005L, confirmation.Value.ConfirmedMaxSourceDebit.Value);
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM commerce_checkout_confirmations
+                WHERE fx_market_id IS NOT NULL AND fx_market_policy_version_id IS NOT NULL
+                  AND order_book_version IS NOT NULL;
+                """));
+    }
+
+    [TestMethod]
+    public async Task ACrossCurrencyCheckoutWithoutLiquidityIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCrossCurrency();
+
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        Result<BankCardView> card = await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                harness.CustomerOf(buyer),
+                buyer,
+                BankCardForm.IntegratedCashDebit,
+                IdempotencyKey.Create("commerce", "card-xc")),
+            CancellationToken.None);
+
+        CommerceOrderId orderId = await ForeignOrderAsync(harness, 1_500);
+
+        Result<CommerceCheckoutConfirmationView> confirmation = await harness.Commerce
+            .ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(Buyer(), orderId, harness.DebitCardOf(buyer), 50),
+                CancellationToken.None);
+
+        Assert.IsFalse(confirmation.IsSuccess);
+        Assert.AreEqual(
+            BankingErrorCodes.CommerceFxLiquidityInsufficient, confirmation.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("commerce_checkout_confirmations"));
+    }
+
+    [TestMethod]
+    public async Task ACrossCurrencyCheckoutWithoutCurrencyTrustIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCrossCurrency();
+        await ProvideLiquidityAsync(harness, 10_000, 150);
+        harness.Execute("UPDATE currency_trust_designations SET status = 'SUPERSEDED';");
+
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        Result<BankCardView> card = await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                harness.CustomerOf(buyer),
+                buyer,
+                BankCardForm.IntegratedCashDebit,
+                IdempotencyKey.Create("commerce", "card-xc")),
+            CancellationToken.None);
+
+        CommerceOrderId orderId = await ForeignOrderAsync(harness, 1_500);
+
+        Result<CommerceCheckoutConfirmationView> confirmation = await harness.Commerce
+            .ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(Buyer(), orderId, harness.DebitCardOf(buyer), 50),
+                CancellationToken.None);
+
+        Assert.IsFalse(confirmation.IsSuccess);
+        Assert.AreEqual(
+            BankingErrorCodes.CommerceCurrencyTrustInsufficient, confirmation.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task ASlippageBeyondTheMarketCeilingIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCrossCurrency();
+        await ProvideLiquidityAsync(harness, 10_000, 150);
+        harness.Execute("""
+            UPDATE fx_market_policy_versions SET maximum_market_slippage_bps = 10;
+            """);
+
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        Result<BankCardView> card = await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                harness.CustomerOf(buyer),
+                buyer,
+                BankCardForm.IntegratedCashDebit,
+                IdempotencyKey.Create("commerce", "card-xc")),
+            CancellationToken.None);
+
+        CommerceOrderId orderId = await ForeignOrderAsync(harness, 1_500);
+
+        Result<CommerceCheckoutConfirmationView> confirmation = await harness.Commerce
+            .ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(Buyer(), orderId, harness.DebitCardOf(buyer), 50),
+                CancellationToken.None);
+
+        Assert.IsFalse(confirmation.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CommerceSlippageInvalid, confirmation.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task AMerchantWithCrossCurrencyDisabledRejectsTheConfirmation()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCrossCurrency();
+        await ProvideLiquidityAsync(harness, 10_000, 150);
+        harness.Execute("UPDATE merchant_profiles SET cross_currency_mode = 'DISABLED';");
+
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                harness.CustomerOf(buyer),
+                buyer,
+                BankCardForm.IntegratedCashDebit,
+                IdempotencyKey.Create("commerce", "card-xc")),
+            CancellationToken.None);
+
+        CommerceOrderId orderId = await ForeignOrderAsync(harness, 1_500);
+        harness.Execute("UPDATE merchant_profiles SET cross_currency_mode = 'DISABLED';");
+
+        Result<CommerceCheckoutConfirmationView> confirmation = await harness.Commerce
+            .ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(Buyer(), orderId, harness.DebitCardOf(buyer), 50),
+                CancellationToken.None);
+
+        Assert.IsFalse(confirmation.IsSuccess);
+        Assert.AreEqual(
+            BankingErrorCodes.CommerceCrossCurrencyDisabled, confirmation.Error!.Code);
     }
 
     [TestMethod]

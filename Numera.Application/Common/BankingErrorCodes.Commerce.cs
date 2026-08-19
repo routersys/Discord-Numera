@@ -2,6 +2,18 @@ namespace Numera.Application.Common;
 
 public static partial class BankingErrorCodes
 {
+    public static string CommerceFxMarketUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 227);
+
+    public static string CommerceCurrencyTrustInsufficient { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 228);
+
+    public static string CommerceFxLiquidityInsufficient { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 229);
+
+    public static string CommerceCrossCurrencyDisabled { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 230);
+
     public static string MerchantProductNotFound { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.NotFound, 180);
 

@@ -50,6 +50,147 @@ public sealed partial class FxApplicationService
         bool PlanComplete,
         UtcTimestamp Now);
 
+    internal readonly record struct FxAcquisitionEstimate(
+        FxMarketId MarketId,
+        FxMarketPolicyVersionId PolicyVersionId,
+        long OrderBookVersion,
+        long SourceMinor,
+        long AcquiredGrossMinor,
+        long FeeMinor);
+
+    internal static FxAcquisitionEstimate? EstimateAcquisition(
+        IBankingUnitOfWork unitOfWork,
+        FxMarket market,
+        FxMarketPolicyVersion policy,
+        CurrencyId acquireCurrencyId,
+        long acquireNetMinor)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+        ArgumentNullException.ThrowIfNull(market);
+        ArgumentNullException.ThrowIfNull(policy);
+
+        if (acquireNetMinor <= 0 ||
+            GrossUp(acquireNetMinor, policy.TakerFeeBps) is not { } grossNeeded)
+        {
+            return null;
+        }
+
+        bool acquireBase = acquireCurrencyId == market.BaseCurrencyId;
+
+        IReadOnlyList<FxOrder> resting = unitOfWork.Fx.ListRestingOrders(
+            market.Id,
+            acquireBase ? FxOrderSide.SellBase : FxOrderSide.BuyBase,
+            FxPricing.MaximumFokMakerOrders + 1);
+
+        long acquired = 0;
+        long source = 0;
+        int makers = 0;
+
+        foreach (FxOrder maker in resting)
+        {
+            if (acquired >= grossNeeded || makers == FxPricing.MaximumFokMakerOrders)
+            {
+                break;
+            }
+
+            if (maker.PriceUnits is not { } price)
+            {
+                break;
+            }
+
+            long takeBase = acquireBase
+                ? Math.Min(
+                    maker.RemainingBaseMinor,
+                    RoundUpToLot(grossNeeded - acquired, market.LotSizeBaseMinor))
+                : BaseForQuote(
+                    grossNeeded - acquired,
+                    price,
+                    market.PriceScale,
+                    market.LotSizeBaseMinor,
+                    maker.RemainingBaseMinor);
+
+            if (takeBase <= 0 ||
+                !FxPricing.TryQuoteMinor(takeBase, price, market.PriceScale, out long quote))
+            {
+                return null;
+            }
+
+            acquired = checked(acquired + (acquireBase ? takeBase : quote));
+            source = checked(source + (acquireBase ? quote : takeBase));
+            makers++;
+        }
+
+        if (acquired < grossNeeded)
+        {
+            return null;
+        }
+
+        return new FxAcquisitionEstimate(
+            market.Id,
+            policy.Id,
+            unitOfWork.Fx.FindSummary(market.Id)?.OrderBookVersion ?? 1,
+            source,
+            acquired,
+            (long)(checked((Int128)acquired * policy.TakerFeeBps) / FxPricing.BasisPointScale));
+    }
+
+    internal static long? GrossUp(long netMinor, int feeBps)
+    {
+        if (netMinor <= 0 || feeBps is < 0 or >= FxPricing.BasisPointScale)
+        {
+            return null;
+        }
+
+        Int128 scale = FxPricing.BasisPointScale;
+        Int128 candidate = ((Int128)netMinor * scale + scale - feeBps - 1) / (scale - feeBps);
+
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            if (candidate > long.MaxValue)
+            {
+                return null;
+            }
+
+            long gross = (long)candidate;
+            long net = checked(gross - (long)(checked((Int128)gross * feeBps) / scale));
+
+            if (net >= netMinor)
+            {
+                return gross;
+            }
+
+            candidate += 1;
+        }
+
+        return null;
+    }
+
+    private static long RoundUpToLot(long amount, long lotSizeBaseMinor)
+    {
+        long remainder = amount % lotSizeBaseMinor;
+
+        return remainder == 0 ? amount : checked(amount + lotSizeBaseMinor - remainder);
+    }
+
+    private static long BaseForQuote(
+        long quoteMinor,
+        long priceUnits,
+        long priceScale,
+        long lotSizeBaseMinor,
+        long availableBaseMinor)
+    {
+        Int128 required = ((Int128)quoteMinor * priceScale + priceUnits - 1) / priceUnits;
+
+        if (required > long.MaxValue)
+        {
+            return 0;
+        }
+
+        long rounded = RoundUpToLot(Math.Max((long)required, lotSizeBaseMinor), lotSizeBaseMinor);
+
+        return Math.Min(rounded, availableBaseMinor);
+    }
+
     private Result<FxOrderView> Place(IBankingUnitOfWork unitOfWork, PlaceFxOrderCommand command)
     {
         Result<PlacementContext> prepared = Prepare(unitOfWork, command);

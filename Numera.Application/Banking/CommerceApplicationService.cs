@@ -663,6 +663,12 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
                 ErrorCategory.Validation, BankingErrorCodes.CommerceSlippageInvalid);
         }
 
+        if (profile.Status != MerchantProfileStatus.Active || !IsPayable(unitOfWork, profile, order))
+        {
+            return Result<CommerceCheckoutConfirmationView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.MerchantProductNotSellable);
+        }
+
         if (unitOfWork.BankCards.FindDebitCard(command.DebitCardId) is not { } debitCard ||
             debitCard.Status != DebitCardStatus.Active)
         {
@@ -677,21 +683,23 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
                 ErrorCategory.Forbidden, BankingErrorCodes.CommerceOrderNotOwned);
         }
 
-        if (source.CurrencyId != order.PresentmentCurrencyId)
+        Result<CrossCurrencyQuote> quoted = QuoteSource(
+            unitOfWork, source, order, profile, command.MaximumSlippageBps);
+
+        if (!quoted.IsSuccess)
         {
-            return Result<CommerceCheckoutConfirmationView>.Failure(
-                ErrorCategory.InfrastructureUnavailable,
-                BankingErrorCodes.CommerceCrossCurrencyUnavailable);
+            return Result<CommerceCheckoutConfirmationView>.Failure(quoted.Error!);
         }
 
-        Result<MoneyMinor> fee = EstimatePurchaseFee(unitOfWork, source, order.OrderTotalPresentment, now);
+        CrossCurrencyQuote quote = quoted.Value;
+        Result<MoneyMinor> fee = EstimatePurchaseFee(unitOfWork, source, quote.SourcePrincipal, now);
 
         if (!fee.IsSuccess)
         {
             return Result<CommerceCheckoutConfirmationView>.Failure(fee.Error!);
         }
 
-        MoneyMinor maximumSourceDebit = order.OrderTotalPresentment.Add(fee.Value);
+        MoneyMinor maximumSourceDebit = quote.MaximumSourcePrincipal.Add(fee.Value);
 
         CommerceCheckoutConfirmationRecord confirmation = new(
             CommerceCheckoutConfirmationId.FromValue(idGenerator.NextId()),
@@ -701,11 +709,11 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
             source.Id,
             source.CurrencyId,
             order.PresentmentCurrencyId,
-            null,
-            null,
-            null,
-            order.OrderTotalPresentment,
-            MoneyMinor.Zero,
+            quote.MarketId,
+            quote.PolicyVersionId,
+            quote.OrderBookVersion,
+            quote.SourcePrincipal,
+            quote.FxFee,
             fee.Value,
             command.MaximumSlippageBps,
             maximumSourceDebit,
@@ -864,6 +872,97 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
             MerchantAdministrationApplicationService.ToView(commerceReturn, [returnLine]));
     }
 
+    private readonly record struct CrossCurrencyQuote(
+        FxMarketId? MarketId,
+        FxMarketPolicyVersionId? PolicyVersionId,
+        long? OrderBookVersion,
+        MoneyMinor SourcePrincipal,
+        MoneyMinor MaximumSourcePrincipal,
+        MoneyMinor FxFee);
+
+    private static Result<CrossCurrencyQuote> QuoteSource(
+        IBankingUnitOfWork unitOfWork,
+        Numera.Domain.Banking.DepositAccount source,
+        CommerceOrderRecord order,
+        MerchantProfileRecord profile,
+        int slippageBps)
+    {
+        if (source.CurrencyId == order.PresentmentCurrencyId)
+        {
+            return Result<CrossCurrencyQuote>.Success(new CrossCurrencyQuote(
+                MarketId: null,
+                PolicyVersionId: null,
+                OrderBookVersion: null,
+                order.OrderTotalPresentment,
+                order.OrderTotalPresentment,
+                MoneyMinor.Zero));
+        }
+
+        if (profile.CrossCurrencyMode != MerchantVocabulary.CrossCurrencyFxFok)
+        {
+            return Result<CrossCurrencyQuote>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceCrossCurrencyDisabled);
+        }
+
+        (CurrencyId first, CurrencyId second) = FxAdministrationApplicationService.Orient(
+            source.CurrencyId, order.PresentmentCurrencyId);
+
+        if (unitOfWork.Fx.FindMarketByPair(first, second) is not { } market ||
+            !market.IsTradable ||
+            market.CurrentPolicyVersionId is not { } policyVersionId ||
+            unitOfWork.Fx.FindPolicyVersion(policyVersionId) is not { } policy)
+        {
+            return Result<CrossCurrencyQuote>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceFxMarketUnavailable);
+        }
+
+        if (slippageBps > policy.MaximumMarketSlippageBps)
+        {
+            return Result<CrossCurrencyQuote>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CommerceSlippageInvalid);
+        }
+
+        if (!IsTrusted(unitOfWork, source.CurrencyId) ||
+            !IsTrusted(unitOfWork, order.PresentmentCurrencyId))
+        {
+            return Result<CrossCurrencyQuote>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceCurrencyTrustInsufficient);
+        }
+
+        if (FxApplicationService.EstimateAcquisition(
+                unitOfWork,
+                market,
+                policy,
+                order.PresentmentCurrencyId,
+                order.OrderTotalPresentment.Value) is not { } estimate)
+        {
+            return Result<CrossCurrencyQuote>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceFxLiquidityInsufficient);
+        }
+
+        Int128 ceiling = checked((Int128)estimate.SourceMinor * (10_000 + slippageBps));
+        Int128 maximum = (ceiling + 9_999) / 10_000;
+
+        if (maximum > long.MaxValue)
+        {
+            return Result<CrossCurrencyQuote>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.AmountInvalid);
+        }
+
+        return Result<CrossCurrencyQuote>.Success(new CrossCurrencyQuote(
+            estimate.MarketId,
+            estimate.PolicyVersionId,
+            estimate.OrderBookVersion,
+            MoneyMinor.FromMinor(estimate.SourceMinor),
+            MoneyMinor.FromMinor((long)maximum),
+            MoneyMinor.FromMinor(estimate.FeeMinor)));
+    }
+
+    private static bool IsTrusted(IBankingUnitOfWork unitOfWork, CurrencyId currencyId) =>
+        unitOfWork.Governance.FindCurrentTrustDesignation(currencyId) is
+            { Status: CurrencyTrustDesignationStatus.Active } designation &&
+        designation.Tier >= CurrencyTrustTier.Established;
+
     private static Result<MoneyMinor> EstimatePurchaseFee(
         IBankingUnitOfWork unitOfWork,
         Numera.Domain.Banking.DepositAccount source,
@@ -900,6 +999,23 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
     private static bool IsVisibleIn(MerchantProfileRecord profile, ulong guildId) =>
         profile.CatalogVisibilityScope == MerchantVocabulary.ScopeGlobal ||
         profile.HomeGuildId == guildId.ToString(CultureInfo.InvariantCulture);
+
+    private static bool IsPayable(
+        IBankingUnitOfWork unitOfWork,
+        MerchantProfileRecord profile,
+        CommerceOrderRecord order)
+    {
+        foreach (CommerceOrderLineRecord line in unitOfWork.Commerce.ListOrderLines(order.Id))
+        {
+            if (unitOfWork.Commerce.FindProduct(line.MerchantProductId) is not { } product ||
+                !IsPayableIn(profile, product, order.OriginGuildId))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static bool IsPayableIn(
         MerchantProfileRecord profile,
