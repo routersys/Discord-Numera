@@ -84,7 +84,8 @@ public sealed class FxMatchingTests
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Accounts = new BankAccountApplicationService(
                 gateway, payments, harness.Clock, ids);
-            harness.Markets = new FxApplicationService(gateway, harness.Clock, ids);
+            harness.Markets = new FxApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Maintenance = new SettlementMaintenanceService(
                 gateway, payments, harness.Clock, ids);
 
@@ -825,6 +826,41 @@ public sealed class FxMatchingTests
 
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.FxAmountNotRepresentable, result.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task TheVisualSnapshotCarriesTheFourCacheKeyComponents()
+    {
+        await using Harness harness = Harness.Create();
+        (Trader maker, Trader taker) = await TradersAsync(harness);
+
+        await SellAsync(harness, maker, 1_000, 150, "sell-1");
+        await BuyAsync(harness, taker, 1_000, 150, "buy-1");
+
+        harness.Clock.Advance(120_000);
+
+        Result<FxRateVisualView> rate = await harness.Markets.GetFxRateVisualAsync(
+            new GetFxRateVisualQuery(harness.MarketId), CancellationToken.None);
+
+        Result<FxBoardVisualView> board = await harness.Markets.GetFxBoardVisualAsync(
+            new GetFxBoardVisualQuery(harness.MarketId), CancellationToken.None);
+
+        Result<FxChartVisualView> chart = await harness.Markets.GetFxChartVisualAsync(
+            new GetFxChartVisualQuery(harness.MarketId, 3600), CancellationToken.None);
+
+        Assert.IsTrue(rate.IsSuccess);
+        Assert.IsTrue(board.IsSuccess);
+        Assert.IsTrue(chart.IsSuccess);
+
+        Assert.AreEqual(rate.Value.CacheKey, board.Value.CacheKey);
+        Assert.AreEqual(rate.Value.StatisticsAsOfMinute, rate.Value.CacheKey.StatisticsAsOfMinute);
+        Assert.AreEqual(0L, rate.Value.StatisticsAsOfMinute % 60);
+        Assert.AreEqual(2L, rate.Value.CacheKey.SummaryVersion);
+        Assert.AreEqual(3L, rate.Value.CacheKey.OrderBookVersion);
+        Assert.AreEqual(1L, rate.Value.CacheKey.ProjectionVersion);
+        Assert.AreEqual(1L, chart.Value.CacheKey.ProjectionVersion);
+        Assert.AreEqual(150L, rate.Value.High24hPriceUnits);
+        Assert.AreEqual(1_000L, rate.Value.Volume24hBaseMinor);
     }
 
     [TestMethod]

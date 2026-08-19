@@ -62,6 +62,12 @@ public sealed record FxTradeHistoryPageView(
     IReadOnlyList<FxTradeHistoryItem> Items,
     string? NextCursor);
 
+public sealed record FxVisualCacheKey(
+    long StatisticsAsOfMinute,
+    long SummaryVersion,
+    long OrderBookVersion,
+    long ProjectionVersion);
+
 public sealed record FxRateVisualView(
     FxMarketId MarketId,
     long StatisticsAsOfMinute,
@@ -73,21 +79,24 @@ public sealed record FxRateVisualView(
     long Low24hPriceUnits,
     long Volume24hBaseMinor,
     long SummaryVersion,
-    long OrderBookVersion);
+    long OrderBookVersion,
+    FxVisualCacheKey CacheKey);
 
 public sealed record FxBoardVisualView(
     FxMarketId MarketId,
     long StatisticsAsOfMinute,
     IReadOnlyList<FxDepthLevel> Bids,
     IReadOnlyList<FxDepthLevel> Asks,
-    long OrderBookVersion);
+    long OrderBookVersion,
+    FxVisualCacheKey CacheKey);
 
 public sealed record FxChartVisualView(
     FxMarketId MarketId,
     int BucketSeconds,
     long StatisticsAsOfMinute,
     IReadOnlyList<FxOhlcBucket> Buckets,
-    long SummaryVersion);
+    long SummaryVersion,
+    FxVisualCacheKey CacheKey);
 
 public interface IFxApplicationService
 {
@@ -126,22 +135,28 @@ public sealed partial class FxApplicationService : IFxApplicationService
 {
     public const int DepthLevels = 10;
 
+    public const int MinuteBucketSeconds = 60;
+
     public const long RollingWindowSeconds = 86400;
 
     private readonly IBankingWriteGateway writeGateway;
+    private readonly IBankingReadGateway readGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public FxApplicationService(
         IBankingWriteGateway writeGateway,
+        IBankingReadGateway readGateway,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(readGateway);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.readGateway = readGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
@@ -173,7 +188,9 @@ public sealed partial class FxApplicationService : IFxApplicationService
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        return writeGateway.ExecuteAsync(unitOfWork => RateVisual(unitOfWork, query), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(readGateway.Execute(context => RateVisual(context, query)));
     }
 
     public Task<Result<FxBoardVisualView>> GetFxBoardVisualAsync(
@@ -182,7 +199,9 @@ public sealed partial class FxApplicationService : IFxApplicationService
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        return writeGateway.ExecuteAsync(unitOfWork => BoardVisual(unitOfWork, query), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(readGateway.Execute(context => BoardVisual(context, query)));
     }
 
     public Task<Result<FxChartVisualView>> GetFxChartVisualAsync(
@@ -191,7 +210,9 @@ public sealed partial class FxApplicationService : IFxApplicationService
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        return writeGateway.ExecuteAsync(unitOfWork => ChartVisual(unitOfWork, query), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(readGateway.Execute(context => ChartVisual(context, query)));
     }
 
     public Task<Result<FxOrderPageView>> ListFxOrdersAsync(
@@ -288,61 +309,54 @@ public sealed partial class FxApplicationService : IFxApplicationService
                 : null));
     }
 
-    private Result<FxRateVisualView> RateVisual(IBankingUnitOfWork unitOfWork, GetFxRateVisualQuery query)
+    private Result<FxRateVisualView> RateVisual(IBankingReadContext context, GetFxRateVisualQuery query)
     {
-        if (unitOfWork.Fx.FindMarket(query.MarketId) is not { } market)
+        long asOf = StatisticsAsOfMinute(clock.Now());
+
+        if (Snapshot(context, query.MarketId, MinuteBucketSeconds, asOf) is not { } snapshot)
         {
             return Result<FxRateVisualView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
-        long asOf = StatisticsAsOfMinute(clock.Now());
-        long windowStart = asOf - RollingWindowSeconds;
-
-        IReadOnlyList<FxOhlcBucket> buckets =
-            unitOfWork.Fx.ListBuckets(market.Id, 60, windowStart, asOf);
-
-        IReadOnlyList<FxDepthLevel> bids = unitOfWork.Fx.ReadDepth(market.Id, FxOrderSide.BuyBase, 1);
-        IReadOnlyList<FxDepthLevel> asks = unitOfWork.Fx.ReadDepth(market.Id, FxOrderSide.SellBase, 1);
-        FxMarketSummary? summary = unitOfWork.Fx.FindSummary(market.Id);
-
-        long? bid = bids.Count > 0 ? bids[0].PriceUnits : null;
-        long? ask = asks.Count > 0 ? asks[0].PriceUnits : null;
+        long? bid = snapshot.Bids.Count > 0 ? snapshot.Bids[0].PriceUnits : null;
+        long? ask = snapshot.Asks.Count > 0 ? snapshot.Asks[0].PriceUnits : null;
 
         return Result<FxRateVisualView>.Success(new FxRateVisualView(
-            market.Id,
+            snapshot.MarketId,
             asOf,
-            summary?.LastTradePriceUnits,
+            snapshot.LastTradePriceUnits,
             bid,
             ask,
             bid is { } b && ask is { } a ? checked(a - b) : null,
-            buckets.Count == 0 ? 0 : buckets.Max(static bucket => bucket.HighPriceUnits),
-            buckets.Count == 0 ? 0 : buckets.Min(static bucket => bucket.LowPriceUnits),
-            buckets.Sum(static bucket => bucket.BaseVolumeMinor),
-            summary?.SummaryVersion ?? 1,
-            summary?.OrderBookVersion ?? 1));
+            snapshot.Buckets.Count == 0 ? 0 : snapshot.Buckets.Max(static bucket => bucket.HighPriceUnits),
+            snapshot.Buckets.Count == 0 ? 0 : snapshot.Buckets.Min(static bucket => bucket.LowPriceUnits),
+            snapshot.Buckets.Sum(static bucket => bucket.BaseVolumeMinor),
+            snapshot.SummaryVersion,
+            snapshot.OrderBookVersion,
+            CacheKeyOf(asOf, snapshot)));
     }
 
     private Result<FxBoardVisualView> BoardVisual(
-        IBankingUnitOfWork unitOfWork,
+        IBankingReadContext context,
         GetFxBoardVisualQuery query)
     {
-        if (unitOfWork.Fx.FindMarket(query.MarketId) is not { } market)
-        {
-            return Result<FxBoardVisualView>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
-        }
+        long asOf = StatisticsAsOfMinute(clock.Now());
 
-        return Result<FxBoardVisualView>.Success(new FxBoardVisualView(
-            market.Id,
-            StatisticsAsOfMinute(clock.Now()),
-            unitOfWork.Fx.ReadDepth(market.Id, FxOrderSide.BuyBase, DepthLevels),
-            unitOfWork.Fx.ReadDepth(market.Id, FxOrderSide.SellBase, DepthLevels),
-            unitOfWork.Fx.FindSummary(market.Id)?.OrderBookVersion ?? 1));
+        return Snapshot(context, query.MarketId, MinuteBucketSeconds, asOf) is not { } snapshot
+            ? Result<FxBoardVisualView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound)
+            : Result<FxBoardVisualView>.Success(new FxBoardVisualView(
+                snapshot.MarketId,
+                asOf,
+                snapshot.Bids,
+                snapshot.Asks,
+                snapshot.OrderBookVersion,
+                CacheKeyOf(asOf, snapshot)));
     }
 
     private Result<FxChartVisualView> ChartVisual(
-        IBankingUnitOfWork unitOfWork,
+        IBankingReadContext context,
         GetFxChartVisualQuery query)
     {
         if (query.BucketSeconds is not (60 or 300 or 3600))
@@ -351,21 +365,38 @@ public sealed partial class FxApplicationService : IFxApplicationService
                 ErrorCategory.Validation, BankingErrorCodes.FxBucketInvalid);
         }
 
-        if (unitOfWork.Fx.FindMarket(query.MarketId) is not { } market)
-        {
-            return Result<FxChartVisualView>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
-        }
-
         long asOf = StatisticsAsOfMinute(clock.Now());
 
-        return Result<FxChartVisualView>.Success(new FxChartVisualView(
-            market.Id,
-            query.BucketSeconds,
-            asOf,
-            unitOfWork.Fx.ListBuckets(market.Id, query.BucketSeconds, asOf - RollingWindowSeconds, asOf),
-            unitOfWork.Fx.FindSummary(market.Id)?.SummaryVersion ?? 1));
+        return Snapshot(context, query.MarketId, query.BucketSeconds, asOf) is not { } snapshot
+            ? Result<FxChartVisualView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound)
+            : Result<FxChartVisualView>.Success(new FxChartVisualView(
+                snapshot.MarketId,
+                query.BucketSeconds,
+                asOf,
+                snapshot.Buckets,
+                snapshot.SummaryVersion,
+                CacheKeyOf(asOf, snapshot)));
     }
+
+    private static FxVisualSnapshot? Snapshot(
+        IBankingReadContext context,
+        FxMarketId marketId,
+        int bucketSeconds,
+        long statisticsAsOfMinute) =>
+        context.FxVisuals.Read(
+            marketId,
+            bucketSeconds,
+            statisticsAsOfMinute - RollingWindowSeconds,
+            statisticsAsOfMinute,
+            DepthLevels);
+
+    private static FxVisualCacheKey CacheKeyOf(long statisticsAsOfMinute, FxVisualSnapshot snapshot) =>
+        new(
+            statisticsAsOfMinute,
+            snapshot.SummaryVersion,
+            snapshot.OrderBookVersion,
+            snapshot.ProjectionVersion);
 
     internal static long StatisticsAsOfMinute(UtcTimestamp now) =>
         now.UnixMilliseconds / 60_000 * 60;
