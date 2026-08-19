@@ -50,6 +50,8 @@ public sealed class TransferTests
 
         public SettlementMaintenanceService Maintenance { get; private set; } = null!;
 
+        public DormancyMaintenanceService Dormancy { get; private set; } = null!;
+
         public EconomyScopeId Scope { get; } = EconomyScopeId.FromValue(EntityIdValue.FromBits(1));
 
         public static Harness Create(
@@ -84,6 +86,7 @@ public sealed class TransferTests
                 gateway, harness.Payments, harness.Clock, ids);
             harness.Maintenance = new SettlementMaintenanceService(
                 gateway, harness.Payments, harness.Clock, ids);
+            harness.Dormancy = new DormancyMaintenanceService(gateway, harness.Clock, ids);
 
             return harness;
         }
@@ -687,6 +690,38 @@ public sealed class TransferTests
             return result.Value;
         }
 
+        public void ReserveHold(DepositAccountId accountId, long amount)
+        {
+            Execute($"""
+                INSERT INTO business_operations(business_operation_id, operation_type, economy_scope_id,
+                    actor_party_id, correlation_id, idempotency_scope, idempotency_key, status,
+                    created_at, committed_at, version)
+                VALUES({Blob(200)}, 'PAYMENT_TRANSFER', {Blob(1)}, NULL, {Blob(201)}, 'RACE', 'race-1',
+                    'STARTED', 1, NULL, 1);
+
+                INSERT INTO holds(hold_id, hold_scope_kind, deposit_account_id, ledger_account_id,
+                    business_operation_id, amount_minor, remaining_minor, reason, status, created_at,
+                    expires_at, terminal_at, version)
+                SELECT {Blob(202)}, 'CUSTOMER_DEPOSIT', deposit_account_id, NULL, {Blob(200)},
+                    {amount}, {amount}, 'TRANSFER', 'ACTIVE', 1, NULL, NULL, 1
+                FROM deposit_accounts WHERE deposit_account_id = $account;
+
+                UPDATE ledger_balance_projections
+                SET held_minor = {amount}, version = version + 1
+                WHERE ledger_account_id = (
+                    SELECT ledger_account_id FROM deposit_accounts WHERE deposit_account_id = $account);
+                """.Replace(
+                    "$account",
+                    $"x'{Convert.ToHexString(accountId.Value.ToByteArray())}'",
+                    StringComparison.Ordinal));
+        }
+
+        public string StatusOf(DepositAccountId accountId) => ReadText(
+            $"""
+            SELECT status FROM deposit_accounts
+            WHERE deposit_account_id = x'{Convert.ToHexString(accountId.Value.ToByteArray())}';
+            """);
+
         public Task<Result<PaymentOrderView>> TransferAsync(
             CustomerAccountId payer,
             DepositAccountId source,
@@ -736,6 +771,102 @@ public sealed class TransferTests
         harness.Fund(source.Id, funding);
 
         return new Parties(payer, source, payee, destination);
+    }
+
+    [TestMethod]
+    public async Task AClosedAccountRejectsALaterTransfer()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+
+        Result closed = await harness.Accounts.CloseDepositAccountAsync(
+            new CloseDepositAccountCommand(parties.Payer, parties.Source.Id), CancellationToken.None);
+
+        Assert.IsTrue(closed.IsSuccess, closed.Error?.Code);
+
+        Result<PaymentOrderView> transfer = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(transfer.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.DepositAccountNotOperable, transfer.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task AnActiveHoldRejectsTheCloseRequest()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+        harness.ReserveHold(parties.Source.Id, 200);
+
+        Result closed = await harness.Accounts.CloseDepositAccountAsync(
+            new CloseDepositAccountCommand(parties.Payer, parties.Source.Id), CancellationToken.None);
+
+        Assert.IsFalse(closed.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.DepositAccountHasActiveHolds, closed.Error!.Code);
+        Assert.AreEqual("ACTIVE", harness.StatusOf(parties.Source.Id));
+    }
+
+    [TestMethod]
+    public async Task TwoInactiveMonthsMoveAFundedAccountToDormantAndBlockTransfers()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+
+        harness.Clock.Advance(70L * 24 * 60 * 60 * 1000);
+
+        DormancyMaintenanceReport report =
+            await harness.Dormancy.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(2, report.Transitioned);
+        Assert.AreEqual("DORMANT", harness.StatusOf(parties.Source.Id));
+
+        Result<PaymentOrderView> transfer = await harness.TransferAsync(
+            parties.Payer, parties.Source.Id, parties.Destination.AccountNumber, 300);
+
+        Assert.IsFalse(transfer.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.DepositAccountNotOperable, transfer.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task AnEmptyInactiveAccountGoesStraightToClosing()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness, funding: 0);
+
+        harness.Clock.Advance(70L * 24 * 60 * 60 * 1000);
+
+        await harness.Dormancy.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual("CLOSING", harness.StatusOf(parties.Source.Id));
+        Assert.AreEqual(
+            "DORMANCY",
+            harness.ReadText("""
+                SELECT closure_reason FROM deposit_accounts WHERE status = 'CLOSING' LIMIT 1;
+                """));
+    }
+
+    [TestMethod]
+    public async Task AReactivationCommittedFirstMakesTheDormancyJobANoOp()
+    {
+        await using Harness harness = Harness.Create();
+        Parties parties = await SetupAsync(harness);
+
+        harness.Clock.Advance(70L * 24 * 60 * 60 * 1000);
+        await harness.Dormancy.ProcessDueAsync(CancellationToken.None);
+
+        Result reactivated = await harness.Accounts.ReactivateDepositAccountAsync(
+            new ReactivateDepositAccountCommand(parties.Payer, parties.Source.Id),
+            CancellationToken.None);
+
+        Assert.IsTrue(reactivated.IsSuccess, reactivated.Error?.Code);
+        Assert.AreEqual("ACTIVE", harness.StatusOf(parties.Source.Id));
+
+        DormancyMaintenanceReport report =
+            await harness.Dormancy.ProcessDueAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, report.Transitioned);
+        Assert.AreEqual(0, report.Assessed);
+        Assert.AreEqual("ACTIVE", harness.StatusOf(parties.Source.Id));
     }
 
     [TestMethod]

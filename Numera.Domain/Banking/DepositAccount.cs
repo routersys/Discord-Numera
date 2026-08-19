@@ -299,7 +299,10 @@ public sealed class DepositAccount : VersionedEntity
 
     public void RequestClosure(ClosureReason reason, UtcTimestamp requestedAt)
     {
-        if (reason == Banking.ClosureReason.Dormancy && Status != DepositAccountStatus.Dormant)
+        if (reason == Banking.ClosureReason.Dormancy &&
+            Status is not (DepositAccountStatus.Dormant
+                or DepositAccountStatus.Active
+                or DepositAccountStatus.Restricted))
         {
             throw InvariantViolationException.Create(InvariantViolationCode.ClosureReasonInconsistent);
         }

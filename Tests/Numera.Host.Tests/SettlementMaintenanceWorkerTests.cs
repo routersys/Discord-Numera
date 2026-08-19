@@ -46,7 +46,7 @@ internal sealed class RecordingMaintenanceRunner : ISettlementMaintenanceRunner
     {
         Calls.Add(nameof(ProcessDueDormancyAsync));
 
-        return Task.FromResult(new DormancyMaintenanceReport(1, 0));
+        return Task.FromResult(new DormancyMaintenanceReport(1, 0, 0));
     }
 }
 

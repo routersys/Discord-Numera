@@ -127,9 +127,23 @@ public sealed class DepositAccountTests
     }
 
     [TestMethod]
-    public void DormancyClosureRequiresDormantAccount()
+    public void DormancyClosureIsAllowedFromActiveAndDormant()
+    {
+        DepositAccount fromActive = Active();
+        fromActive.RequestClosure(ClosureReason.Dormancy, Later);
+        Assert.AreEqual(DepositAccountStatus.Closing, fromActive.Status);
+
+        DepositAccount fromDormant = Active();
+        fromDormant.MarkDormant(null);
+        fromDormant.RequestClosure(ClosureReason.Dormancy, Later);
+        Assert.AreEqual(DepositAccountStatus.Closing, fromDormant.Status);
+    }
+
+    [TestMethod]
+    public void DormancyClosureRejectsAFrozenAccount()
     {
         DepositAccount account = Active();
+        account.Freeze();
 
         InvariantViolationException exception = Assert.ThrowsExactly<InvariantViolationException>(
             () => account.RequestClosure(ClosureReason.Dormancy, Later));

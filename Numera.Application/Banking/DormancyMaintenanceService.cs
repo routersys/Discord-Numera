@@ -6,12 +6,13 @@ using Numera.Domain.Common;
 
 namespace Numera.Application.Banking;
 
-public sealed record DormancyMaintenanceReport(int Assessed, int Closed);
+public sealed record DormancyMaintenanceReport(int Assessed, int Closed, int Transitioned);
 
 public sealed class DormancyMaintenanceService
 {
     public const int BatchSize = 100;
     public const int MaximumCatchUpDues = 8;
+    public const int InactivityMonths = 2;
     public const long DormancyIntervalMilliseconds = 7L * 24 * 60 * 60 * 1000;
     public const string OperationType = "DORMANCY_FEE";
     public const string TransactionType = "DORMANCY_FEE";
@@ -37,13 +38,15 @@ public sealed class DormancyMaintenanceService
 
     public async Task<DormancyMaintenanceReport> ProcessDueAsync(CancellationToken cancellationToken)
     {
+        int transitioned = await TransitionInactiveAsync(cancellationToken).ConfigureAwait(false);
+
         Result<IReadOnlyList<DepositAccountId>> due = await writeGateway
             .ExecuteAsync(ListDue, cancellationToken)
             .ConfigureAwait(false);
 
         if (!due.IsSuccess)
         {
-            return new DormancyMaintenanceReport(0, 0);
+            return new DormancyMaintenanceReport(0, 0, transitioned);
         }
 
         int assessed = 0;
@@ -73,8 +76,78 @@ public sealed class DormancyMaintenanceService
             }
         }
 
-        return new DormancyMaintenanceReport(assessed, closed);
+        return new DormancyMaintenanceReport(assessed, closed, transitioned);
     }
+
+    private async Task<int> TransitionInactiveAsync(CancellationToken cancellationToken)
+    {
+        Result<IReadOnlyList<DepositAccountId>> candidates = await writeGateway
+            .ExecuteAsync(ListInactive, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!candidates.IsSuccess)
+        {
+            return 0;
+        }
+
+        int transitioned = 0;
+
+        foreach (DepositAccountId accountId in candidates.Value)
+        {
+            Result<bool> outcome = await writeGateway
+                .ExecuteAsync(unitOfWork => TransitionInactive(unitOfWork, accountId), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (outcome.IsSuccess && outcome.Value)
+            {
+                transitioned++;
+            }
+        }
+
+        return transitioned;
+    }
+
+    private Result<IReadOnlyList<DepositAccountId>> ListInactive(IBankingUnitOfWork unitOfWork) =>
+        Result<IReadOnlyList<DepositAccountId>>.Success(
+        [
+            .. unitOfWork.DepositAccounts
+                .ListDormancyCandidates(Shift(clock.Now(), -InactivityMonths), BatchSize)
+                .Select(static account => account.Id),
+        ]);
+
+    private Result<bool> TransitionInactive(IBankingUnitOfWork unitOfWork, DepositAccountId accountId)
+    {
+        UtcTimestamp now = clock.Now();
+
+        if (unitOfWork.DepositAccounts.Find(accountId) is not { } account ||
+            account.Status is not (DepositAccountStatus.Active or DepositAccountStatus.Restricted) ||
+            Shift(account.LastCustomerActivityAt, InactivityMonths) > now)
+        {
+            return Result<bool>.Success(false);
+        }
+
+        LedgerBalance balance = unitOfWork.LedgerAccounts.FindProjection(account.LedgerAccountId)
+            ?? LedgerBalance.Empty;
+
+        if (balance.PostedBalance.Value == 0 && balance.HeldAmount.IsZero)
+        {
+            account.RequestClosure(ClosureReason.Dormancy, now);
+        }
+        else
+        {
+            account.MarkDormant(now.AddMilliseconds(DormancyIntervalMilliseconds));
+        }
+
+        unitOfWork.DepositAccounts.Update(account);
+
+        return Result<bool>.Success(true);
+    }
+
+    internal static UtcTimestamp Shift(UtcTimestamp at, int months) =>
+        UtcTimestamp.FromUnixMilliseconds(
+            DateTimeOffset.FromUnixTimeMilliseconds(at.UnixMilliseconds)
+                .AddMonths(months)
+                .ToUnixTimeMilliseconds());
 
     private Result<IReadOnlyList<DepositAccountId>> ListDue(IBankingUnitOfWork unitOfWork) =>
         Result<IReadOnlyList<DepositAccountId>>.Success(

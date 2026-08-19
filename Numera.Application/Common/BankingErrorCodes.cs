@@ -78,6 +78,9 @@ public static partial class BankingErrorCodes
 
     public static string PaymentNetworkNotOperating { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 8);
 
+    public static string DepositAccountHasActiveHolds { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 12);
+
     public static string PaymentNetworkPolicyInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 8);
 

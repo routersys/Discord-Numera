@@ -230,6 +230,10 @@ public interface IDepositAccountRepository
 
     IReadOnlyList<Numera.Domain.Banking.DepositAccount> ListDueDormant(UtcTimestamp now, int limit);
 
+    IReadOnlyList<Numera.Domain.Banking.DepositAccount> ListDormancyCandidates(
+        UtcTimestamp inactiveSince,
+        int limit);
+
     void Update(Numera.Domain.Banking.DepositAccount account);
 
     Numera.Domain.Banking.DepositAccount? Find(DepositAccountId id);

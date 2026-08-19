@@ -1,3 +1,4 @@
+using Numera.Domain.Accounting;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
 using Numera.Domain.Banking;
@@ -69,6 +70,7 @@ public sealed partial class BankAccountApplicationService
             command.CustomerAccountId,
             command.DepositAccountId,
             static (account, now) => account.RequestClosure(ClosureReason.User, now),
+            requiresSettledHolds: true,
             cancellationToken);
     }
 
@@ -76,6 +78,16 @@ public sealed partial class BankAccountApplicationService
         CustomerAccountId customerAccountId,
         DepositAccountId depositAccountId,
         Action<DepositAccount, UtcTimestamp> change,
+        CancellationToken cancellationToken) =>
+        await ChangeStateAsync(
+            customerAccountId, depositAccountId, change, requiresSettledHolds: false, cancellationToken)
+            .ConfigureAwait(false);
+
+    private async Task<Result> ChangeStateAsync(
+        CustomerAccountId customerAccountId,
+        DepositAccountId depositAccountId,
+        Action<DepositAccount, UtcTimestamp> change,
+        bool requiresSettledHolds,
         CancellationToken cancellationToken)
     {
         Result<bool> outcome = await writeGateway.ExecuteAsync(
@@ -91,6 +103,14 @@ public sealed partial class BankAccountApplicationService
                         BankingErrorCodes.DepositAccountNotOperable);
 
                     return Result<bool>.Failure(denied.Category, denied.Code);
+                }
+
+                if (requiresSettledHolds &&
+                    (unitOfWork.LedgerAccounts.FindProjection(account.LedgerAccountId)
+                        ?? LedgerBalance.Empty).HeldAmount.IsPositive)
+                {
+                    return Result<bool>.Failure(
+                        ErrorCategory.Conflict, BankingErrorCodes.DepositAccountHasActiveHolds);
                 }
 
                 change(account, clock.Now());

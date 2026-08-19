@@ -378,6 +378,29 @@ public sealed class SqliteDepositAccountRepository : IDepositAccountRepository
         }
     }
 
+    public IReadOnlyList<DepositAccount> ListDormancyCandidates(UtcTimestamp inactiveSince, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM deposit_accounts
+            WHERE status IN ('ACTIVE','RESTRICTED') AND last_customer_activity_at <= $since
+            ORDER BY last_customer_activity_at, deposit_account_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$since", inactiveSince.UnixMilliseconds);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<DepositAccount> accounts = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            accounts.Add(Read(reader));
+        }
+
+        return accounts;
+    }
+
     public IReadOnlyList<DepositAccount> ListDueDormant(UtcTimestamp now, int limit)
     {
         using SqliteCommand command = unitOfWork.CreateCommand($"""
