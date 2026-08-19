@@ -94,18 +94,24 @@ public interface IAtmApplicationService
         CancellationToken cancellationToken);
 }
 
-public sealed class AtmApplicationService : IAtmApplicationService
+public sealed partial class AtmApplicationService : IAtmApplicationService
 {
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
+    private readonly IIdGenerator idGenerator;
 
-    public AtmApplicationService(IBankingWriteGateway writeGateway, IClock clock)
+    public AtmApplicationService(
+        IBankingWriteGateway writeGateway,
+        IClock clock,
+        IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
         this.clock = clock;
+        this.idGenerator = idGenerator;
     }
 
     public Task<Result<AtmSessionView>> OpenAtmSessionAsync(
@@ -124,15 +130,7 @@ public sealed class AtmApplicationService : IAtmApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(
-            unitOfWork => RejectCashOperation(
-                unitOfWork,
-                command.Actor,
-                command.AtmTerminalId,
-                command.DepositAccountId,
-                command.CashCurrencyId,
-                command.AmountMinor,
-                withdrawal: true),
-            cancellationToken);
+            unitOfWork => Withdraw(unitOfWork, command), cancellationToken);
     }
 
     public Task<Result<AtmTransactionView>> AtmDepositAsync(
@@ -142,15 +140,7 @@ public sealed class AtmApplicationService : IAtmApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(
-            unitOfWork => RejectCashOperation(
-                unitOfWork,
-                command.Actor,
-                command.AtmTerminalId,
-                command.DepositAccountId,
-                command.CashCurrencyId,
-                command.AmountMinor,
-                withdrawal: false),
-            cancellationToken);
+            unitOfWork => Deposit(unitOfWork, command), cancellationToken);
     }
 
     public Task<Result<AccountBalanceView>> AtmBalanceInquiryAsync(
@@ -292,61 +282,6 @@ public sealed class AtmApplicationService : IAtmApplicationService
             account.Id, account.CurrencyId, balance.PostedBalance, balance.AvailableBalance));
     }
 
-    private static Result<AtmTransactionView> RejectCashOperation(
-        IBankingUnitOfWork unitOfWork,
-        AuthorizationContext actor,
-        AtmTerminalId terminalId,
-        DepositAccountId depositAccountId,
-        CurrencyId cashCurrencyId,
-        long amountMinor,
-        bool withdrawal)
-    {
-        Result<AtmAccess> access = Authorise(unitOfWork, actor, terminalId, depositAccountId);
-
-        if (!access.IsSuccess)
-        {
-            return Result<AtmTransactionView>.Failure(access.Error!);
-        }
-
-        if (amountMinor <= 0)
-        {
-            return Result<AtmTransactionView>.Failure(
-                ErrorCategory.Validation, BankingErrorCodes.AmountInvalid, nameof(amountMinor));
-        }
-
-        AtmTerminalRecord terminal = access.Value.Terminal;
-
-        if (withdrawal ? !terminal.WithdrawalEnabled : !terminal.DepositEnabled)
-        {
-            return Result<AtmTransactionView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.AtmServiceDisabled);
-        }
-
-        if (unitOfWork.Cash.FindCurrencyService(terminal.Id, cashCurrencyId) is not { } service ||
-            service.Status != AtmTerminalCurrencyServiceStatus.Active ||
-            (withdrawal ? !service.WithdrawalEnabled : !service.DepositEnabled))
-        {
-            return Result<AtmTransactionView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.AtmServiceDisabled);
-        }
-
-        if (cashCurrencyId != access.Value.Account.CurrencyId &&
-            !service.CrossCurrencyWithdrawalEnabled)
-        {
-            return Result<AtmTransactionView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.AtmServiceDisabled);
-        }
-
-        if (withdrawal && !CanDispense(unitOfWork, terminal.Id, cashCurrencyId, amountMinor))
-        {
-            return Result<AtmTransactionView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.AtmCashUnavailable);
-        }
-
-        return Result<AtmTransactionView>.Failure(
-            ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.AtmFinancialOperationUnavailable);
-    }
-
     private static bool CanDispense(
         IBankingUnitOfWork unitOfWork,
         AtmTerminalId terminalId,
@@ -433,7 +368,10 @@ public sealed class AtmApplicationService : IAtmApplicationService
             : Result<MoneyMinor>.Failure(plan.Error!);
     }
 
-    private readonly record struct AtmAccess(AtmTerminalRecord Terminal, DepositAccount Account);
+    private readonly record struct AtmAccess(
+        AtmTerminalRecord Terminal,
+        DepositAccount Account,
+        CashCard Card);
 
     private static Result<AtmAccess> Authorise(
         IBankingUnitOfWork unitOfWork,
@@ -468,13 +406,13 @@ public sealed class AtmApplicationService : IAtmApplicationService
 
         if (unitOfWork.BankCards.FindUsableByAccount(account.Id) is not { } card ||
             unitOfWork.BankCards.FindCashCardByBankCard(card.Id) is not
-                { Status: CashCardStatus.Active })
+                { Status: CashCardStatus.Active } cashCard)
         {
             return Result<AtmAccess>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.CashCardNotFound);
         }
 
-        return Result<AtmAccess>.Success(new AtmAccess(terminal, account));
+        return Result<AtmAccess>.Success(new AtmAccess(terminal, account, cashCard));
     }
 }
 

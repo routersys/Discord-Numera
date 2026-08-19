@@ -984,4 +984,132 @@ internal sealed class SqliteCashRepository : ICashRepository
         SqliteValueMapper.ReadTimestamp(reader, 9),
         SqliteValueMapper.ReadNullableTimestamp(reader, 10),
         reader.GetInt64(11));
+
+    private const string TransactionColumns =
+        "atm_transaction_id, business_operation_id, atm_terminal_id, cash_card_id, " +
+        "deposit_account_id, issuer_bank_id, acquirer_bank_id, transaction_type, source_currency_id, " +
+        "source_amount_minor, cash_currency_id, cash_amount_minor, issuer_fee_currency_id, " +
+        "issuer_fee_minor, acquirer_fee_currency_id, acquirer_fee_minor, placement_fee_currency_id, " +
+        "placement_fee_minor, status, clearing_instruction_id, fx_business_operation_id, created_at, " +
+        "completed_at, version";
+
+    public void AddTransaction(AtmTransactionRecord transaction)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            INSERT INTO atm_transactions({TransactionColumns})
+            VALUES($id, $operation, $terminal, $card, $account, $issuer, $acquirer, $type,
+                $sourceCurrency, $sourceAmount, $cashCurrency, $cashAmount, $issuerFeeCurrency,
+                $issuerFee, $acquirerFeeCurrency, $acquirerFee, $placementFeeCurrency, $placementFee,
+                $status, $clearing, NULL, $created, $completed, $version);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(transaction.Id.Value));
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(transaction.BusinessOperationId.Value));
+        command.Parameters.AddWithValue(
+            "$terminal", SqliteValueMapper.ToBlob(transaction.AtmTerminalId.Value));
+        command.Parameters.AddWithValue("$card", SqliteValueMapper.ToBlob(transaction.CashCardId.Value));
+        command.Parameters.AddWithValue(
+            "$account", SqliteValueMapper.ToBlob(transaction.DepositAccountId.Value));
+        command.Parameters.AddWithValue(
+            "$issuer", SqliteValueMapper.ToBlob(transaction.IssuerBankId.Value));
+        command.Parameters.AddWithValue(
+            "$acquirer", SqliteValueMapper.ToBlob(transaction.AcquirerBankId.Value));
+        command.Parameters.AddWithValue("$type", transaction.TransactionType);
+        command.Parameters.AddWithValue(
+            "$sourceCurrency", SqliteValueMapper.ToBlob(transaction.SourceCurrencyId.Value));
+        command.Parameters.AddWithValue("$sourceAmount", transaction.SourceAmount.Value);
+        command.Parameters.AddWithValue(
+            "$cashCurrency", SqliteValueMapper.ToBlob(transaction.CashCurrencyId.Value));
+        command.Parameters.AddWithValue("$cashAmount", transaction.CashAmount.Value);
+        command.Parameters.AddWithValue(
+            "$issuerFeeCurrency", SqliteValueMapper.ToBlob(transaction.IssuerFeeCurrencyId.Value));
+        command.Parameters.AddWithValue("$issuerFee", transaction.IssuerFee.Value);
+        command.Parameters.AddWithValue(
+            "$acquirerFeeCurrency", SqliteValueMapper.ToBlob(transaction.AcquirerFeeCurrencyId.Value));
+        command.Parameters.AddWithValue("$acquirerFee", transaction.AcquirerFee.Value);
+        command.Parameters.AddWithValue(
+            "$placementFeeCurrency",
+            transaction.PlacementFeeCurrencyId is { } placement
+                ? SqliteValueMapper.ToBlob(placement.Value)
+                : DBNull.Value);
+        command.Parameters.AddWithValue("$placementFee", transaction.PlacementFee.Value);
+        command.Parameters.AddWithValue("$status", transaction.Status.ToToken());
+        command.Parameters.AddWithValue(
+            "$clearing",
+            transaction.ClearingInstructionId is { } clearing
+                ? SqliteValueMapper.ToBlob(clearing.Value)
+                : DBNull.Value);
+        command.Parameters.AddWithValue("$created", transaction.CreatedAt.UnixMilliseconds);
+        command.Parameters.AddWithValue(
+            "$completed", SqliteValueMapper.ToParameter(transaction.CompletedAt));
+        command.Parameters.AddWithValue("$version", transaction.Version);
+
+        command.ExecuteNonQuery();
+    }
+
+    public AtmTransactionRecord? FindTransactionByBusinessOperation(
+        BusinessOperationId businessOperationId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {TransactionColumns} FROM atm_transactions WHERE business_operation_id = $operation;
+            """);
+
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(businessOperationId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new AtmTransactionRecord(
+                AtmTransactionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                AtmTerminalId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+                CashCardId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                DepositAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+                BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+                reader.GetString(7),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 8)),
+                MoneyMinor.FromMinor(reader.GetInt64(9)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 10)),
+                MoneyMinor.FromMinor(reader.GetInt64(11)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 12)),
+                MoneyMinor.FromMinor(reader.GetInt64(13)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 14)),
+                MoneyMinor.FromMinor(reader.GetInt64(15)),
+                reader.IsDBNull(16)
+                    ? null
+                    : CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 16)),
+                MoneyMinor.FromMinor(reader.GetInt64(17)),
+                AtmTransactionStatusCatalog.ParseToken(reader.GetString(18)),
+                reader.IsDBNull(19)
+                    ? null
+                    : ClearingInstructionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 19)),
+                SqliteValueMapper.ReadTimestamp(reader, 21),
+                SqliteValueMapper.ReadNullableTimestamp(reader, 22),
+                reader.GetInt64(23))
+            : null;
+    }
+
+    public MoneyMinor SumWithdrawnAmount(
+        DepositAccountId depositAccountId,
+        UtcTimestamp fromInclusive,
+        UtcTimestamp toExclusive)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(cash_amount_minor), 0) FROM atm_transactions
+            WHERE deposit_account_id = $account AND transaction_type = 'WITHDRAWAL'
+              AND status <> 'DECLINED' AND status <> 'CANCELLED'
+              AND created_at >= $from AND created_at < $to;
+            """);
+
+        command.Parameters.AddWithValue("$account", SqliteValueMapper.ToBlob(depositAccountId.Value));
+        command.Parameters.AddWithValue("$from", fromInclusive.UnixMilliseconds);
+        command.Parameters.AddWithValue("$to", toExclusive.UnixMilliseconds);
+
+        return MoneyMinor.FromMinor((long)(command.ExecuteScalar() ?? 0L));
+    }
 }

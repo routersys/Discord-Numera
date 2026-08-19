@@ -136,8 +136,42 @@ public sealed record AtmDiscordInstallationRecord(
     UtcTimestamp? LastSyncedAt,
     long Version);
 
+public sealed record AtmTransactionRecord(
+    AtmTransactionId Id,
+    BusinessOperationId BusinessOperationId,
+    AtmTerminalId AtmTerminalId,
+    CashCardId CashCardId,
+    DepositAccountId DepositAccountId,
+    BankId IssuerBankId,
+    BankId AcquirerBankId,
+    string TransactionType,
+    CurrencyId SourceCurrencyId,
+    MoneyMinor SourceAmount,
+    CurrencyId CashCurrencyId,
+    MoneyMinor CashAmount,
+    CurrencyId IssuerFeeCurrencyId,
+    MoneyMinor IssuerFee,
+    CurrencyId AcquirerFeeCurrencyId,
+    MoneyMinor AcquirerFee,
+    CurrencyId? PlacementFeeCurrencyId,
+    MoneyMinor PlacementFee,
+    AtmTransactionStatus Status,
+    ClearingInstructionId? ClearingInstructionId,
+    UtcTimestamp CreatedAt,
+    UtcTimestamp? CompletedAt,
+    long Version);
+
 public interface ICashRepository
 {
+    void AddTransaction(AtmTransactionRecord transaction);
+
+    AtmTransactionRecord? FindTransactionByBusinessOperation(BusinessOperationId businessOperationId);
+
+    MoneyMinor SumWithdrawnAmount(
+        DepositAccountId depositAccountId,
+        UtcTimestamp fromInclusive,
+        UtcTimestamp toExclusive);
+
     void AddDenomination(CurrencyDenominationRecord denomination);
 
     void UpdateDenomination(CurrencyDenominationRecord denomination);

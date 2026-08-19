@@ -305,6 +305,8 @@ public interface IBankPolicyRepository
     TransferLimitSet? FindTransferLimits(BankPolicyVersionId bankPolicyVersionId);
 
     MoneyMinor? FindMaximumActiveHolds(BankPolicyVersionId bankPolicyVersionId);
+
+    TransferLimitSet? FindAtmWithdrawalLimits(BankPolicyVersionId bankPolicyVersionId);
 }
 
 public partial interface IAccountLimitPreferenceRepository

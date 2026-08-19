@@ -91,7 +91,11 @@ internal sealed class ClearingSettlementService
         BusinessDate businessDate = BusinessDateOf(now);
 
         Result<ParticipantSettlement[]> participants = ResolveParticipants(
-            unitOfWork, positions, cycle.CurrencyId, ForeignSplits(unitOfWork, cycleId));
+            unitOfWork,
+            positions,
+            cycle.CurrencyId,
+            SplitsOf(unitOfWork, cycleId, FxApplicationService.ClearingInstructionKind),
+            SplitsOf(unitOfWork, cycleId, AtmApplicationService.ClearingInstructionKind));
 
         if (!participants.IsSuccess)
         {
@@ -246,17 +250,19 @@ internal sealed class ClearingSettlementService
         SettlementSide Side,
         ParticipantLeg Retail,
         ParticipantLeg Foreign,
+        ParticipantLeg Network,
         MoneyMinor Net);
 
-    private static Dictionary<BankId, ClearingSplit> ForeignSplits(
+    private static Dictionary<BankId, ClearingSplit> SplitsOf(
         IBankingUnitOfWork unitOfWork,
-        ClearingCycleId cycleId)
+        ClearingCycleId cycleId,
+        string instructionKind)
     {
         Dictionary<BankId, ClearingSplit> splits = [];
 
         foreach (ClearingInstruction instruction in unitOfWork.Clearing.ListInstructions(cycleId))
         {
-            if (instruction.InstructionKind != FxApplicationService.ClearingInstructionKind ||
+            if (instruction.InstructionKind != instructionKind ||
                 instruction.Status != ClearingInstructionStatus.Locked)
             {
                 continue;
@@ -309,7 +315,8 @@ internal sealed class ClearingSettlementService
         IBankingUnitOfWork unitOfWork,
         IReadOnlyList<ClearingPosition> positions,
         CurrencyId currencyId,
-        Dictionary<BankId, ClearingSplit> foreignSplits)
+        Dictionary<BankId, ClearingSplit> foreignSplits,
+        Dictionary<BankId, ClearingSplit> networkSplits)
     {
         ParticipantSettlement[] participants = new ParticipantSettlement[positions.Count];
 
@@ -332,6 +339,7 @@ internal sealed class ClearingSettlementService
             }
 
             foreignSplits.TryGetValue(position.BankId, out ClearingSplit foreign);
+            networkSplits.TryGetValue(position.BankId, out ClearingSplit network);
 
             Result<ParticipantLeg> retail = ResolveLeg(
                 unitOfWork,
@@ -339,8 +347,8 @@ internal sealed class ClearingSettlementService
                 currencyId,
                 LedgerAccountKind.ClearingPayable,
                 LedgerAccountKind.ClearingReceivable,
-                position.GrossPayable.Subtract(foreign.Payable),
-                position.GrossReceivable.Subtract(foreign.Receivable));
+                position.GrossPayable.Subtract(foreign.Payable).Subtract(network.Payable),
+                position.GrossReceivable.Subtract(foreign.Receivable).Subtract(network.Receivable));
 
             if (!retail.IsSuccess)
             {
@@ -361,8 +369,22 @@ internal sealed class ClearingSettlementService
                 return Result<ParticipantSettlement[]>.Failure(external.Error!);
             }
 
+            Result<ParticipantLeg> networkLeg = ResolveLeg(
+                unitOfWork,
+                bank,
+                currencyId,
+                LedgerAccountKind.AtmNetworkPayable,
+                LedgerAccountKind.AtmNetworkReceivable,
+                network.Payable,
+                network.Receivable);
+
+            if (!networkLeg.IsSuccess)
+            {
+                return Result<ParticipantSettlement[]>.Failure(networkLeg.Error!);
+            }
+
             participants[index] = new ParticipantSettlement(
-                side.Value, retail.Value, external.Value, position.Net);
+                side.Value, retail.Value, external.Value, networkLeg.Value, position.Net);
         }
 
         return Result<ParticipantSettlement[]>.Success(participants);
@@ -382,6 +404,7 @@ internal sealed class ClearingSettlementService
 
             Unwind(unwind, participant.Retail);
             Unwind(unwind, participant.Foreign);
+            Unwind(unwind, participant.Network);
 
             if (participant.Net.IsPositive)
             {

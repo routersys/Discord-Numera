@@ -59,6 +59,48 @@ internal static class TransferLimitPolicy
             field: null);
     }
 
+    internal static Result EvaluateAtmWithdrawal(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        DepositAccount source,
+        MoneyMinor amount,
+        BusinessTimePoint point)
+    {
+        if (bank.CurrentPolicyVersionId is not { } policyVersionId ||
+            unitOfWork.BankPolicies.FindAtmWithdrawalLimits(policyVersionId) is not { } ceilings)
+        {
+            return Result.Failure(ErrorCategory.BankUnavailable, BankingErrorCodes.BankPolicyUnavailable);
+        }
+
+        Result single = Translate(
+            MoneyLimit.Of(ceilings.PerTransfer).Evaluate(MoneyMinor.Zero, amount),
+            BankingErrorCodes.AmountLimitExceeded,
+            ErrorCategory.Validation,
+            field: null);
+
+        if (!single.IsSuccess)
+        {
+            return single;
+        }
+
+        MoneyLimit daily = MoneyLimit.Of(ceilings.DailyOutgoing);
+
+        if (daily.Ceiling is null)
+        {
+            return Result.Success();
+        }
+
+        MoneyMinor used = daily.IsDisabled
+            ? MoneyMinor.Zero
+            : unitOfWork.Cash.SumWithdrawnAmount(source.Id, point.DayStart, point.DayEnd);
+
+        return Translate(
+            daily.Evaluate(used, amount),
+            BankingErrorCodes.DailyOutgoingLimitExceeded,
+            ErrorCategory.AccountRestricted,
+            field: null);
+    }
+
     internal static Result EvaluateActiveHolds(
         IBankingUnitOfWork unitOfWork,
         Bank bank,

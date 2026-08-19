@@ -2,6 +2,27 @@ namespace Numera.Application.Common;
 
 public static partial class BankingErrorCodes
 {
+    public static string AtmSettlementAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 40);
+
+    public static string AtmNetworkParticipationInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 250);
+
+    public static string AtmAcceptCapacityExceeded { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 251);
+
+    public static string AtmCustomerCashInsufficient { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 252);
+
+    public static string AtmDepositBelowFees { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 250);
+
+    public static string AtmCrossCurrencyUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 250);
+
+    public static string CashHolderNotFound { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.NotFound, 250);
+
     public static string CurrencyDenominationNotFound { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.NotFound, 200);
 

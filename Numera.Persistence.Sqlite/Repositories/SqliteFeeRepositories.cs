@@ -104,6 +104,23 @@ public sealed class SqliteBankPolicyRepository : IBankPolicyRepository
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() && !reader.IsDBNull(0) ? MoneyMinor.FromMinor(reader.GetInt64(0)) : null;
     }
+
+    public TransferLimitSet? FindAtmWithdrawalLimits(BankPolicyVersionId bankPolicyVersionId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT per_atm_withdrawal_limit_minor, daily_atm_withdrawal_limit_minor
+            FROM bank_policy_versions WHERE bank_policy_version_id = $id;
+            """);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(bankPolicyVersionId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new TransferLimitSet(
+                reader.IsDBNull(0) ? null : MoneyMinor.FromMinor(reader.GetInt64(0)),
+                reader.IsDBNull(1) ? null : MoneyMinor.FromMinor(reader.GetInt64(1)))
+            : null;
+    }
 }
 
 public sealed class SqliteAccountLimitPreferenceRepository : IAccountLimitPreferenceRepository

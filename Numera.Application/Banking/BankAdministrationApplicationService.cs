@@ -153,6 +153,10 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
         FeeType.InterbankTransfer,
         FeeType.DormancyWeekly,
         FeeType.DebitPurchase,
+        FeeType.AtmOwnWithdrawal,
+        FeeType.AtmPartnerWithdrawal,
+        FeeType.AtmOwnDeposit,
+        FeeType.AtmPartnerDeposit,
     ];
 
     private readonly IBankingWriteGateway writeGateway;
