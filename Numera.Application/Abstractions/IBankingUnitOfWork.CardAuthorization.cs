@@ -43,6 +43,18 @@ public sealed record DebitCardCaptureRecord(
     BusinessOperationId BusinessOperationId,
     UtcTimestamp CapturedAt);
 
+public sealed record DebitCardRefundRecord(
+    DebitCardRefundId Id,
+    DebitCardAuthorizationId DebitCardAuthorizationId,
+    string MerchantRefundReference,
+    MoneyMinor SourceRefund,
+    MoneyMinor PresentmentRefund,
+    string SettlementRoute,
+    PaymentOrderId? PaymentOrderId,
+    BusinessOperationId? FxBusinessOperationId,
+    BusinessOperationId BusinessOperationId,
+    UtcTimestamp RefundedAt);
+
 public interface IDebitCardAuthorizationRepository
 {
     void Add(DebitCardAuthorizationRecord authorization);
@@ -56,6 +68,8 @@ public interface IDebitCardAuthorizationRepository
     IReadOnlyList<DebitCardAuthorizationRecord> ListExpired(UtcTimestamp now, int limit);
 
     void AddCapture(DebitCardCaptureRecord capture);
+
+    void AddRefund(DebitCardRefundRecord refund);
 }
 
 public partial interface IBankingUnitOfWork

@@ -964,6 +964,63 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
             MoneyMinor.FromMinor(estimate.FeeMinor)));
     }
 
+    internal readonly record struct RefundQuote(
+        FxMarketId MarketId,
+        FxMarketPolicyVersionId PolicyVersionId,
+        long OrderBookVersion,
+        MoneyMinor SourceNet,
+        MoneyMinor MinimumSourceNet);
+
+    internal static Result<RefundQuote> QuoteRefund(
+        IBankingUnitOfWork unitOfWork,
+        Numera.Domain.Banking.DepositAccount merchantSource,
+        Numera.Domain.Banking.DepositAccount cardholderDestination,
+        MoneyMinor presentmentRefund,
+        int slippageBps)
+    {
+        (CurrencyId first, CurrencyId second) = FxAdministrationApplicationService.Orient(
+            merchantSource.CurrencyId, cardholderDestination.CurrencyId);
+
+        if (unitOfWork.Fx.FindMarketByPair(first, second) is not { } market ||
+            !market.IsTradable ||
+            market.CurrentPolicyVersionId is not { } policyVersionId ||
+            unitOfWork.Fx.FindPolicyVersion(policyVersionId) is not { } policy)
+        {
+            return Result<RefundQuote>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceFxMarketUnavailable);
+        }
+
+        if (slippageBps > policy.MaximumMarketSlippageBps)
+        {
+            return Result<RefundQuote>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CommerceSlippageInvalid);
+        }
+
+        if (!IsTrusted(unitOfWork, merchantSource.CurrencyId) ||
+            !IsTrusted(unitOfWork, cardholderDestination.CurrencyId))
+        {
+            return Result<RefundQuote>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceCurrencyTrustInsufficient);
+        }
+
+        if (FxApplicationService.EstimateDisposal(
+                unitOfWork, market, policy, merchantSource.CurrencyId, presentmentRefund.Value)
+            is not { } estimate)
+        {
+            return Result<RefundQuote>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceFxLiquidityInsufficient);
+        }
+
+        Int128 floorNet = checked((Int128)estimate.NetMinor * (10_000 - slippageBps)) / 10_000;
+
+        return Result<RefundQuote>.Success(new RefundQuote(
+            market.Id,
+            policyVersionId,
+            estimate.OrderBookVersion,
+            MoneyMinor.FromMinor(estimate.NetMinor),
+            MoneyMinor.FromMinor((long)floorNet)));
+    }
+
     private static bool IsTrusted(IBankingUnitOfWork unitOfWork, CurrencyId currencyId) =>
         unitOfWork.Governance.FindCurrentTrustDesignation(currencyId) is
             { Status: CurrencyTrustDesignationStatus.Active } designation &&

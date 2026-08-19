@@ -96,9 +96,15 @@ public sealed class CommerceCatalogTests
                     gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
                 harness.Clock,
                 ids);
-            harness.Merchants = new MerchantAdministrationApplicationService(gateway, harness.Clock, ids);
             harness.Markets = new FxApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
+            harness.Merchants = new MerchantAdministrationApplicationService(
+                gateway,
+                new PaymentApplicationService(
+                    gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
+                harness.Markets,
+                harness.Clock,
+                ids);
             harness.Commerce = new CommerceApplicationService(
                 gateway,
                 new PaymentApplicationService(
@@ -216,6 +222,21 @@ public sealed class CommerceCatalogTests
             command.CommandText = $"SELECT COUNT(*) FROM {table};";
             return (long)(command.ExecuteScalar() ?? 0L);
         }
+
+        public DepositAccountId HomeAccountOf(CustomerAccountId customerAccountId) =>
+            AccountOf(customerAccountId, Blob(5));
+
+        public DepositAccountId ForeignAccountOf(CustomerAccountId customerAccountId) =>
+            AccountOf(customerAccountId, Blob(75));
+
+        private DepositAccountId AccountOf(CustomerAccountId customerAccountId, string bank) =>
+            DepositAccountId.FromValue(EntityIdValue.FromBytes(
+                Convert.FromHexString(ReadText($"""
+                    SELECT hex(deposit_account_id) FROM deposit_accounts
+                    WHERE customer_account_id
+                        = x'{Convert.ToHexString(customerAccountId.Value.ToByteArray())}'
+                      AND bank_id = {bank};
+                    """))));
 
         public DepositAccountId SourceOf(CommerceOrderId orderId) =>
             DepositAccountId.FromValue(EntityIdValue.FromBytes(
@@ -761,6 +782,31 @@ public sealed class CommerceCatalogTests
         Assert.IsTrue(resting.IsSuccess, resting.Error?.Code);
     }
 
+    private static async Task ProvideSellLiquidityAsync(Harness harness, long baseMinor, long priceUnits)
+    {
+        CustomerAccountId customer = harness.CustomerOf(
+            await harness.OpenAccountAsync(LiquidityUser, "maker"));
+        DepositAccountId home = harness.HomeAccountOf(customer);
+        DepositAccountId foreign = harness.ForeignAccountOf(customer);
+
+        Result<FxOrderView> resting = await harness.Markets.PlaceFxOrderAsync(
+            new PlaceFxOrderCommand(
+                new AuthorizationContext(AuthorizationLevel.Customer, LiquidityUser, GuildId),
+                FxMarketId.FromValue(EntityIdValue.FromBits(83)),
+                customer,
+                FxOrderSide.SellBase,
+                FxOrderType.Limit,
+                baseMinor,
+                priceUnits,
+                null,
+                home,
+                foreign,
+                IdempotencyKey.Create("commerce-fx", "liquidity-2")),
+            CancellationToken.None);
+
+        Assert.IsTrue(resting.IsSuccess, resting.Error?.Code);
+    }
+
     private static async Task<CommerceOrderId> ForeignOrderAsync(Harness harness, long unitPrice)
     {
         MerchantProfileView profile = await CreateForeignProfileAsync(harness);
@@ -896,6 +942,77 @@ public sealed class CommerceCatalogTests
                 JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
                 JOIN merchant_profiles AS m
                     ON m.settlement_deposit_account_id = d.deposit_account_id;
+                """));
+    }
+
+    [TestMethod]
+    public async Task ACrossCurrencyRefundReturnsTheAcquiredSourceNet()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCrossCurrency();
+        await ProvideLiquidityAsync(harness, 10_000, 150);
+        await ProvideSellLiquidityAsync(harness, 10_000, 250);
+
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, 100_000);
+
+        Assert.IsTrue((await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                harness.CustomerOf(buyer),
+                buyer,
+                BankCardForm.IntegratedCashDebit,
+                IdempotencyKey.Create("commerce", "card-xc-refund")),
+            CancellationToken.None)).IsSuccess);
+
+        CommerceOrderId orderId = await ForeignOrderAsync(harness, 1_500);
+
+        Result<CommerceCheckoutConfirmationView> confirmation = await harness.Commerce
+            .ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(Buyer(), orderId, harness.DebitCardOf(buyer), 50),
+                CancellationToken.None);
+
+        Assert.IsTrue(confirmation.IsSuccess, confirmation.Error?.Code);
+
+        Result<CommercePaymentView> captured = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation.Value.Id),
+            CancellationToken.None);
+
+        Assert.IsTrue(captured.IsSuccess, captured.Error?.Code);
+
+        Result<CommerceRefundConfirmationView> review = await harness.Merchants.ReviewRefundAsync(
+            new ReviewCommerceRefundCommand(Merchant(), captured.Value.Id, 1_500, 50),
+            CancellationToken.None);
+
+        Assert.IsTrue(review.IsSuccess, review.Error?.Code);
+        Assert.AreEqual(600L, review.Value.EstimatedSourceRefundNet.Value);
+        Assert.AreEqual(597L, review.Value.ConfirmedMinSourceRefundNet.Value);
+
+        Result<CommercePaymentView> refunded = await harness.Merchants.RefundAsync(
+            new RefundCommercePaymentCommand(Merchant(), null, null, review.Value.Id, "REF-XC"),
+            CancellationToken.None);
+
+        Assert.IsTrue(refunded.IsSuccess, refunded.Error?.Code);
+        Assert.AreEqual(CommercePaymentStatus.Refunded, refunded.Value.Status);
+        Assert.AreEqual(1_500L, refunded.Value.PresentmentRefunded.Value);
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM debit_card_refunds
+                WHERE settlement_route = 'FX_FOK' AND payment_order_id IS NULL
+                  AND fx_business_operation_id IS NOT NULL AND source_refund_minor = 600;
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM commerce_refund_confirmations
+                WHERE consumed_at IS NOT NULL;
+                """));
+        Assert.AreEqual(
+            "99600",
+            harness.ReadText($"""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                WHERE d.deposit_account_id = x'{Convert.ToHexString(buyer.Value.ToByteArray())}';
                 """));
     }
 
@@ -1476,6 +1593,65 @@ public sealed class CommerceCatalogTests
         Assert.IsFalse(captured.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.CommerceSnapshotStale, captured.Error!.Code);
         Assert.AreEqual(0L, harness.Count("debit_card_captures"));
+    }
+
+    [TestMethod]
+    public async Task ASameCurrencyRefundReturnsThePrincipalToTheCardholder()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, DepositAccountId buyer) =
+            await ConfirmableAsync(harness, "refund-1");
+
+        Result<CommercePaymentView> captured = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsTrue(captured.IsSuccess, captured.Error?.Code);
+
+        Result<CommercePaymentView> refunded = await harness.Merchants.RefundAsync(
+            new RefundCommercePaymentCommand(
+                Merchant(), captured.Value.Id, 1_200, null, "REF-1"),
+            CancellationToken.None);
+
+        Assert.IsTrue(refunded.IsSuccess, refunded.Error?.Code);
+        Assert.AreEqual(CommercePaymentStatus.Refunded, refunded.Value.Status);
+        Assert.AreEqual(1_200L, refunded.Value.PresentmentRefunded.Value);
+        Assert.AreEqual(1L, harness.Count("debit_card_refunds"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM debit_card_refunds
+                WHERE settlement_route = 'SAME_CURRENCY_PAYMENT' AND payment_order_id IS NOT NULL
+                  AND fx_business_operation_id IS NULL;
+                """));
+        Assert.AreEqual("REFUNDED", harness.ReadText("SELECT status FROM commerce_orders;"));
+        Assert.AreEqual(
+            "100000",
+            harness.ReadText($"""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                WHERE d.deposit_account_id = x'{Convert.ToHexString(buyer.Value.ToByteArray())}';
+                """));
+    }
+
+    [TestMethod]
+    public async Task ARefundBeyondThePaidAmountIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, _) = await ConfirmableAsync(harness, "refund-2");
+
+        Result<CommercePaymentView> captured = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsTrue(captured.IsSuccess, captured.Error?.Code);
+
+        Result<CommercePaymentView> refunded = await harness.Merchants.RefundAsync(
+            new RefundCommercePaymentCommand(
+                Merchant(), captured.Value.Id, 1_201, null, "REF-2"),
+            CancellationToken.None);
+
+        Assert.IsFalse(refunded.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CommerceReturnQuantityExceeded, refunded.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("debit_card_refunds"));
     }
 
     [TestMethod]

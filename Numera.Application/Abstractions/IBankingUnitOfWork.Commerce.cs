@@ -343,6 +343,8 @@ public interface ICommerceRepository
 
     void AddRefundConfirmation(CommerceRefundConfirmationRecord confirmation);
 
+    void UpdateRefundConfirmation(CommerceRefundConfirmationRecord confirmation);
+
     CommerceRefundConfirmationRecord? FindRefundConfirmation(CommerceRefundConfirmationId id);
 
     void AddReturn(CommerceReturnRecord commerceReturn);

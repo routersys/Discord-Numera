@@ -153,6 +153,42 @@ internal sealed class SqliteDebitCardAuthorizationRepository : IDebitCardAuthori
         command.ExecuteNonQuery();
     }
 
+    public void AddRefund(DebitCardRefundRecord refund)
+    {
+        ArgumentNullException.ThrowIfNull(refund);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO debit_card_refunds(debit_card_refund_id, debit_card_authorization_id,
+                merchant_refund_reference, source_refund_minor, presentment_refund_minor,
+                settlement_route, payment_order_id, fx_business_operation_id, business_operation_id,
+                refunded_at)
+            VALUES($id, $authorization, $reference, $source, $presentment, $route, $order,
+                $fxOperation, $operation, $refundedAt);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(refund.Id.Value));
+        command.Parameters.AddWithValue(
+            "$authorization", SqliteValueMapper.ToBlob(refund.DebitCardAuthorizationId.Value));
+        command.Parameters.AddWithValue("$reference", refund.MerchantRefundReference);
+        command.Parameters.AddWithValue("$source", refund.SourceRefund.Value);
+        command.Parameters.AddWithValue("$presentment", refund.PresentmentRefund.Value);
+        command.Parameters.AddWithValue("$route", refund.SettlementRoute);
+        command.Parameters.AddWithValue(
+            "$order",
+            refund.PaymentOrderId is { } paymentOrderId
+                ? SqliteValueMapper.ToBlob(paymentOrderId.Value)
+                : DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$fxOperation",
+            refund.FxBusinessOperationId is { } fxOperationId
+                ? SqliteValueMapper.ToBlob(fxOperationId.Value)
+                : DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(refund.BusinessOperationId.Value));
+        command.Parameters.AddWithValue("$refundedAt", refund.RefundedAt.UnixMilliseconds);
+        command.ExecuteNonQuery();
+    }
+
     private static void Bind(SqliteCommand command, DebitCardAuthorizationRecord authorization)
     {
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(authorization.Id.Value));

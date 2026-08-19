@@ -943,6 +943,24 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         return reader.Read() ? ReadCheckoutConfirmation(reader) : null;
     }
 
+    public void UpdateRefundConfirmation(CommerceRefundConfirmationRecord confirmation)
+    {
+        ArgumentNullException.ThrowIfNull(confirmation);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE commerce_refund_confirmations
+            SET consumed_at = $consumed, version = $version
+            WHERE commerce_refund_confirmation_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(confirmation.Id.Value));
+        command.Parameters.AddWithValue(
+            "$consumed",
+            confirmation.ConsumedAt is { } consumedAt ? consumedAt.UnixMilliseconds : DBNull.Value);
+        command.Parameters.AddWithValue("$version", confirmation.Version);
+        command.ExecuteNonQuery();
+    }
+
     public void AddRefundConfirmation(CommerceRefundConfirmationRecord confirmation)
     {
         ArgumentNullException.ThrowIfNull(confirmation);

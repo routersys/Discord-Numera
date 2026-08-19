@@ -50,6 +50,9 @@ public static partial class BankingErrorCodes
 
     public static string FxMarketNoLiquidity { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 149);
 
+    public static string FxSlippageExceeded { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 150);
+
     public static string FxSlippageInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 148);
 
     public static string FxMatchingUnavailable { get; } =

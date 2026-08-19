@@ -568,6 +568,193 @@ public sealed partial class FxApplicationService
             : Result<FxCashDeliveryOutcome>.Failure(executed.Error!);
     }
 
+    internal readonly record struct FxDisposalEstimate(long NetMinor, long OrderBookVersion);
+
+    internal static FxDisposalEstimate? EstimateDisposal(
+        IBankingUnitOfWork unitOfWork,
+        FxMarket market,
+        FxMarketPolicyVersion policy,
+        CurrencyId spendCurrencyId,
+        long spendMinor)
+    {
+        bool acquireBase = spendCurrencyId != market.BaseCurrencyId;
+
+        Result<IReadOnlyList<PlannedFill>> planned = PlanSpendExact(
+            unitOfWork, market, acquireBase, spendMinor);
+
+        if (!planned.IsSuccess)
+        {
+            return null;
+        }
+
+        long baseTotal = 0;
+        long quoteTotal = 0;
+
+        foreach (PlannedFill fill in planned.Value)
+        {
+            baseTotal = checked(baseTotal + fill.BaseMinor);
+            quoteTotal = checked(quoteTotal + fill.QuoteMinor);
+        }
+
+        long gross = acquireBase ? baseTotal : quoteTotal;
+        long net = checked(
+            gross - (long)(checked((Int128)gross * policy.TakerFeeBps) / FxPricing.BasisPointScale));
+
+        return new FxDisposalEstimate(
+            net, unitOfWork.Fx.FindSummary(market.Id)?.OrderBookVersion ?? 0);
+    }
+
+    internal readonly record struct FxRefundOutcome(MoneyMinor SourceNet, FxOrderId OrderId);
+
+    internal Result<FxRefundOutcome> DeliverRefund(
+        IBankingUnitOfWork unitOfWork,
+        BusinessOperation operation,
+        CustomerAccount merchantCustomer,
+        DepositAccount merchantSource,
+        DepositAccount cardholderDestination,
+        Bank merchantBank,
+        FxMarketId expectedMarketId,
+        FxMarketPolicyVersionId expectedPolicyVersionId,
+        MoneyMinor presentmentRefund,
+        MoneyMinor minimumSourceNet,
+        BusinessDate businessDate,
+        UtcTimestamp now)
+    {
+        (CurrencyId first, CurrencyId second) = FxAdministrationApplicationService.Orient(
+            merchantSource.CurrencyId, cardholderDestination.CurrencyId);
+
+        if (unitOfWork.Fx.FindMarketByPair(first, second) is not { } market ||
+            !market.IsTradable ||
+            market.Id != expectedMarketId ||
+            market.CurrentPolicyVersionId is not { } policyVersionId ||
+            policyVersionId != expectedPolicyVersionId ||
+            unitOfWork.Fx.FindPolicyVersion(policyVersionId) is not { } policy)
+        {
+            return Result<FxRefundOutcome>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxMarketNotTradable);
+        }
+
+        bool acquireBase = cardholderDestination.CurrencyId == market.BaseCurrencyId;
+
+        Result<IReadOnlyList<PlannedFill>> planned = PlanSpendExact(
+            unitOfWork, market, acquireBase, presentmentRefund.Value);
+
+        if (!planned.IsSuccess)
+        {
+            return Result<FxRefundOutcome>.Failure(planned.Error!);
+        }
+
+        long baseTotal = 0;
+        long quoteTotal = 0;
+
+        foreach (PlannedFill fill in planned.Value)
+        {
+            baseTotal = checked(baseTotal + fill.BaseMinor);
+            quoteTotal = checked(quoteTotal + fill.QuoteMinor);
+        }
+
+        long acquiredGross = acquireBase ? baseTotal : quoteTotal;
+        long net = checked(
+            acquiredGross -
+            (long)(checked((Int128)acquiredGross * policy.TakerFeeBps) / FxPricing.BasisPointScale));
+
+        if (net < minimumSourceNet.Value)
+        {
+            return Result<FxRefundOutcome>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxSlippageExceeded);
+        }
+
+        LedgerBalance balance =
+            unitOfWork.LedgerAccounts.FindProjection(merchantSource.LedgerAccountId)
+                ?? LedgerBalance.Empty;
+
+        if (!balance.CanReserve(presentmentRefund))
+        {
+            return Result<FxRefundOutcome>.Failure(
+                ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
+        }
+
+        PlacementContext context = new(
+            market,
+            policy,
+            merchantCustomer,
+            merchantSource,
+            cardholderDestination,
+            merchantBank,
+            businessDate,
+            merchantSource.CurrencyId,
+            cardholderDestination.CurrencyId,
+            presentmentRefund,
+            planned.Value,
+            PlanComplete: true,
+            acquireBase ? FxOrderSide.BuyBase : FxOrderSide.SellBase,
+            FxOrderType.MarketFok,
+            baseTotal,
+            PriceUnits: null,
+            MaximumSlippageBps: policy.MaximumMarketSlippageBps,
+            IdempotencyKey: default,
+            CashDelivery: null,
+            CustomerEndpointKind,
+            MerchantDelivery: null,
+            now);
+
+        Result<FxOrderView> executed = Execute(unitOfWork, context, operation);
+
+        return executed.IsSuccess
+            ? Result<FxRefundOutcome>.Success(
+                new FxRefundOutcome(MoneyMinor.FromMinor(net), executed.Value.Id))
+            : Result<FxRefundOutcome>.Failure(executed.Error!);
+    }
+
+    private static Result<IReadOnlyList<PlannedFill>> PlanSpendExact(
+        IBankingUnitOfWork unitOfWork,
+        FxMarket market,
+        bool acquireBase,
+        long spendNeeded)
+    {
+        IReadOnlyList<FxOrder> resting = unitOfWork.Fx.ListRestingOrders(
+            market.Id,
+            acquireBase ? FxOrderSide.SellBase : FxOrderSide.BuyBase,
+            FxPricing.MaximumFokMakerOrders + 1);
+
+        List<PlannedFill> fills = [];
+        long spent = 0;
+
+        foreach (FxOrder maker in resting)
+        {
+            if (spent >= spendNeeded || fills.Count == FxPricing.MaximumFokMakerOrders)
+            {
+                break;
+            }
+
+            if (maker.PriceUnits is not { } price)
+            {
+                break;
+            }
+
+            long remaining = checked(spendNeeded - spent);
+            long takeBase = acquireBase
+                ? Math.Min(maker.RemainingBaseMinor, ExactBaseForQuote(remaining, price, market.PriceScale))
+                : Math.Min(maker.RemainingBaseMinor, remaining);
+
+            if (takeBase <= 0 ||
+                !FxPricing.IsLotMultiple(takeBase, market.LotSizeBaseMinor) ||
+                !FxPricing.TryQuoteMinor(takeBase, price, market.PriceScale, out long quote))
+            {
+                return Result<IReadOnlyList<PlannedFill>>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.FxAmountNotRepresentable);
+            }
+
+            fills.Add(new PlannedFill(maker, takeBase, quote));
+            spent = checked(spent + (acquireBase ? quote : takeBase));
+        }
+
+        return spent == spendNeeded
+            ? Result<IReadOnlyList<PlannedFill>>.Success(fills)
+            : Result<IReadOnlyList<PlannedFill>>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxMarketNoLiquidity);
+    }
+
     internal static long? ExactGross(long netMinor, int feeBps)
     {
         if (netMinor <= 0 || feeBps >= FxPricing.BasisPointScale)

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 using Numera.Domain.Identity;
@@ -284,19 +285,27 @@ public interface IMerchantAdministrationApplicationService
 public sealed class MerchantAdministrationApplicationService : IMerchantAdministrationApplicationService
 {
     private readonly IBankingWriteGateway writeGateway;
+    private readonly PaymentApplicationService payments;
+    private readonly FxApplicationService markets;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public MerchantAdministrationApplicationService(
         IBankingWriteGateway writeGateway,
+        PaymentApplicationService payments,
+        FxApplicationService markets,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(payments);
+        ArgumentNullException.ThrowIfNull(markets);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.payments = payments;
+        this.markets = markets;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
@@ -1210,7 +1219,9 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
         return Result<CommerceReturnView>.Success(ToView(updated, lines));
     }
 
-    private static Result<CommerceRefundConfirmationView> ReviewRefund(
+    internal const string RefundedEventType = "COMMERCE_PAYMENT_REFUNDED";
+
+    private Result<CommerceRefundConfirmationView> ReviewRefund(
         IBankingUnitOfWork unitOfWork,
         ReviewCommerceRefundCommand command)
     {
@@ -1261,11 +1272,74 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
                 ErrorCategory.Conflict, BankingErrorCodes.CommerceReturnQuantityExceeded);
         }
 
-        return Result<CommerceRefundConfirmationView>.Failure(
-            ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.CommerceCrossCurrencyUnavailable);
+        if (payment.PaymentRoute != MerchantVocabulary.RouteFxFokDebit)
+        {
+            return Result<CommerceRefundConfirmationView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceRefundRouteInvalid);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        if (unitOfWork.Commerce.FindOrder(payment.CommerceOrderId) is not { } refundOrder ||
+            refundOrder.RefundEligibleUntil is not { } until ||
+            now >= until)
+        {
+            return Result<CommerceRefundConfirmationView>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceRefundWindowClosed);
+        }
+
+        if (payment.DebitCardAuthorizationId is not { } authorizationId ||
+            unitOfWork.DebitCardAuthorizations.Find(authorizationId) is not { } authorization ||
+            unitOfWork.DepositAccounts.Find(authorization.MerchantDestinationDepositAccountId)
+                is not { } merchantAccount ||
+            unitOfWork.DepositAccounts.Find(authorization.DepositAccountId) is not { } cardholder)
+        {
+            return Result<CommerceRefundConfirmationView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CommercePaymentNotFound);
+        }
+
+        Result<CommerceApplicationService.RefundQuote> quoted = CommerceApplicationService.QuoteRefund(
+            unitOfWork,
+            merchantAccount,
+            cardholder,
+            MoneyMinor.FromMinor(command.PresentmentRefundMinor),
+            command.MaximumSlippageBps);
+
+        if (!quoted.IsSuccess)
+        {
+            return Result<CommerceRefundConfirmationView>.Failure(quoted.Error!);
+        }
+
+        CommerceRefundConfirmationRecord confirmation = new(
+            CommerceRefundConfirmationId.FromValue(idGenerator.NextId()),
+            payment.Id,
+            refundOrder.MerchantProfileId,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            MoneyMinor.FromMinor(command.PresentmentRefundMinor),
+            quoted.Value.MarketId,
+            quoted.Value.PolicyVersionId,
+            quoted.Value.OrderBookVersion,
+            quoted.Value.SourceNet,
+            quoted.Value.MinimumSourceNet,
+            command.MaximumSlippageBps,
+            now,
+            now.AddMilliseconds(CommerceApplicationService.ConfirmationLifetimeMilliseconds),
+            ConsumedAt: null,
+            VersionedEntity.InitialVersion);
+
+        unitOfWork.Commerce.AddRefundConfirmation(confirmation);
+
+        return Result<CommerceRefundConfirmationView>.Success(new CommerceRefundConfirmationView(
+            confirmation.Id,
+            confirmation.CommercePaymentId,
+            confirmation.PresentmentRefund,
+            confirmation.EstimatedSourceRefundNet,
+            confirmation.ConfirmedMinSourceRefundNet,
+            confirmation.ConfirmedMaximumSlippageBps,
+            confirmation.ExpiresAt));
     }
 
-    private static Result<CommercePaymentView> Refund(
+    private Result<CommercePaymentView> Refund(
         IBankingUnitOfWork unitOfWork,
         RefundCommercePaymentCommand command)
     {
@@ -1339,8 +1413,299 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
                 ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
         }
 
-        return Result<CommercePaymentView>.Failure(
-            ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.CommerceRefundUnavailable);
+        if (crossCurrencyForm)
+        {
+            return RefundCrossCurrency(
+                unitOfWork,
+                command,
+                order,
+                payment,
+                authorized.Value,
+                unitOfWork.Commerce.FindRefundConfirmation(
+                    command.CommerceRefundConfirmationId!.Value)!);
+        }
+
+        return RefundSameCurrency(
+            unitOfWork,
+            command,
+            order,
+            payment,
+            authorized.Value,
+            MoneyMinor.FromMinor(command.PresentmentRefundMinor!.Value));
+    }
+
+    private Result<CommercePaymentView> RefundCrossCurrency(
+        IBankingUnitOfWork unitOfWork,
+        RefundCommercePaymentCommand command,
+        CommerceOrderRecord order,
+        CommercePaymentRecord payment,
+        MerchantProfileRecord profile,
+        CommerceRefundConfirmationRecord confirmation)
+    {
+        UtcTimestamp now = clock.Now();
+
+        if (confirmation.ConsumedAt is not null || now >= confirmation.ExpiresAt)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceConfirmationExpired);
+        }
+
+        if (confirmation.ActorDiscordUserId !=
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture))
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Forbidden, BankingErrorCodes.CommerceOrderNotOwned);
+        }
+
+        if (payment.PaymentRoute != MerchantVocabulary.RouteFxFokDebit)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceRefundRouteInvalid);
+        }
+
+        if (order.RefundEligibleUntil is not { } until || now >= until)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceRefundWindowClosed);
+        }
+
+        MoneyMinor refund = confirmation.PresentmentRefund;
+
+        if (payment.PresentmentRefunded.Add(refund) > payment.PresentmentPaid)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceReturnQuantityExceeded);
+        }
+
+        if (payment.DebitCardAuthorizationId is not { } authorizationId ||
+            unitOfWork.DebitCardAuthorizations.Find(authorizationId) is not { } authorization ||
+            unitOfWork.DepositAccounts.Find(authorization.MerchantDestinationDepositAccountId)
+                is not { } merchantAccount ||
+            unitOfWork.DepositAccounts.Find(authorization.DepositAccountId) is not { } cardholder)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CommercePaymentNotFound);
+        }
+
+        if (unitOfWork.CustomerAccounts.Find(cardholder.CustomerAccountId) is not { } cardholderCustomer ||
+            unitOfWork.Banks.Find(merchantAccount.BankId) is not { } merchantBank)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            PaymentApplicationService.MerchantRefundOperationType,
+            merchantBank.EconomyScopeId,
+            profile.PartyId,
+            idGenerator.NextId(),
+            Numera.Domain.Accounting.IdempotencyKey.Create(
+                PaymentApplicationService.MerchantRefundOperationType,
+                confirmation.Id.Value.ToString()),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        Result<FxApplicationService.FxRefundOutcome> delivered = markets.DeliverRefund(
+            unitOfWork,
+            operation,
+            cardholderCustomer,
+            merchantAccount,
+            cardholder,
+            merchantBank,
+            confirmation.FxMarketId,
+            confirmation.FxMarketPolicyVersionId,
+            refund,
+            confirmation.ConfirmedMinSourceRefundNet,
+            BusinessDateOf(now),
+            now);
+
+        if (!delivered.IsSuccess)
+        {
+            return Result<CommercePaymentView>.Failure(delivered.Error!);
+        }
+
+        unitOfWork.DebitCardAuthorizations.AddRefund(new DebitCardRefundRecord(
+            DebitCardRefundId.FromValue(idGenerator.NextId()),
+            authorization.Id,
+            command.MerchantRefundReference,
+            delivered.Value.SourceNet,
+            refund,
+            CommerceApplicationService.FxRoute,
+            PaymentOrderId: null,
+            operation.Id,
+            operation.Id,
+            now));
+
+        unitOfWork.DebitCardAuthorizations.Update(authorization with
+        {
+            RefundedAmount = authorization.RefundedAmount.Add(delivered.Value.SourceNet),
+            PresentmentRefunded = authorization.PresentmentRefunded.Add(refund),
+            Version = authorization.Version + 1,
+        });
+
+        unitOfWork.Commerce.UpdateRefundConfirmation(confirmation with
+        {
+            ConsumedAt = now,
+            Version = confirmation.Version + 1,
+        });
+
+        return Finalize(unitOfWork, command, order, payment, refund, operation.Id, now);
+    }
+
+    private static BusinessDate BusinessDateOf(UtcTimestamp at) => BusinessDate.FromDayNumber(
+        DateOnly.FromDateTime(
+            DateTimeOffset.FromUnixTimeMilliseconds(at.UnixMilliseconds).UtcDateTime).DayNumber);
+
+    private Result<CommercePaymentView> RefundSameCurrency(
+        IBankingUnitOfWork unitOfWork,
+        RefundCommercePaymentCommand command,
+        CommerceOrderRecord order,
+        CommercePaymentRecord payment,
+        MerchantProfileRecord profile,
+        MoneyMinor refund)
+    {
+        UtcTimestamp now = clock.Now();
+
+        if (payment.PaymentRoute != MerchantVocabulary.RouteSameCurrencyDebit)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceRefundRouteInvalid);
+        }
+
+        if (order.RefundEligibleUntil is not { } until || now >= until)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceRefundWindowClosed);
+        }
+
+        if (payment.PresentmentRefunded.Add(refund) > payment.PresentmentPaid)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceReturnQuantityExceeded);
+        }
+
+        if (payment.DebitCardAuthorizationId is not { } authorizationId ||
+            unitOfWork.DebitCardAuthorizations.Find(authorizationId) is not { } authorization)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CommercePaymentNotFound);
+        }
+
+        if (unitOfWork.DepositAccounts.Find(authorization.MerchantDestinationDepositAccountId)
+                is not { } merchantAccount ||
+            unitOfWork.DepositAccounts.Find(authorization.DepositAccountId) is not { } cardholder)
+        {
+            return Result<CommercePaymentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
+        }
+
+        Result<PaymentApplicationService.MerchantRefundPosting> posted = payments.PostMerchantRefund(
+            unitOfWork,
+            unitOfWork.Banks.Find(merchantAccount.BankId)!.EconomyScopeId,
+            profile.PartyId,
+            cardholder.CustomerAccountId,
+            merchantAccount,
+            cardholder,
+            refund,
+            Numera.Domain.Accounting.IdempotencyKey.Create(
+                PaymentApplicationService.MerchantRefundOperationType,
+                command.MerchantRefundReference),
+            now);
+
+        if (!posted.IsSuccess)
+        {
+            return Result<CommercePaymentView>.Failure(posted.Error!);
+        }
+
+        unitOfWork.DebitCardAuthorizations.AddRefund(new DebitCardRefundRecord(
+            DebitCardRefundId.FromValue(idGenerator.NextId()),
+            authorization.Id,
+            command.MerchantRefundReference,
+            refund,
+            refund,
+            CommerceApplicationService.SameCurrencyRoute,
+            posted.Value.OrderId,
+            FxBusinessOperationId: null,
+            posted.Value.BusinessOperationId,
+            now));
+
+        unitOfWork.DebitCardAuthorizations.Update(authorization with
+        {
+            RefundedAmount = authorization.RefundedAmount.Add(refund),
+            PresentmentRefunded = authorization.PresentmentRefunded.Add(refund),
+            Version = authorization.Version + 1,
+        });
+
+        return Finalize(
+            unitOfWork, command, order, payment, refund, posted.Value.BusinessOperationId, now);
+    }
+
+    private Result<CommercePaymentView> Finalize(
+        IBankingUnitOfWork unitOfWork,
+        RefundCommercePaymentCommand command,
+        CommerceOrderRecord order,
+        CommercePaymentRecord payment,
+        MoneyMinor refund,
+        BusinessOperationId businessOperationId,
+        UtcTimestamp now)
+    {
+        MoneyMinor refunded = payment.PresentmentRefunded.Add(refund);
+        CommercePaymentStatus status = refunded == payment.PresentmentPaid
+            ? CommercePaymentStatus.Refunded
+            : CommercePaymentStatus.PartiallyRefunded;
+
+        CommercePaymentStatusCatalog.EnsureTransition(payment.Status, status);
+
+        CommercePaymentRecord updated = payment with
+        {
+            PresentmentRefunded = refunded,
+            Status = status,
+            Version = payment.Version + 1,
+        };
+
+        unitOfWork.Commerce.UpdatePayment(updated);
+
+        CommerceOrderStatus orderStatus = status == CommercePaymentStatus.Refunded
+            ? CommerceOrderStatus.Refunded
+            : CommerceOrderStatus.PartiallyRefunded;
+
+        CommerceOrderStatusCatalog.EnsureTransition(order.Status, orderStatus);
+
+        unitOfWork.Commerce.UpdateOrder(order with
+        {
+            Status = orderStatus,
+            Version = order.Version + 1,
+        });
+
+        unitOfWork.BankAdministration.AddAuditRecord(
+            AuditRecordId.FromValue(idGenerator.NextId()),
+            businessOperationId,
+            command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            PaymentApplicationService.MerchantRefundOperationType,
+            "commerce_payments",
+            payment.Id.Value,
+            null,
+            now);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            businessOperationId,
+            RefundedEventType,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $$"""{"commerce_payment_id":"{{payment.Id.Value}}"}"""),
+            now));
+
+        return Result<CommercePaymentView>.Success(new CommercePaymentView(
+            updated.Id,
+            updated.CommerceOrderId,
+            updated.PresentmentCurrencyId,
+            updated.PresentmentPaid,
+            updated.PresentmentRefunded,
+            updated.PaymentRoute ?? MerchantVocabulary.RouteSameCurrencyDebit,
+            updated.Status));
     }
 
     private Result<CommerceFulfillmentView> RetryFulfillment(

@@ -169,4 +169,10 @@ public static partial class BankingErrorCodes
 
     public static string CommerceCaptureRejected { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 186);
+
+    public static string CommerceRefundRouteInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 187);
+
+    public static string CommerceRefundWindowClosed { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.OperationExpired, 180);
 }

@@ -664,15 +664,8 @@ public sealed partial class PaymentApplicationService : IPaymentApplicationServi
                 ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
         }
 
-        Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
-            unitOfWork,
-            bank,
-            source,
-            FeeTypeOf(order),
-            ChannelOf(order),
-            destination.BankId,
-            order.Amount,
-            point);
+        Result<FeeAssessmentPlan> fee = ResolveOrderFee(
+            unitOfWork, bank, source, destination, order, point);
 
         if (!fee.IsSuccess)
         {
@@ -788,15 +781,8 @@ public sealed partial class PaymentApplicationService : IPaymentApplicationServi
                 ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
         }
 
-        Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
-            unitOfWork,
-            bank,
-            source,
-            FeeTypeOf(order),
-            ChannelOf(order),
-            destination.BankId,
-            order.Amount,
-            point);
+        Result<FeeAssessmentPlan> fee = ResolveOrderFee(
+            unitOfWork, bank, source, destination, order, point);
 
         if (!fee.IsSuccess)
         {
@@ -1535,6 +1521,45 @@ public sealed partial class PaymentApplicationService : IPaymentApplicationServi
             leg.Period);
 
         posting.ApplyProjections(unitOfWork, ordered, now);
+    }
+
+    private static Result<FeeAssessmentPlan> ResolveOrderFee(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        DepositAccount source,
+        DepositAccount destination,
+        PaymentOrder order,
+        BusinessTimePoint point)
+    {
+        if (!string.Equals(order.Method, MerchantRefundMethod, StringComparison.Ordinal))
+        {
+            return FeeResolver.Resolve(
+                unitOfWork,
+                bank,
+                source,
+                FeeTypeOf(order),
+                ChannelOf(order),
+                destination.BankId,
+                order.Amount,
+                point);
+        }
+
+        return unitOfWork.LedgerAccounts.FindPostingByKind(
+                bank.GeneralLedgerBookId, LedgerAccountKind.FeeRevenue, order.CurrencyId)
+            is { } revenue &&
+            bank.CurrentFeeScheduleVersionId is { } scheduleVersionId
+            ? Result<FeeAssessmentPlan>.Success(new FeeAssessmentPlan(
+                new FeeQuote(
+                    scheduleVersionId,
+                    FeeRuleId.FromValue(EntityIdValue.FromBits(0)),
+                    FeeType.DebitPurchase,
+                    MoneyMinor.Zero,
+                    WaiverCounterKey: null,
+                    WaiverApplied: false),
+                revenue,
+                point.BusinessMonth))
+            : Result<FeeAssessmentPlan>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.FeeRevenueAccountUnavailable);
     }
 
     private static FeeType FeeTypeOf(PaymentOrder order) =>

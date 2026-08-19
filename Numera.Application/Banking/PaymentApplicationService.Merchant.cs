@@ -12,6 +12,8 @@ public sealed partial class PaymentApplicationService
     public const string MerchantPaymentMethod = "DEBIT_CARD_MERCHANT";
     public const string MerchantOperationType = "COMMERCE_CAPTURE";
     public const string MerchantHoldReason = "DEBIT_PURCHASE";
+    public const string MerchantRefundMethod = "DEBIT_CARD_REFUND";
+    public const string MerchantRefundOperationType = "COMMERCE_REFUND";
 
     internal readonly record struct MerchantPurchaseReservation(
         PaymentOrderId OrderId,
@@ -179,6 +181,138 @@ public sealed partial class PaymentApplicationService
             feeScheduleVersionId,
             operation.Id,
             routed.Value.Mode));
+    }
+
+    internal readonly record struct MerchantRefundPosting(
+        PaymentOrderId OrderId,
+        BusinessOperationId BusinessOperationId,
+        SettlementMode SettlementMode);
+
+    internal Result<MerchantRefundPosting> PostMerchantRefund(
+        IBankingUnitOfWork unitOfWork,
+        EconomyScopeId economyScopeId,
+        PartyId payerPartyId,
+        CustomerAccountId payerCustomerAccountId,
+        DepositAccount merchantSource,
+        DepositAccount cardholderDestination,
+        MoneyMinor amount,
+        IdempotencyKey idempotencyKey,
+        UtcTimestamp now)
+    {
+        ArgumentNullException.ThrowIfNull(merchantSource);
+        ArgumentNullException.ThrowIfNull(cardholderDestination);
+
+        if (merchantSource.Permits(AccountOperation.OutgoingTransfer) != StatusPermission.Allowed)
+        {
+            return Result<MerchantRefundPosting>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.DepositAccountNotOperable);
+        }
+
+        if (cardholderDestination.Permits(AccountOperation.ExternalCredit) != StatusPermission.Allowed)
+        {
+            return Result<MerchantRefundPosting>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.DestinationAccountNotOperable);
+        }
+
+        if (cardholderDestination.CurrencyId != merchantSource.CurrencyId)
+        {
+            return Result<MerchantRefundPosting>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CurrencyMismatch);
+        }
+
+        if (unitOfWork.Banks.Find(merchantSource.BankId) is not { Status: BankStatus.Operating } bank)
+        {
+            return Result<MerchantRefundPosting>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
+        }
+
+        Result<PaymentRoute> routed = PaymentRoutePolicy.Resolve(
+            unitOfWork,
+            bank.EconomyScopeId,
+            cardholderDestination.BankId != merchantSource.BankId,
+            amount);
+
+        if (!routed.IsSuccess)
+        {
+            return Result<MerchantRefundPosting>.Failure(routed.Error!);
+        }
+
+        if (routed.Value.Mode == SettlementMode.Rtgs)
+        {
+            return Result<MerchantRefundPosting>.Failure(
+                ErrorCategory.InfrastructureUnavailable,
+                BankingErrorCodes.CommerceInterbankCaptureUnavailable);
+        }
+
+        if (unitOfWork.AccountingPeriods.FindOpen(
+                bank.GeneralLedgerBookId, BusinessDateOf(now)) is null)
+        {
+            return Result<MerchantRefundPosting>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        LedgerBalance balance =
+            unitOfWork.LedgerAccounts.FindProjection(merchantSource.LedgerAccountId)
+                ?? LedgerBalance.Empty;
+
+        if (!balance.CanReserve(amount))
+        {
+            return Result<MerchantRefundPosting>.Failure(
+                ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
+        }
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            MerchantRefundOperationType,
+            economyScopeId,
+            payerPartyId,
+            idGenerator.NextId(),
+            idempotencyKey,
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        PaymentOrder order = PaymentOrder.Create(
+            PaymentOrderId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            payerCustomerAccountId,
+            merchantSource.Id,
+            cardholderDestination.Id,
+            merchantSource.CurrencyId,
+            amount,
+            MerchantRefundMethod,
+            routed.Value.Mode,
+            routed.Value.PostingPolicy,
+            routed.Value.PolicyVersionId,
+            memo: null,
+            now);
+
+        order.Authorize();
+
+        Hold hold = Hold.ReserveOnDeposit(
+            HoldId.FromValue(idGenerator.NextId()),
+            merchantSource.Id,
+            operation.Id,
+            amount,
+            MerchantRefundMethod,
+            now,
+            expiresAt: null);
+
+        unitOfWork.Holds.Add(hold);
+        unitOfWork.LedgerAccounts.UpsertProjection(
+            merchantSource.LedgerAccountId, balance.IncreaseHold(amount), now);
+
+        order.HoldFunds();
+        unitOfWork.PaymentOrders.Add(order);
+
+        Result<PaymentOrderView> posted = routed.Value.Mode == SettlementMode.Internal
+            ? PostTransfer(unitOfWork, order.Id, idempotencyKey)
+            : PostClearingDebit(unitOfWork, order.Id);
+
+        return posted.IsSuccess
+            ? Result<MerchantRefundPosting>.Success(
+                new MerchantRefundPosting(order.Id, operation.Id, routed.Value.Mode))
+            : Result<MerchantRefundPosting>.Failure(posted.Error!);
     }
 
     internal readonly record struct MerchantFxReservation(
