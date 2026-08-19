@@ -24,6 +24,7 @@ public interface IDatabaseBootstrapService
     EconomyBootstrapOutcome InitializeEconomy(
         string guildId,
         string canonicalTimezone,
+        long minimumInitialBankCapitalMinor,
         long nowMilliseconds);
 
     string? FindEconomyScope(string guildId);
@@ -37,6 +38,13 @@ public sealed class SqliteDatabaseBootstrapService : IDatabaseBootstrapService
     public const string EconomyAlreadyExists = "ECONOMY_ALREADY_EXISTS";
     public const string GuildIdInvalid = "GUILD_ID_INVALID";
     public const string TimezoneInvalid = "TIMEZONE_INVALID";
+    public const string BankCapitalInvalid = "BANK_CAPITAL_INVALID";
+
+    public const int CanonicalMinimumCet1Bps = 450;
+    public const int CanonicalLendingCet1Bps = 700;
+    public const int CanonicalMinimumLeverageBps = 300;
+    public const int CanonicalWarningLeverageBps = 400;
+    public const int CanonicalMinimumLiquidityBps = 10000;
 
     private readonly SqliteConnectionFactory connectionFactory;
     private readonly Func<byte[]> idFactory;
@@ -147,6 +155,7 @@ public sealed class SqliteDatabaseBootstrapService : IDatabaseBootstrapService
     public EconomyBootstrapOutcome InitializeEconomy(
         string guildId,
         string canonicalTimezone,
+        long minimumInitialBankCapitalMinor,
         long nowMilliseconds)
     {
         ArgumentNullException.ThrowIfNull(guildId);
@@ -155,6 +164,11 @@ public sealed class SqliteDatabaseBootstrapService : IDatabaseBootstrapService
         if (!IsIdentifier(guildId))
         {
             return EconomyBootstrapOutcome.Failed(GuildIdInvalid);
+        }
+
+        if (minimumInitialBankCapitalMinor <= 0)
+        {
+            return EconomyBootstrapOutcome.Failed(BankCapitalInvalid);
         }
 
         if (canonicalTimezone.Length is 0 or > 64)
@@ -171,6 +185,7 @@ public sealed class SqliteDatabaseBootstrapService : IDatabaseBootstrapService
         byte[] partyId = idFactory();
         byte[] bookId = idFactory();
         byte[] periodId = idFactory();
+        byte[] prudentialId = idFactory();
 
         int year = DateTimeOffset.FromUnixTimeMilliseconds(nowMilliseconds).UtcDateTime.Year;
         string periodKey = year.ToString(CultureInfo.InvariantCulture);
@@ -236,6 +251,30 @@ public sealed class SqliteDatabaseBootstrapService : IDatabaseBootstrapService
                 command.Parameters.AddWithValue("$key", periodKey);
                 command.Parameters.AddWithValue("$starts", periodKey + "-01-01");
                 command.Parameters.AddWithValue("$ends", periodKey + "-12-31");
+            });
+
+        Execute(
+            connection,
+            transaction,
+            """
+            INSERT INTO prudential_policy_versions(prudential_policy_version_id, economy_scope_id,
+                minimum_cet1_bps, lending_cet1_bps, minimum_leverage_bps,
+                configured_warning_leverage_bps, minimum_liquidity_bps,
+                minimum_initial_bank_capital_minor, status, created_at, published_at, retired_at, version)
+            VALUES($id, $scope, $cet1, $lending, $leverage, $warning, $liquidity, $capital,
+                'PUBLISHED', $now, $now, NULL, 1);
+            """,
+            command =>
+            {
+                command.Parameters.AddWithValue("$id", prudentialId);
+                command.Parameters.AddWithValue("$scope", scopeId);
+                command.Parameters.AddWithValue("$cet1", CanonicalMinimumCet1Bps);
+                command.Parameters.AddWithValue("$lending", CanonicalLendingCet1Bps);
+                command.Parameters.AddWithValue("$leverage", CanonicalMinimumLeverageBps);
+                command.Parameters.AddWithValue("$warning", CanonicalWarningLeverageBps);
+                command.Parameters.AddWithValue("$liquidity", CanonicalMinimumLiquidityBps);
+                command.Parameters.AddWithValue("$capital", minimumInitialBankCapitalMinor);
+                command.Parameters.AddWithValue("$now", nowMilliseconds);
             });
 
         transaction.Commit();

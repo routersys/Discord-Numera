@@ -65,8 +65,8 @@ public static class ConsoleCommandLine
             ["database", "restore", "latest"] => Simple(ConsoleCommandKind.DatabaseRestoreLatest),
             ["database", "restore", string path] => WithArgument(ConsoleCommandKind.DatabaseRestore, path),
             ["database", "recovery", "status"] => Simple(ConsoleCommandKind.DatabaseRecoveryStatus),
-            ["economy", "init", string guild, string timezone] =>
-                WithArgument(ConsoleCommandKind.EconomyInit, guild + " " + timezone),
+            ["economy", "init", string guild, string timezone, string capital] =>
+                WithArgument(ConsoleCommandKind.EconomyInit, guild + " " + timezone + " " + capital),
             ["health"] => Simple(ConsoleCommandKind.Health),
             ["help"] => Simple(ConsoleCommandKind.Help),
             ["shutdown"] => Simple(ConsoleCommandKind.Shutdown),

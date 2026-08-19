@@ -39,6 +39,7 @@ internal sealed class StubBootstrap : IDatabaseBootstrapService
     public EconomyBootstrapOutcome InitializeEconomy(
         string guildId,
         string canonicalTimezone,
+        long minimumInitialBankCapitalMinor,
         long nowMilliseconds) => Outcome;
 
     public string? FindEconomyScope(string guildId) => Scope;
@@ -137,10 +138,10 @@ public sealed class ConsoleCommandExecutorTests
     [TestMethod]
     public void TheInitCommandParsesTheGuildAndTimezone()
     {
-        ConsoleCommand command = ConsoleCommandLine.Parse("economy init 1284327110349164587 Asia/Tokyo");
+        ConsoleCommand command = ConsoleCommandLine.Parse("economy init 1284327110349164587 Asia/Tokyo 100000");
 
         Assert.AreEqual(ConsoleCommandKind.EconomyInit, command.Kind);
-        Assert.AreEqual("1284327110349164587 Asia/Tokyo", command.Argument);
+        Assert.AreEqual("1284327110349164587 Asia/Tokyo 100000", command.Argument);
     }
 
     [TestMethod]
@@ -148,7 +149,7 @@ public sealed class ConsoleCommandExecutorTests
     {
         StubBootstrap bootstrap = new();
 
-        ConsoleCommandResult result = Run("economy init 123 Nowhere/Nothing", bootstrap: bootstrap);
+        ConsoleCommandResult result = Run("economy init 123 Nowhere/Nothing 100000", bootstrap: bootstrap);
 
         Assert.IsFalse(result.IsSuccess);
         CollectionAssert.Contains(
@@ -159,7 +160,7 @@ public sealed class ConsoleCommandExecutorTests
     [TestMethod]
     public void ASuccessfulInitReportsTheIssuanceBook()
     {
-        ConsoleCommandResult result = Run("economy init 1284327110349164587 Asia/Tokyo");
+        ConsoleCommandResult result = Run("economy init 1284327110349164587 Asia/Tokyo 100000");
 
         Assert.IsTrue(result.IsSuccess);
         CollectionAssert.Contains(result.Lines.ToArray(), ConsoleText.EconomyCreated);
@@ -177,7 +178,7 @@ public sealed class ConsoleCommandExecutorTests
         };
 
         ConsoleCommandResult result = Run(
-            "economy init 1284327110349164587 Asia/Tokyo", bootstrap: bootstrap);
+            "economy init 1284327110349164587 Asia/Tokyo 100000", bootstrap: bootstrap);
 
         Assert.IsFalse(result.IsSuccess);
         CollectionAssert.Contains(

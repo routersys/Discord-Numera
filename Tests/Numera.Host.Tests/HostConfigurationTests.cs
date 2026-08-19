@@ -274,7 +274,7 @@ public sealed class ConsoleCommandLineTests
             "database restore path",
             "database restore latest",
             "database recovery status",
-            "economy init 1 Asia/Tokyo",
+            "economy init 1 Asia/Tokyo 1",
             "health",
             "help",
             "shutdown",

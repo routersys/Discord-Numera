@@ -187,7 +187,7 @@ internal sealed class ConsoleCommandExecutor
     {
         string[] parts = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        if (parts.Length != 2)
+        if (parts.Length != 3)
         {
             return ConsoleCommandResult.Failed(SqliteDatabaseBootstrapService.GuildIdInvalid);
         }
@@ -197,8 +197,13 @@ internal sealed class ConsoleCommandExecutor
             return ConsoleCommandResult.Failed(SqliteDatabaseBootstrapService.TimezoneInvalid);
         }
 
+        if (!long.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out long capital))
+        {
+            return ConsoleCommandResult.Failed(SqliteDatabaseBootstrapService.BankCapitalInvalid);
+        }
+
         EconomyBootstrapOutcome outcome = bootstrap.InitializeEconomy(
-            parts[0], parts[1], timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+            parts[0], parts[1], capital, timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
 
         return outcome.IsSuccess
             ? ConsoleCommandResult.Ok(
