@@ -51,6 +51,14 @@ internal sealed class RecordingMaintenanceRunner : ISettlementMaintenanceRunner
         return Task.FromResult(new CommerceFulfillmentReport(2, 1, 1));
     }
 
+    public Task<AtmInstallationRecoveryReport> ScanAtmInstallationsAsync(
+        CancellationToken cancellationToken)
+    {
+        Calls.Add(nameof(ScanAtmInstallationsAsync));
+
+        return Task.FromResult(new AtmInstallationRecoveryReport(1, 1, 0));
+    }
+
     public Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken)
     {
         Calls.Add(nameof(ProcessDueExpiriesAsync));
@@ -134,6 +142,7 @@ public sealed class SettlementMaintenanceWorkerTests
                 "ExpireCheckoutsAsync",
                 "FinalizeMerchantSettlementsAsync",
                 "ProcessDueFulfillmentsAsync",
+                "ScanAtmInstallationsAsync",
                 "ProcessDueExpiriesAsync",
                 "ProcessDueDormancyAsync",
             },
@@ -147,8 +156,8 @@ public sealed class SettlementMaintenanceWorkerTests
 
         await worker.RunOnceAsync(CancellationToken.None);
 
-        Assert.AreEqual(15, diagnostics.LastExamined);
-        Assert.AreEqual(12, diagnostics.LastSettled);
+        Assert.AreEqual(16, diagnostics.LastExamined);
+        Assert.AreEqual(13, diagnostics.LastSettled);
     }
 
     [TestMethod]

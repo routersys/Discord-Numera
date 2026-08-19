@@ -428,7 +428,8 @@ public sealed record PublishAtmInstallationCommand(
     AuthorizationContext Actor,
     AtmTerminalId AtmTerminalId,
     ulong ChannelId,
-    ulong MessageId);
+    ulong MessageId,
+    EntityIdValue InstallationNonce);
 
 public sealed record SyncAtmInstallationCommand(
     AuthorizationContext Actor,
@@ -574,7 +575,9 @@ public sealed class AtmInstallationAdministrationApplicationService
             return Result<AtmDiscordInstallationView>.Failure(scope.Error!);
         }
 
-        if (command.ChannelId == 0 || command.MessageId == 0)
+        if (command.ChannelId == 0 ||
+            command.MessageId == 0 ||
+            command.InstallationNonce == default)
         {
             return Result<AtmDiscordInstallationView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.AtmInstallationTargetInvalid);
@@ -604,7 +607,7 @@ public sealed class AtmInstallationAdministrationApplicationService
             terminal.PlacementGuildId,
             command.ChannelId.ToString(CultureInfo.InvariantCulture),
             command.MessageId.ToString(CultureInfo.InvariantCulture),
-            idGenerator.NextId(),
+            command.InstallationNonce,
             null,
             AtmDiscordInstallationStatus.Active,
             command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),

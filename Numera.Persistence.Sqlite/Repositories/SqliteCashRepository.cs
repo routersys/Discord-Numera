@@ -778,6 +778,28 @@ internal sealed class SqliteCashRepository : ICashRepository
         return reader.Read() ? ReadInstallation(reader) : null;
     }
 
+    public IReadOnlyList<AtmDiscordInstallationRecord> ListActiveInstallations(int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {InstallationColumns} FROM atm_discord_installations
+            WHERE status = 'ACTIVE'
+            ORDER BY installed_at, atm_discord_installation_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$limit", limit);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<AtmDiscordInstallationRecord> active = [];
+
+        while (reader.Read())
+        {
+            active.Add(ReadInstallation(reader));
+        }
+
+        return active;
+    }
+
     public AtmDiscordInstallationRecord? FindActiveInstallation(AtmTerminalId atmTerminalId)
     {
         using SqliteCommand command = unitOfWork.CreateCommand($"""

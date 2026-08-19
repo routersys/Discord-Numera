@@ -17,6 +17,8 @@ internal interface ISettlementMaintenanceRunner
 
     Task<CommerceFulfillmentReport> ProcessDueFulfillmentsAsync(CancellationToken cancellationToken);
 
+    Task<AtmInstallationRecoveryReport> ScanAtmInstallationsAsync(CancellationToken cancellationToken);
+
     Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken);
 
     Task<DormancyMaintenanceReport> ProcessDueDormancyAsync(CancellationToken cancellationToken);
@@ -27,6 +29,7 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
     private readonly SettlementMaintenanceService service;
     private readonly CommerceMaintenanceService commerce;
     private readonly CommerceFulfillmentService fulfillments;
+    private readonly AtmInstallationRecoveryService installations;
     private readonly ExpiryMaintenanceService expiries;
     private readonly DormancyMaintenanceService dormancy;
 
@@ -34,6 +37,7 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
         SettlementMaintenanceService service,
         CommerceMaintenanceService commerce,
         CommerceFulfillmentService fulfillments,
+        AtmInstallationRecoveryService installations,
         ExpiryMaintenanceService expiries,
         DormancyMaintenanceService dormancy)
     {
@@ -45,6 +49,7 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
         this.service = service;
         this.commerce = commerce;
         this.fulfillments = fulfillments;
+        this.installations = installations;
         this.expiries = expiries;
         this.dormancy = dormancy;
     }
@@ -62,6 +67,10 @@ internal sealed class SettlementMaintenanceRunner : ISettlementMaintenanceRunner
     public Task<CommerceFulfillmentReport> ProcessDueFulfillmentsAsync(
         CancellationToken cancellationToken) =>
         fulfillments.ProcessDueAsync(cancellationToken);
+
+    public Task<AtmInstallationRecoveryReport> ScanAtmInstallationsAsync(
+        CancellationToken cancellationToken) =>
+        installations.ScanAsync(cancellationToken);
 
     public Task<ExpiryMaintenanceReport> ProcessDueExpiriesAsync(CancellationToken cancellationToken) =>
         expiries.ProcessDueAsync(cancellationToken);
@@ -112,6 +121,8 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
                 .FinalizeMerchantSettlementsAsync(cancellationToken).ConfigureAwait(false);
             CommerceFulfillmentReport fulfillments = await runner
                 .ProcessDueFulfillmentsAsync(cancellationToken).ConfigureAwait(false);
+            AtmInstallationRecoveryReport installations = await runner
+                .ScanAtmInstallationsAsync(cancellationToken).ConfigureAwait(false);
             ExpiryMaintenanceReport expiries = await runner.ProcessDueExpiriesAsync(cancellationToken)
                 .ConfigureAwait(false);
             DormancyMaintenanceReport dormancy = await runner.ProcessDueDormancyAsync(cancellationToken)
@@ -121,9 +132,10 @@ internal sealed class SettlementMaintenanceWorker : BackgroundService
 
             diagnostics.SettlementMaintenanceCompleted(
                 queued.Examined + cycles.Examined + checkouts.Examined + finality.Examined +
-                    fulfillments.Examined + expiries.Total + dormancyCount,
+                    fulfillments.Examined + installations.Examined + expiries.Total + dormancyCount,
                 queued.Settled + cycles.Settled + checkouts.Cancelled + finality.Finalized +
-                    fulfillments.Succeeded + expiries.Total + dormancyCount);
+                    fulfillments.Succeeded + installations.Confirmed + installations.Broken +
+                    expiries.Total + dormancyCount);
         }
         catch (OperationCanceledException)
         {

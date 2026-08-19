@@ -260,6 +260,8 @@ public interface ICashRepository
     AtmDiscordInstallationRecord? FindInstallation(AtmDiscordInstallationId id);
 
     AtmDiscordInstallationRecord? FindActiveInstallation(AtmTerminalId atmTerminalId);
+
+    IReadOnlyList<AtmDiscordInstallationRecord> ListActiveInstallations(int limit);
 }
 
 public partial interface IBankingUnitOfWork

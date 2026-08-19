@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Numera.Application.Abstractions;
 using Numera.Application.Banking;
 using Numera.Application.Common;
 using Numera.Domain.Banking;
@@ -66,6 +67,7 @@ public sealed class AtmAdministrationTests
             harness.Atm = new AtmAdministrationApplicationService(gateway, clock, ids);
             harness.Installations =
                 new AtmInstallationAdministrationApplicationService(gateway, clock, ids);
+            harness.WriteGateway = gateway;
 
             return harness;
         }
@@ -111,6 +113,16 @@ public sealed class AtmAdministrationTests
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText = sql;
             command.ExecuteNonQuery();
+        }
+
+        public SqliteBankingWriteGateway WriteGateway { get; private set; } = null!;
+
+        public string ReadText(string sql)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = sql;
+            return command.ExecuteScalar()?.ToString() ?? string.Empty;
         }
 
         public long Count(string table)
@@ -172,6 +184,46 @@ public sealed class AtmAdministrationTests
         harness.Atm.CreateTerminalAsync(
             new CreateAtmTerminalCommand(Owner(), harness.Bank, GuildId.ToString(), null, "本店ATM"),
             CancellationToken.None);
+
+    [TestMethod]
+    public async Task AnUnconfirmedInstallationMessageBecomesBrokenWithoutReposting()
+    {
+        await using Harness harness = Harness.Create();
+        Result<AtmTerminalView> terminal = await CreateTerminalAsync(harness);
+
+        Assert.IsTrue((await harness.Installations.PublishAsync(
+            new PublishAtmInstallationCommand(
+                Owner(), terminal.Value.Id, 1234UL, 5678UL, EntityIdValue.FromBits(910)),
+            CancellationToken.None)).IsSuccess);
+
+        RecordingInstallationMessageGateway gateway = new()
+        {
+            State = AtmInstallationMessageState.Confirmed,
+        };
+
+        AtmInstallationRecoveryService recovery = new(harness.WriteGateway, gateway);
+
+        AtmInstallationRecoveryReport confirmed = await recovery.ScanAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, confirmed.Examined);
+        Assert.AreEqual(1, confirmed.Confirmed);
+        Assert.AreEqual(0, confirmed.Broken);
+        Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM atm_discord_installations;"));
+        Assert.AreEqual(1, gateway.Calls.Count);
+        Assert.IsTrue(gateway.Calls[0].StartsWith("1234:5678:", StringComparison.Ordinal));
+
+        gateway.State = AtmInstallationMessageState.Missing;
+
+        AtmInstallationRecoveryReport broken = await recovery.ScanAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, broken.Broken);
+        Assert.AreEqual("BROKEN", harness.ReadText("SELECT status FROM atm_discord_installations;"));
+        Assert.AreEqual(1L, harness.Count("atm_discord_installations"));
+
+        AtmInstallationRecoveryReport quiet = await recovery.ScanAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, quiet.Examined);
+    }
 
     [TestMethod]
     public async Task DenominationsMustKeepTheDivisibilityChain()
@@ -402,14 +454,16 @@ public sealed class AtmAdministrationTests
         Result<AtmTerminalView> terminal = await CreateTerminalAsync(harness);
 
         Result<AtmDiscordInstallationView> published = await harness.Installations.PublishAsync(
-            new PublishAtmInstallationCommand(Owner(), terminal.Value.Id, 1234UL, 5678UL),
+            new PublishAtmInstallationCommand(
+                Owner(), terminal.Value.Id, 1234UL, 5678UL, EntityIdValue.FromBits(901)),
             CancellationToken.None);
 
         Assert.IsTrue(published.IsSuccess, published.Error?.Code);
         Assert.AreEqual(AtmDiscordInstallationStatus.Active, published.Value.Status);
 
         Result<AtmDiscordInstallationView> duplicate = await harness.Installations.PublishAsync(
-            new PublishAtmInstallationCommand(Owner(), terminal.Value.Id, 1234UL, 9999UL),
+            new PublishAtmInstallationCommand(
+                Owner(), terminal.Value.Id, 1234UL, 9999UL, EntityIdValue.FromBits(902)),
             CancellationToken.None);
 
         Assert.IsFalse(duplicate.IsSuccess);
