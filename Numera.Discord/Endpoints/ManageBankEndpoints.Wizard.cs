@@ -185,14 +185,19 @@ public sealed partial class ManageBankEndpoints
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return DiscordEndpointResponse.UpdateMessage(
-            ViewKeys.ManageBankCreated,
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["institutionCode"] = result.Value.InstitutionCode,
-                ["bankName"] = result.Value.Name,
-                ["status"] = catalog.Resolve(ViewKeys.StatusOf(result.Value.Status.ToToken())),
-            });
+        return await OpenCapitalStageAsync(
+                context,
+                scope,
+                result.Value.InstitutionCode,
+                ViewKeys.ManageBankCreated,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["institutionCode"] = result.Value.InstitutionCode,
+                    ["bankName"] = result.Value.Name,
+                    ["status"] = catalog.Resolve(ViewKeys.StatusOf(result.Value.Status.ToToken())),
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static Dictionary<string, string> Review(BankCreatePayload payload) =>

@@ -19,19 +19,23 @@ public sealed partial class ManageBankEndpoints : IEconomyEndpoint
     private static readonly string[] BankAssetSteps = ["upload", "review", "publish"];
 
     private readonly IBankAdministrationApplicationService banks;
+    private readonly IBankQueryApplicationService bankQueries;
     private readonly ITextCatalog catalog;
     private readonly Sessions.InteractionSessionService sessions;
 
     public ManageBankEndpoints(
         IBankAdministrationApplicationService banks,
+        IBankQueryApplicationService bankQueries,
         ITextCatalog catalog,
         Sessions.InteractionSessionService sessions)
     {
         ArgumentNullException.ThrowIfNull(banks);
+        ArgumentNullException.ThrowIfNull(bankQueries);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(sessions);
 
         this.banks = banks;
+        this.bankQueries = bankQueries;
         this.catalog = catalog;
         this.sessions = sessions;
     }
@@ -56,6 +60,30 @@ public sealed partial class ManageBankEndpoints : IEconomyEndpoint
         {
             return EndpointFailures.From(
                 ErrorCategory.Validation, BankingErrorCodes.CentralBankBookUnavailable);
+        }
+
+        Result<BankDetailView> existing = await bankQueries
+            .GetBankDetailAsync(
+                new GetBankDetailQuery(context.GuildId, institutionCode), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing.IsSuccess)
+        {
+            return existing.Value.Status == BankStatus.PendingActivation
+                ? await OpenCapitalStageAsync(
+                        context,
+                        scope,
+                        institutionCode,
+                        ViewKeys.ManageBankCapitalPrompt,
+                        new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["institutionCode"] = institutionCode,
+                            ["status"] = catalog.Resolve(
+                                ViewKeys.StatusOf(existing.Value.Status.ToToken())),
+                        },
+                        cancellationToken)
+                    .ConfigureAwait(false)
+                : EndpointFailures.From(ErrorCategory.Conflict, BankingErrorCodes.BankAlreadyExists);
         }
 
         Result<BankDraftView> result = await banks

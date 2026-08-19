@@ -21,6 +21,18 @@ internal static class ViewKeys
     public const string ManageBankCreateReview = "view.manage.bank_create.review";
     public const string ManageBankCreateInputLabel = "view.manage.bank_create.input_label";
     public const string ManageBankCreateCommitLabel = "view.manage.bank_create.commit_label";
+    public const string ManageBankCapitalPrompt = "view.manage.bank_capital.prompt";
+    public const string ManageBankCapitalModal = "view.manage.bank_capital.modal";
+    public const string ManageBankCapitalReview = "view.manage.bank_capital.review";
+    public const string ManageBankCapitalContributed = "view.manage.bank_capital.contributed";
+    public const string ManageBankActivated = "view.manage.bank_activated";
+    public const string ManageBankCapitalInputLabel = "view.manage.bank_capital.input_label";
+    public const string ManageBankCapitalCommitLabel = "view.manage.bank_capital.commit_label";
+    public const string ManageBankActivateLabel = "view.manage.bank_capital.activate_label";
+    public const string ManageBankCapitalIssuerLabel = "view.manage.bank_capital.issuer_label";
+    public const string FieldCapitalAmount = "capital_amount";
+    public const string FieldCapitalSource = "capital_source";
+    public const string FieldCapitalMinimum = "capital_minimum";
     public const string FieldInstitution = "institution";
     public const string FieldBankName = "bank_name";
     public const string FieldProduct = "product";
@@ -195,6 +207,32 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldProduct)] = "{productCode} {productName}",
             [ViewKeys.FieldLabel(ViewKeys.ManageBankCreateReview, ViewKeys.FieldOpeningPolicy)] = "口座開設",
             [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldOpeningPolicy)] = "受付する",
+            [ViewKeys.ManageBankCapitalPrompt + ".title"] = "資本の払込",
+            [ViewKeys.ManageBankCapitalPrompt + ".description"] =
+                "{institutionCode} は {status} です。営業を開始するには資本を払い込んでください。",
+            [ViewKeys.ManageBankCapitalModal + ".title"] = "資本払込の入力",
+            [ViewKeys.ManageBankCapitalModal + ".description"] =
+                "払込額を最小単位で入力します。払込元を空欄にすると中央銀行が払い込みます。",
+            [ViewKeys.ManageBankCapitalInputLabel] = "払込内容を入力",
+            [ViewKeys.ManageBankCapitalCommitLabel] = "この内容で払い込む",
+            [ViewKeys.ManageBankActivateLabel] = "営業を開始する",
+            [ViewKeys.ManageBankCapitalIssuerLabel] = "中央銀行",
+            [ViewKeys.ManageBankCapitalReview + ".title"] = "払込内容の確認",
+            [ViewKeys.ManageBankCapitalReview + ".description"] =
+                "内容を確認して払込を確定してください。払込は取り消せません。",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldInstitution)] = "金融機関コード",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldInstitution)] =
+                "{institutionCode}",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldCapitalAmount)] = "払込額",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldCapitalAmount)] = "{amount}",
+            [ViewKeys.FieldLabel(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldCapitalSource)] = "払込元",
+            [ViewKeys.FieldValue(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldCapitalSource)] = "{source}",
+            [ViewKeys.ManageBankCapitalContributed + ".title"] = "資本を払い込みました",
+            [ViewKeys.ManageBankCapitalContributed + ".description"] =
+                "{institutionCode} へ {amount} を払い込みました。払込資本は {paidIn} で最低額は {minimum} です。",
+            [ViewKeys.ManageBankActivated + ".title"] = "銀行の営業を開始しました",
+            [ViewKeys.ManageBankActivated + ".description"] =
+                "{institutionCode} を {status} にしました。名称は {bankName} です。",
             [ViewKeys.ManagePanelPlaceholder] = "管理項目を選択",
             [ViewKeys.ManagePanelCategory + ".title"] = "{category}",
             [ViewKeys.ManagePanelCategory + ".description"] = "操作を選択してください。",

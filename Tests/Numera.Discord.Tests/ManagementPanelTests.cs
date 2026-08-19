@@ -254,4 +254,65 @@ public sealed class BankCreateViewTests
             Assert.DoesNotContain("{", value);
         }
     }
+
+    [TestMethod]
+    public void TheCapitalPromptBindsEveryPlaceholderTheHandlerSupplies()
+    {
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = "NUM0001",
+            ["status"] = Catalog.Resolve(ViewKeys.StatusOf("PENDING_ACTIVATION")),
+        };
+
+        Assert.DoesNotContain("{", Catalog.Format(ViewKeys.ManageBankCapitalPrompt + ".description", data));
+    }
+
+    [TestMethod]
+    public void TheCapitalReviewBindsEveryPlaceholderTheHandlerSupplies()
+    {
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = "NUM0001",
+            ["amount"] = "1000000",
+            ["source"] = Catalog.Resolve(ViewKeys.ManageBankCapitalIssuerLabel),
+        };
+
+        foreach (string field in new[]
+        {
+            ViewKeys.FieldInstitution, ViewKeys.FieldCapitalAmount, ViewKeys.FieldCapitalSource,
+        })
+        {
+            string label = Catalog.Format(
+                ViewKeys.FieldLabel(ViewKeys.ManageBankCapitalReview, field), data);
+            string value = Catalog.Format(
+                ViewKeys.FieldValue(ViewKeys.ManageBankCapitalReview, field), data);
+
+            Assert.IsNotEmpty(label);
+            Assert.DoesNotContain("{", value);
+        }
+    }
+
+    [TestMethod]
+    public void TheContributedAndActivatedViewsBindEveryPlaceholder()
+    {
+        Dictionary<string, string> contributed = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = "NUM0001",
+            ["amount"] = "1000000",
+            ["paidIn"] = "1000000",
+            ["minimum"] = "1000000",
+        };
+
+        Dictionary<string, string> activated = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = "NUM0001",
+            ["bankName"] = "ヌメラ銀行",
+            ["status"] = Catalog.Resolve(ViewKeys.StatusOf("OPERATING")),
+        };
+
+        Assert.DoesNotContain(
+            "{", Catalog.Format(ViewKeys.ManageBankCapitalContributed + ".description", contributed));
+        Assert.DoesNotContain(
+            "{", Catalog.Format(ViewKeys.ManageBankActivated + ".description", activated));
+    }
 }

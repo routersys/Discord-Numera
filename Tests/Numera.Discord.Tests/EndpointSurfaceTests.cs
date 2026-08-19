@@ -137,6 +137,9 @@ public sealed class EndpointSurfaceTests
         CollectionAssert.AreEqual(
             new[]
             {
+                "bank-activate",
+                "bank-capital-commit",
+                "bank-capital-input",
                 "bank-create-commit",
                 "bank-create-input",
                 "panel-action",
@@ -148,7 +151,7 @@ public sealed class EndpointSurfaceTests
             EconomyCommandManifest.ComponentActions.Order(StringComparer.Ordinal).ToArray());
 
         CollectionAssert.AreEqual(
-            new[] { "bank-create", "transfer" },
+            new[] { "bank-capital", "bank-create", "transfer" },
             EconomyCommandManifest.ModalActions.Order(StringComparer.Ordinal).ToArray());
     }
 

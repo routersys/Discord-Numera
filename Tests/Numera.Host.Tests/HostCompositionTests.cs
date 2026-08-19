@@ -59,6 +59,9 @@ public sealed class HostCompositionTests
         CollectionAssert.AreEqual(
             new[]
             {
+                "bank:v1:btn:bank-activate:*",
+                "bank:v1:btn:bank-capital-commit:*",
+                "bank:v1:btn:bank-capital-input:*",
                 "bank:v1:btn:bank-create-commit:*",
                 "bank:v1:btn:bank-create-input:*",
                 "bank:v1:btn:transfer-execute:*",
@@ -72,7 +75,12 @@ public sealed class HostCompositionTests
                 .ToArray());
 
         CollectionAssert.AreEqual(
-            new[] { "bank:v1:modal:bank-create:*", "bank:v1:modal:transfer:*" },
+            new[]
+            {
+                "bank:v1:modal:bank-capital:*",
+                "bank:v1:modal:bank-create:*",
+                "bank:v1:modal:transfer:*",
+            },
             interactions.ModalCommands.Select(static command => command.Name)
                 .Order(StringComparer.Ordinal)
                 .ToArray());
