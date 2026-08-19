@@ -45,6 +45,7 @@ public sealed class FxOrder : VersionedEntity
         FxParticipantKind participantKind,
         PartyId participantPartyId,
         CustomerAccountId? customerAccountId,
+        FxInterventionMandateId? interventionMandateId,
         FxOrderSide side,
         FxOrderType orderType,
         FxTimeInForce timeInForce,
@@ -71,6 +72,7 @@ public sealed class FxOrder : VersionedEntity
         MarketId = marketId;
         ParticipantKind = participantKind;
         ParticipantPartyId = participantPartyId;
+        InterventionMandateId = interventionMandateId;
         CustomerAccountId = customerAccountId;
         Side = side;
         OrderType = orderType;
@@ -100,6 +102,8 @@ public sealed class FxOrder : VersionedEntity
     public FxParticipantKind ParticipantKind { get; }
 
     public PartyId ParticipantPartyId { get; }
+
+    public FxInterventionMandateId? InterventionMandateId { get; }
 
     public CustomerAccountId? CustomerAccountId { get; }
 
@@ -156,6 +160,7 @@ public sealed class FxOrder : VersionedEntity
         FxParticipantKind participantKind,
         PartyId participantPartyId,
         CustomerAccountId? customerAccountId,
+        FxInterventionMandateId? interventionMandateId,
         FxOrderSide side,
         FxOrderType orderType,
         FxTimeInForce timeInForce,
@@ -193,12 +198,20 @@ public sealed class FxOrder : VersionedEntity
             throw InvariantViolationException.Create(InvariantViolationCode.FxOrderParticipantInvalid);
         }
 
+        if (participantKind == FxParticipantKind.MonetaryAuthority
+            ? interventionMandateId is null
+            : interventionMandateId is not null)
+        {
+            throw InvariantViolationException.Create(InvariantViolationCode.FxOrderParticipantInvalid);
+        }
+
         return new FxOrder(
             id,
             marketId,
             participantKind,
             participantPartyId,
             customerAccountId,
+            interventionMandateId,
             side,
             orderType,
             timeInForce,
@@ -227,6 +240,7 @@ public sealed class FxOrder : VersionedEntity
         FxParticipantKind participantKind,
         PartyId participantPartyId,
         CustomerAccountId? customerAccountId,
+        FxInterventionMandateId? interventionMandateId,
         FxOrderSide side,
         FxOrderType orderType,
         FxTimeInForce timeInForce,
@@ -253,6 +267,7 @@ public sealed class FxOrder : VersionedEntity
             participantKind,
             participantPartyId,
             customerAccountId,
+            interventionMandateId,
             side,
             orderType,
             timeInForce,

@@ -55,6 +55,9 @@ public sealed record MonetaryAuthorityRecord(
 public sealed record OfficialReservePositionRecord(
     OfficialReservePositionId Id,
     CurrencyId CurrencyId,
+    LedgerAccountId AssetLedgerAccountId,
+    MonetaryAuthorityId CustodianMonetaryAuthorityId,
+    LedgerAccountId CustodianLiabilityLedgerAccountId,
     OfficialReservePositionStatus Status);
 
 public sealed record OfficialReservePortfolioRecord(
@@ -162,6 +165,12 @@ public interface IGovernanceRepository
     MonetaryAuthorityRecord? FindMonetaryAuthority(EconomyScopeId economyScopeId);
 
     OfficialReservePortfolioRecord? FindReservePortfolio(MonetaryAuthorityId monetaryAuthorityId);
+
+    OfficialReservePositionRecord? FindReservePosition(
+        MonetaryAuthorityId monetaryAuthorityId,
+        CurrencyId currencyId);
+
+    MonetaryAuthorityRecord? FindAuthorityByCurrency(CurrencyId homeCurrencyId);
 
     void AddInterventionMandate(FxInterventionMandateRecord mandate);
 

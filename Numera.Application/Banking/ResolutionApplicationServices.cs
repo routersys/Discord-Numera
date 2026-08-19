@@ -590,19 +590,23 @@ public sealed class MonetaryAuthorityAdministrationApplicationService
     : IMonetaryAuthorityAdministrationApplicationService
 {
     private readonly IBankingWriteGateway writeGateway;
+    private readonly FxApplicationService markets;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public MonetaryAuthorityAdministrationApplicationService(
         IBankingWriteGateway writeGateway,
+        FxApplicationService markets,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(markets);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.markets = markets;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
@@ -708,8 +712,23 @@ public sealed class MonetaryAuthorityAdministrationApplicationService
                         ErrorCategory.Conflict, BankingErrorCodes.InterventionMandateNotActive);
                 }
 
-                return Result<FxOrderView>.Failure(
-                    ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.FxMatchingUnavailable);
+                Result<FxApplicationService.InterventionOutcome> executed = markets.Intervene(
+                    unitOfWork,
+                    resolved.Value,
+                    mandate,
+                    command.Side,
+                    command.BaseMinor,
+                    clock.Now());
+
+                if (!executed.IsSuccess)
+                {
+                    return Result<FxOrderView>.Failure(executed.Error!);
+                }
+
+                return unitOfWork.Fx.FindOrder(executed.Value.OrderId) is { } placed
+                    ? Result<FxOrderView>.Success(FxApplicationService.ToView(placed))
+                    : Result<FxOrderView>.Failure(
+                        ErrorCategory.NotFound, BankingErrorCodes.FxOrderNotFound);
             },
             cancellationToken);
     }

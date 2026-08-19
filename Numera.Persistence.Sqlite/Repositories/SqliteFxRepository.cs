@@ -20,7 +20,7 @@ internal sealed class SqliteFxRepository : IFxRepository
         "filled_base_minor, sequence_no, status, source_funding_endpoint_id, " +
         "destination_settlement_endpoint_id, source_hold_id, fee_policy_version_id, " +
         "maker_received_gross_minor, maker_fee_charged_minor, taker_received_gross_minor, " +
-        "taker_fee_charged_minor, created_at, terminal_at, version";
+        "taker_fee_charged_minor, created_at, terminal_at, version, fx_intervention_mandate_id";
 
     private const string TradeColumns =
         "fx_trade_id, market_id, maker_order_id, taker_order_id, maker_fee_policy_version_id, " +
@@ -217,10 +217,15 @@ internal sealed class SqliteFxRepository : IFxRepository
             VALUES($id, $market, $participantKind, $participantParty, $customer, $side, $type, $tif,
                 $price, $slippage, $original, $filled, $sequence, $status, $funding, $settlement,
                 $hold, $policy, $makerGross, $makerFee, $takerGross, $takerFee, $created, NULL,
-                $version);
+                $version, $mandate);
             """);
 
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(order.Id.Value));
+        command.Parameters.AddWithValue(
+            "$mandate",
+            order.InterventionMandateId is { } mandate
+                ? SqliteValueMapper.ToBlob(mandate.Value)
+                : DBNull.Value);
         command.Parameters.AddWithValue("$market", SqliteValueMapper.ToBlob(order.MarketId.Value));
         command.Parameters.AddWithValue("$participantKind", order.ParticipantKind.ToToken());
         command.Parameters.AddWithValue(
@@ -516,6 +521,10 @@ internal sealed class SqliteFxRepository : IFxRepository
             reader.IsDBNull(4)
                 ? null
                 : CustomerAccountId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(4))),
+            reader.IsDBNull(25)
+                ? null
+                : FxInterventionMandateId.FromValue(
+                    EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(25))),
             FxMarketCatalog.ParseSideToken(reader.GetString(5)),
             FxMarketCatalog.ParseOrderTypeToken(reader.GetString(6)),
             FxMarketCatalog.ParseTimeInForceToken(reader.GetString(7)),
@@ -596,10 +605,12 @@ internal sealed class SqliteFxRepository : IFxRepository
             INSERT INTO fx_funding_endpoints(fx_funding_endpoint_id, currency_id, endpoint_kind,
                 owner_party_id, deposit_account_id, ledger_account_id, bank_id, monetary_authority_id,
                 created_at)
-            VALUES($id, $currency, $kind, $owner, $deposit, $ledger, $bank, NULL, $created);
+            VALUES($id, $currency, $kind, $owner, $deposit, $ledger, $bank, $authority, $created);
             """);
 
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(endpoint.Id.Value));
+        command.Parameters.AddWithValue(
+            "$authority", Blob(endpoint.MonetaryAuthorityId?.Value));
         command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(endpoint.CurrencyId.Value));
         command.Parameters.AddWithValue("$kind", endpoint.EndpointKind);
         command.Parameters.AddWithValue("$owner", SqliteValueMapper.ToBlob(endpoint.OwnerPartyId.Value));
@@ -615,7 +626,7 @@ internal sealed class SqliteFxRepository : IFxRepository
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""
             SELECT fx_funding_endpoint_id, currency_id, endpoint_kind, owner_party_id,
-                   deposit_account_id, ledger_account_id, bank_id, created_at
+                   deposit_account_id, ledger_account_id, bank_id, monetary_authority_id, created_at
             FROM fx_funding_endpoints WHERE fx_funding_endpoint_id = $id;
             """);
 
@@ -636,7 +647,10 @@ internal sealed class SqliteFxRepository : IFxRepository
                     ? null
                     : LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
                 reader.IsDBNull(6) ? null : BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
-                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(7)))
+                reader.IsDBNull(7)
+                    ? null
+                    : MonetaryAuthorityId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(8)))
             : null;
     }
 

@@ -45,6 +45,7 @@ public sealed record FxFundingEndpointRecord(
     DepositAccountId? DepositAccountId,
     LedgerAccountId? LedgerAccountId,
     BankId? BankId,
+    MonetaryAuthorityId? MonetaryAuthorityId,
     UtcTimestamp CreatedAt);
 
 public sealed record FxSettlementEndpointRecord(

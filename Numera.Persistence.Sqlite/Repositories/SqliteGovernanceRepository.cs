@@ -290,7 +290,8 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
         }
 
         using SqliteCommand positions = unitOfWork.CreateCommand("""
-            SELECT official_reserve_position_id, currency_id, status
+            SELECT official_reserve_position_id, currency_id, asset_ledger_account_id,
+                   custodian_monetary_authority_id, custodian_liability_ledger_account_id, status
             FROM official_reserve_positions WHERE official_reserve_portfolio_id = $portfolio;
             """);
 
@@ -301,16 +302,66 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
 
         while (positionReader.Read())
         {
-            holdings.Add(new OfficialReservePositionRecord(
-                OfficialReservePositionId.FromValue(
-                    EntityIdValue.FromBytes(positionReader.GetFieldValue<byte[]>(0))),
-                CurrencyId.FromValue(EntityIdValue.FromBytes(positionReader.GetFieldValue<byte[]>(1))),
-                OfficialReservePositionStatusCatalog.ParseToken(positionReader.GetString(2))));
+            holdings.Add(ReadPosition(positionReader));
         }
 
         return new OfficialReservePortfolioRecord(
             portfolioId, monetaryAuthorityId, status, holdings, version);
     }
+
+    public OfficialReservePositionRecord? FindReservePosition(
+        MonetaryAuthorityId monetaryAuthorityId,
+        CurrencyId currencyId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT p.official_reserve_position_id, p.currency_id, p.asset_ledger_account_id,
+                   p.custodian_monetary_authority_id, p.custodian_liability_ledger_account_id, p.status
+            FROM official_reserve_positions AS p
+            JOIN official_reserve_portfolios AS f
+                ON f.official_reserve_portfolio_id = p.official_reserve_portfolio_id
+            WHERE f.monetary_authority_id = $authority AND p.currency_id = $currency;
+            """);
+
+        command.Parameters.AddWithValue(
+            "$authority", SqliteValueMapper.ToBlob(monetaryAuthorityId.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(currencyId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadPosition(reader) : null;
+    }
+
+    public MonetaryAuthorityRecord? FindAuthorityByCurrency(CurrencyId homeCurrencyId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT monetary_authority_id, economy_scope_id, party_id, accounting_book_id,
+                   home_currency_id, status, version
+            FROM monetary_authorities WHERE home_currency_id = $currency;
+            """);
+
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(homeCurrencyId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new MonetaryAuthorityRecord(
+                MonetaryAuthorityId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                EconomyScopeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+                AccountingBookId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                MonetaryAuthorityStatusCatalog.ParseToken(reader.GetString(5)),
+                reader.GetInt64(6))
+            : null;
+    }
+
+    private static OfficialReservePositionRecord ReadPosition(SqliteDataReader reader) => new(
+        OfficialReservePositionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+        CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+        LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+        MonetaryAuthorityId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+        LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+        OfficialReservePositionStatusCatalog.ParseToken(reader.GetString(5)));
 
     public void AddInterventionMandate(FxInterventionMandateRecord mandate)
     {

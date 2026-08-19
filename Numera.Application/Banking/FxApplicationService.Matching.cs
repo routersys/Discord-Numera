@@ -255,6 +255,7 @@ public sealed partial class FxApplicationService
             context.Source.Id,
             LedgerAccountId: null,
             context.Source.BankId,
+            MonetaryAuthorityId: null,
             context.Now);
 
         FxSettlementEndpointRecord settlement = context.CashDelivery is { } delivery
@@ -316,6 +317,7 @@ public sealed partial class FxApplicationService
                 FxParticipantKind.Customer,
                 context.Customer.PartyId,
                 context.Customer.Id,
+                interventionMandateId: null,
                 context.Side,
                 context.OrderType,
                 TimeInForceOf(context.OrderType),

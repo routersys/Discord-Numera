@@ -97,4 +97,16 @@ public static partial class BankingErrorCodes
 
     public static string ResolutionEstateAccountUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 42);
+
+    public static string InterventionSideNotAllowed { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 220);
+
+    public static string InterventionAllowanceExceeded { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 221);
+
+    public static string ReservePositionAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 43);
+
+    public static string ReserveCurrencyNotEligible { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 222);
 }

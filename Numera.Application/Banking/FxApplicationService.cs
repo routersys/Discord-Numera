@@ -406,7 +406,7 @@ public sealed partial class FxApplicationService : IFxApplicationService
             ? parsed
             : null;
 
-    private static FxOrderView ToView(FxOrder order) =>
+    internal static FxOrderView ToView(FxOrder order) =>
         new(
             order.Id,
             order.MarketId,

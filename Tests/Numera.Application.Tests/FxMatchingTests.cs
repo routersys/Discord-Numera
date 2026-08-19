@@ -97,11 +97,96 @@ public sealed class FxMatchingTests
                 gateway, harness.Clock, ids);
             harness.Trust = new CurrencyTrustAdministrationApplicationService(
                 gateway, harness.Clock, ids);
+            harness.Authority = new MonetaryAuthorityAdministrationApplicationService(
+                gateway, harness.Markets, harness.Clock, ids);
 
             return harness;
         }
 
         private static string Blob(int seed) => $"x'{new string('0', 30)}{seed:x2}'";
+
+        public MonetaryAuthorityAdministrationApplicationService Authority { get; private set; } = null!;
+
+        public FxInterventionMandateId MandateId { get; } =
+            FxInterventionMandateId.FromValue(EntityIdValue.FromBits(196));
+
+        public void SeedMonetaryAuthority() => Execute($"""
+            INSERT OR IGNORE INTO system_owner_identities(discord_user_id, created_at)
+            VALUES('{OwnerUser}', 1);
+
+            INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+            VALUES({Blob(180)}, 'GOVERNMENT', '通貨当局', 'ACTIVE', 1, 1);
+
+            INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                created_at, version)
+            VALUES({Blob(181)}, {Blob(180)}, 'CENTRAL_BANK', 'OPEN', 1, 1);
+
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            VALUES({Blob(182)}, {Blob(181)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES
+                ({Blob(183)}, {Blob(181)}, NULL, '2000M', 'BASE_MONEY_ISSUANCE_LIABILITY', 'LIABILITY',
+                    'CREDIT', {Blob(3)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(184)}, {Blob(181)}, NULL, '2550M', 'FX_CLEARING_PAYABLE', 'LIABILITY',
+                    'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(185)}, {Blob(181)}, NULL, '2500M', 'FX_CLEARING_PAYABLE', 'LIABILITY', 'CREDIT',
+                    {Blob(3)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(186)}, {Blob(181)}, NULL, '1600M', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET',
+                    'DEBIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(187)}, {Blob(181)}, NULL, '2600M', 'CENTRAL_BANK_SETTLEMENT_LIABILITY',
+                    'LIABILITY', 'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                version, updated_at)
+            VALUES({Blob(183)}, 1000000, 0, 1, 1);
+
+            INSERT INTO monetary_authorities(monetary_authority_id, economy_scope_id, party_id,
+                accounting_book_id, home_currency_id, home_fx_funding_ledger_account_id, status,
+                version)
+            VALUES({Blob(190)}, {Blob(5)}, {Blob(180)}, {Blob(181)}, {Blob(3)}, {Blob(183)}, 'ACTIVE',
+                1);
+
+            INSERT INTO official_reserve_portfolios(official_reserve_portfolio_id,
+                monetary_authority_id, status, version)
+            VALUES({Blob(191)}, {Blob(190)}, 'ACTIVE', 1);
+
+            INSERT INTO official_reserve_positions(official_reserve_position_id,
+                official_reserve_portfolio_id, currency_id, asset_ledger_account_id,
+                custodian_monetary_authority_id, custodian_liability_ledger_account_id, status, version)
+            VALUES({Blob(192)}, {Blob(191)}, {Blob(2)}, {Blob(186)}, {Blob(190)}, {Blob(187)}, 'ACTIVE',
+                1);
+
+            INSERT INTO currency_trust_policy_versions(currency_trust_policy_version_id,
+                economy_scope_id, established_min_age_seconds, established_min_trade_days,
+                established_min_counterparties, trusted_min_age_seconds, trusted_min_trade_days,
+                trusted_min_counterparties, reserve_min_age_seconds, reserve_min_trade_days,
+                reserve_min_counterparties, status, created_at, published_at, version)
+            VALUES({Blob(193)}, {Blob(5)}, 604800, 3, 2, 2592000, 10, 3, 7776000, 30, 5, 'PUBLISHED',
+                1, 1, 1);
+
+            INSERT INTO authorization_decisions(authorization_decision_id, target_type, target_id,
+                scope_guild_id, authority_kind, actor_discord_user_id, actor_customer_account_id,
+                decision_kind, reason_code, occurred_at, supersedes_decision_id)
+            VALUES({Blob(194)}, 'CURRENCY_TRUST_DESIGNATION', {Blob(2)}, NULL, 'SYSTEM_OWNER',
+                '{OwnerUser}', NULL, 'APPROVE', NULL, 1, NULL);
+
+            INSERT INTO currency_trust_designations(currency_trust_designation_id, currency_id,
+                currency_trust_policy_version_id, trust_tier, status, authorization_decision_id,
+                qualified_age_seconds, qualified_trade_days, qualified_counterparties, effective_from,
+                terminal_at, version)
+            VALUES({Blob(195)}, {Blob(2)}, {Blob(193)}, 'RESERVE_ELIGIBLE', 'ACTIVE', {Blob(194)},
+                7776000, 30, 5, 1, NULL, 1);
+
+            INSERT INTO fx_intervention_mandates(fx_intervention_mandate_id, monetary_authority_id,
+                market_id, allowed_side, maximum_source_minor_per_order, maximum_source_minor_total,
+                used_source_minor, maximum_slippage_bps, valid_from, valid_until, status, version)
+            VALUES({Blob(196)}, {Blob(190)}, {Blob(100)}, 'BOTH', 3000, 9000, 0, 1000, 1,
+                4102444800000, 'ACTIVE', 1);
+            """);
 
         private void Seed(int makerFeeBps, int takerFeeBps)
         {
@@ -610,6 +695,78 @@ public sealed class FxMatchingTests
         Assert.AreEqual(900L, harness.Held(taker.QuoteAccount));
         Assert.AreEqual(
             1L, harness.Scalar("SELECT COUNT(*) FROM fx_orders WHERE status = 'FILLED';"));
+    }
+
+    [TestMethod]
+    public async Task AMonetaryAuthorityInterventionBuysBaseAgainstTheBook()
+    {
+        await using Harness harness = Harness.Create();
+        (Trader maker, _) = await TradersAsync(harness);
+        harness.SeedMonetaryAuthority();
+
+        await SellAsync(harness, maker, 1_000, 150, "sell-mi");
+
+        Result<FxOrderView> intervened = await harness.Authority.PlaceInterventionOrderAsync(
+            new PlaceFxInterventionOrderCommand(
+                new AuthorizationContext(AuthorizationLevel.SystemOwner, OwnerUser, QuoteGuildId),
+                harness.MandateId,
+                FxOrderSide.BuyBase,
+                1_000,
+                150),
+            CancellationToken.None);
+
+        Assert.IsTrue(intervened.IsSuccess, intervened.Error?.Code);
+        Assert.AreEqual(FxOrderStatus.Filled, intervened.Value.Status);
+        Assert.AreEqual(1_000L, intervened.Value.FilledBaseMinor);
+        Assert.AreEqual(
+            "MONETARY_AUTHORITY",
+            harness.ReadText("""
+                SELECT participant_kind FROM fx_orders WHERE participant_kind = 'MONETARY_AUTHORITY';
+                """));
+        Assert.AreEqual(
+            1_500L,
+            harness.Scalar("""
+                SELECT used_source_minor FROM fx_intervention_mandates;
+                """));
+        Assert.AreEqual(
+            998_500L,
+            harness.Scalar("""
+                SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'BASE_MONEY_ISSUANCE_LIABILITY';
+                """));
+        Assert.AreEqual(
+            1_000L,
+            harness.Scalar("""
+                SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+                JOIN official_reserve_positions AS r
+                    ON r.asset_ledger_account_id = p.ledger_account_id;
+                """));
+    }
+
+    [TestMethod]
+    public async Task AnInterventionBeyondTheMandateAllowanceIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        (Trader maker, _) = await TradersAsync(harness);
+        harness.SeedMonetaryAuthority();
+
+        await SellAsync(harness, maker, 4_000, 150, "sell-mi2");
+
+        Result<FxOrderView> intervened = await harness.Authority.PlaceInterventionOrderAsync(
+            new PlaceFxInterventionOrderCommand(
+                new AuthorizationContext(AuthorizationLevel.SystemOwner, OwnerUser, QuoteGuildId),
+                harness.MandateId,
+                FxOrderSide.BuyBase,
+                4_000,
+                150),
+            CancellationToken.None);
+
+        Assert.IsFalse(intervened.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.InterventionAllowanceExceeded, intervened.Error!.Code);
+        Assert.AreEqual(0L, harness.Scalar(
+            "SELECT COUNT(*) FROM fx_orders WHERE participant_kind = 'MONETARY_AUTHORITY';"));
+        Assert.AreEqual(0L, harness.Scalar("SELECT used_source_minor FROM fx_intervention_mandates;"));
     }
 
     [TestMethod]
