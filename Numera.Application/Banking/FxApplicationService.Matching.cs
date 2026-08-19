@@ -422,7 +422,7 @@ public sealed partial class FxApplicationService
         bool acquireBase = deliveryCurrencyId == market.BaseCurrencyId;
 
         Result<IReadOnlyList<PlannedFill>> planned = PlanExact(
-            unitOfWork, market, acquireBase, gross);
+            unitOfWork, market, customer.PartyId, acquireBase, gross);
 
         if (!planned.IsSuccess)
         {
@@ -518,7 +518,7 @@ public sealed partial class FxApplicationService
 
         bool acquireBase = destination.CurrencyId == market.BaseCurrencyId;
 
-        Result<IReadOnlyList<PlannedFill>> planned = PlanExact(unitOfWork, market, acquireBase, gross);
+        Result<IReadOnlyList<PlannedFill>> planned = PlanExact(unitOfWork, market, customer.PartyId, acquireBase, gross);
 
         if (!planned.IsSuccess)
         {
@@ -574,13 +574,14 @@ public sealed partial class FxApplicationService
         IBankingUnitOfWork unitOfWork,
         FxMarket market,
         FxMarketPolicyVersion policy,
+        PartyId spendPartyId,
         CurrencyId spendCurrencyId,
         long spendMinor)
     {
         bool acquireBase = spendCurrencyId != market.BaseCurrencyId;
 
         Result<IReadOnlyList<PlannedFill>> planned = PlanSpendExact(
-            unitOfWork, market, acquireBase, spendMinor);
+            unitOfWork, market, spendPartyId, acquireBase, spendMinor);
 
         if (!planned.IsSuccess)
         {
@@ -637,7 +638,7 @@ public sealed partial class FxApplicationService
         bool acquireBase = cardholderDestination.CurrencyId == market.BaseCurrencyId;
 
         Result<IReadOnlyList<PlannedFill>> planned = PlanSpendExact(
-            unitOfWork, market, acquireBase, presentmentRefund.Value);
+            unitOfWork, market, merchantCustomer.PartyId, acquireBase, presentmentRefund.Value);
 
         if (!planned.IsSuccess)
         {
@@ -709,6 +710,7 @@ public sealed partial class FxApplicationService
     private static Result<IReadOnlyList<PlannedFill>> PlanSpendExact(
         IBankingUnitOfWork unitOfWork,
         FxMarket market,
+        PartyId takerPartyId,
         bool acquireBase,
         long spendNeeded)
     {
@@ -727,7 +729,7 @@ public sealed partial class FxApplicationService
                 break;
             }
 
-            if (maker.PriceUnits is not { } price)
+            if (maker.PriceUnits is not { } price || maker.ParticipantPartyId == takerPartyId)
             {
                 break;
             }
@@ -792,6 +794,7 @@ public sealed partial class FxApplicationService
     private static Result<IReadOnlyList<PlannedFill>> PlanExact(
         IBankingUnitOfWork unitOfWork,
         FxMarket market,
+        PartyId takerPartyId,
         bool acquireBase,
         long grossNeeded)
     {
@@ -810,7 +813,7 @@ public sealed partial class FxApplicationService
                 break;
             }
 
-            if (maker.PriceUnits is not { } price)
+            if (maker.PriceUnits is not { } price || maker.ParticipantPartyId == takerPartyId)
             {
                 break;
             }
@@ -952,7 +955,7 @@ public sealed partial class FxApplicationService
         }
 
         Result<IReadOnlyList<PlannedFill>> planned = BuildPlan(
-            unitOfWork, market, command, bound.Value);
+            unitOfWork, market, command, customer.PartyId, bound.Value);
 
         if (!planned.IsSuccess)
         {
@@ -1069,6 +1072,7 @@ public sealed partial class FxApplicationService
         IBankingUnitOfWork unitOfWork,
         FxMarket market,
         PlaceFxOrderCommand command,
+        PartyId takerPartyId,
         long boundPriceUnits)
     {
         IReadOnlyList<FxOrder> resting = unitOfWork.Fx.ListRestingOrders(
@@ -1085,6 +1089,11 @@ public sealed partial class FxApplicationService
             }
 
             if (maker.PriceUnits is not { } makerPrice || !Crosses(command.Side, boundPriceUnits, makerPrice))
+            {
+                break;
+            }
+
+            if (maker.ParticipantPartyId == takerPartyId)
             {
                 break;
             }

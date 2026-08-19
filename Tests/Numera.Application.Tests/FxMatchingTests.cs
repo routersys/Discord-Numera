@@ -613,6 +613,24 @@ public sealed class FxMatchingTests
     }
 
     [TestMethod]
+    public async Task AnOrderCrossingItsOwnPartyIsBlockedInsteadOfSkipped()
+    {
+        await using Harness harness = Harness.Create();
+        (Trader maker, Trader taker) = await TradersAsync(harness);
+
+        await SellAsync(harness, maker, 400, 150, "self-1");
+        await SellAsync(harness, taker, 400, 150, "self-2");
+
+        Result<FxOrderView> result = await BuyAsync(harness, taker, 800, 150, "buy-self");
+
+        Assert.IsTrue(result.IsSuccess, result.Error?.Code);
+        Assert.AreEqual(400L, result.Value.FilledBaseMinor);
+        Assert.AreEqual(400L, result.Value.RemainingBaseMinor);
+        Assert.AreEqual(
+            1L, harness.Scalar("SELECT COUNT(*) FROM fx_trades;"));
+    }
+
+    [TestMethod]
     public async Task AnImmediateOrCancelOrderExpiresAndReleasesTheUnfilledRemainder()
     {
         await using Harness harness = Harness.Create();

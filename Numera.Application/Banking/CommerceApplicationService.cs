@@ -975,6 +975,7 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
         IBankingUnitOfWork unitOfWork,
         Numera.Domain.Banking.DepositAccount merchantSource,
         Numera.Domain.Banking.DepositAccount cardholderDestination,
+        PartyId merchantParty,
         MoneyMinor presentmentRefund,
         int slippageBps)
     {
@@ -1004,7 +1005,12 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
         }
 
         if (FxApplicationService.EstimateDisposal(
-                unitOfWork, market, policy, merchantSource.CurrencyId, presentmentRefund.Value)
+                unitOfWork,
+                market,
+                policy,
+                merchantParty,
+                merchantSource.CurrencyId,
+                presentmentRefund.Value)
             is not { } estimate)
         {
             return Result<RefundQuote>.Failure(

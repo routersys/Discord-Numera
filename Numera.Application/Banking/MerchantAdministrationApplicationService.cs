@@ -1449,6 +1449,7 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
             unitOfWork,
             merchantAccount,
             cardholder,
+            authorized.Value.PartyId,
             MoneyMinor.FromMinor(command.PresentmentRefundMinor),
             command.MaximumSlippageBps);
 
