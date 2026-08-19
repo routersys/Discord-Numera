@@ -62,7 +62,7 @@ public sealed class AtmAdministrationTests
             SequentialIdGenerator ids = new(9_000);
             FixedClock clock = new();
 
-            harness.Cash = new CashAdministrationApplicationService(gateway, ids);
+            harness.Cash = new CashAdministrationApplicationService(gateway, clock, ids);
             harness.Atm = new AtmAdministrationApplicationService(gateway, clock, ids);
             harness.Installations =
                 new AtmInstallationAdministrationApplicationService(gateway, clock, ids);
@@ -385,11 +385,13 @@ public sealed class AtmAdministrationTests
         Result<CurrencyDenominationView> denomination = await CreateDenominationAsync(harness, 1_000);
 
         Result<CashConversionView> converted = await harness.Cash.ConvertReserveToCashAsync(
-            new ConvertReserveToCashCommand(Owner(), harness.Bank, denomination.Value.Id, 10),
+            new ConvertReserveToCashCommand(
+                Owner(), harness.Bank, denomination.Value.Id, 10, "convert-1"),
             CancellationToken.None);
 
         Assert.IsFalse(converted.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.CashConversionUnavailable, converted.Error!.Code);
+        Assert.AreEqual(
+            BankingErrorCodes.SettlementParticipationUnavailable, converted.Error!.Code);
         Assert.AreEqual(0L, harness.Count("cash_movements"));
     }
 

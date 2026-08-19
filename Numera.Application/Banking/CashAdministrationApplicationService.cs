@@ -1,3 +1,4 @@
+using Numera.Domain.Accounting;
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
 using Numera.Domain.Banking;
@@ -27,13 +28,15 @@ public sealed record ConvertReserveToCashCommand(
     AuthorizationContext Actor,
     BankId BankId,
     CurrencyDenominationId CurrencyDenominationId,
-    long Quantity);
+    long Quantity,
+    string IdempotencyToken);
 
 public sealed record ConvertCashToReserveCommand(
     AuthorizationContext Actor,
     BankId BankId,
     CurrencyDenominationId CurrencyDenominationId,
-    long Quantity);
+    long Quantity,
+    string IdempotencyToken);
 
 public sealed record CurrencyDenominationView(
     CurrencyDenominationId Id,
@@ -75,17 +78,31 @@ public interface ICashAdministrationApplicationService
 
 public sealed class CashAdministrationApplicationService : ICashAdministrationApplicationService
 {
+    public const string ConversionOperationType = "CASH_CONVERSION";
+
+    public const string ConversionTransactionType = "CASH_CONVERSION";
+
+    public const string ConversionDescriptionCode = "CASH_CONVERSION";
+
+    public const string ConversionInKind = "CENTRAL_BANK_CONVERSION_IN";
+
+    public const string ConversionOutKind = "CENTRAL_BANK_CONVERSION_OUT";
+
     private readonly IBankingWriteGateway writeGateway;
+    private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public CashAdministrationApplicationService(
         IBankingWriteGateway writeGateway,
+        IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.clock = clock;
         this.idGenerator = idGenerator;
     }
 
@@ -134,7 +151,9 @@ public sealed class CashAdministrationApplicationService : ICashAdministrationAp
                 command.Actor,
                 command.BankId,
                 command.CurrencyDenominationId,
-                command.Quantity),
+                command.Quantity,
+                command.IdempotencyToken,
+                toCash: true),
             cancellationToken);
     }
 
@@ -150,7 +169,9 @@ public sealed class CashAdministrationApplicationService : ICashAdministrationAp
                 command.Actor,
                 command.BankId,
                 command.CurrencyDenominationId,
-                command.Quantity),
+                command.Quantity,
+                command.IdempotencyToken,
+                toCash: false),
             cancellationToken);
     }
 
@@ -289,12 +310,14 @@ public sealed class CashAdministrationApplicationService : ICashAdministrationAp
         return Result<bool>.Success(true);
     }
 
-    private static Result<CashConversionView> Convert(
+    private Result<CashConversionView> Convert(
         IBankingUnitOfWork unitOfWork,
         AuthorizationContext actor,
         BankId bankId,
         CurrencyDenominationId denominationId,
-        long quantity)
+        long quantity,
+        string idempotencyToken,
+        bool toCash)
     {
         Result<EconomyScopeId> scope = GovernanceAuthorization.Authorise(unitOfWork, actor);
 
@@ -309,10 +332,10 @@ public sealed class CashAdministrationApplicationService : ICashAdministrationAp
                 ErrorCategory.Validation, BankingErrorCodes.CashQuantityInvalid, nameof(quantity));
         }
 
-        if (unitOfWork.Banks.Find(bankId) is null)
+        if (unitOfWork.Banks.Find(bankId) is not { Status: BankStatus.Operating } bank)
         {
             return Result<CashConversionView>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
         }
 
         if (unitOfWork.Cash.FindDenomination(denominationId) is not { } denomination ||
@@ -322,8 +345,182 @@ public sealed class CashAdministrationApplicationService : ICashAdministrationAp
                 ErrorCategory.NotFound, BankingErrorCodes.CurrencyDenominationNotFound);
         }
 
-        return Result<CashConversionView>.Failure(
-            ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.CashConversionUnavailable);
+        if (unitOfWork.Cash.FindCashVault(bank.Id, denomination.CurrencyId) is not
+            { Status: BankCashVaultStatus.Active } vault)
+        {
+            return Result<CashConversionView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.BankCashVaultNotFound);
+        }
+
+        if (unitOfWork.SettlementParticipations.FindLive(bank.Id) is not
+                { Status: SettlementParticipationStatus.Active } participation ||
+            participation.CentralBankSettlementAccountId is not { } settlementAccountId ||
+            unitOfWork.CentralBankSettlementAccounts.Find(settlementAccountId) is not
+                { Status: CentralBankSettlementAccountStatus.Active } settlementAccount ||
+            settlementAccount.CurrencyId != denomination.CurrencyId)
+        {
+            return Result<CashConversionView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementParticipationUnavailable);
+        }
+
+        LedgerAccount? liability = unitOfWork.LedgerAccounts.Find(
+            settlementAccount.CentralBankLedgerAccountId);
+        LedgerAccount? reserve = unitOfWork.LedgerAccounts.FindPostingByKind(
+            bank.GeneralLedgerBookId,
+            LedgerAccountKind.CentralBankReserveAsset,
+            denomination.CurrencyId);
+        LedgerAccount? cash = unitOfWork.LedgerAccounts.FindPostingByKind(
+            bank.GeneralLedgerBookId, LedgerAccountKind.CashAsset, denomination.CurrencyId);
+
+        if (liability is null || reserve is null || cash is null)
+        {
+            return Result<CashConversionView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+        }
+
+        LedgerAccount? outstanding = unitOfWork.LedgerAccounts.FindPostingByKind(
+            liability.BookId, LedgerAccountKind.CashOutstandingLiability, denomination.CurrencyId);
+
+        if (outstanding is null)
+        {
+            return Result<CashConversionView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+        }
+
+        MoneyMinor amount = MoneyMinor.FromMinor(checked(denomination.ValueMinor * quantity));
+        UtcTimestamp now = clock.Now();
+        BusinessDate businessDate = BusinessDate.FromDayNumber(
+            DateOnly.FromDateTime(
+                DateTimeOffset.FromUnixTimeMilliseconds(now.UnixMilliseconds).UtcDateTime).DayNumber);
+
+        if (!toCash && Held(unitOfWork, vault.CashHolderId, denomination.Id) < quantity)
+        {
+            return Result<CashConversionView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.BankCashInsufficient);
+        }
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            ConversionOperationType,
+            bank.EconomyScopeId,
+            null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(ConversionOperationType, idempotencyToken),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        LedgerPostingBuilder bankPosting = new();
+        bankPosting.Add(PostingLine.Institutional(
+            cash, toCash ? EntrySide.Debit : EntrySide.Credit, amount));
+        bankPosting.Add(PostingLine.Institutional(
+            reserve, toCash ? EntrySide.Credit : EntrySide.Debit, amount));
+
+        Result posted = PostConversion(
+            unitOfWork, bank.GeneralLedgerBookId, operation, denomination.CurrencyId,
+            businessDate, now, bankPosting);
+
+        if (!posted.IsSuccess)
+        {
+            return Result<CashConversionView>.Failure(posted.Error!);
+        }
+
+        LedgerPostingBuilder centralPosting = new();
+        centralPosting.Add(PostingLine.Institutional(
+            liability, toCash ? EntrySide.Debit : EntrySide.Credit, amount));
+        centralPosting.Add(PostingLine.Institutional(
+            outstanding, toCash ? EntrySide.Credit : EntrySide.Debit, amount));
+
+        Result central = PostConversion(
+            unitOfWork, liability.BookId, operation, denomination.CurrencyId,
+            businessDate, now, centralPosting);
+
+        if (!central.IsSuccess)
+        {
+            return Result<CashConversionView>.Failure(central.Error!);
+        }
+
+        unitOfWork.Cash.AddCashMovement(new CashMovementRecord(
+            CashMovementId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            denomination.Id,
+            toCash ? null : vault.CashHolderId,
+            toCash ? vault.CashHolderId : null,
+            quantity,
+            amount,
+            toCash ? ConversionInKind : ConversionOutKind,
+            now));
+
+        CashPositionRecord position =
+            unitOfWork.Cash.FindCashPosition(vault.CashHolderId, denomination.Id)
+                ?? new CashPositionRecord(vault.CashHolderId, denomination.Id, 0, 0, 0);
+
+        unitOfWork.Cash.UpsertCashPosition(position with
+        {
+            OnHandCount = checked(position.OnHandCount + (toCash ? quantity : -quantity)),
+            Version = position.Version + 1,
+        });
+
+        unitOfWork.BankAdministration.AddAuditRecord(
+            AuditRecordId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            actor.DiscordUserId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ConversionOperationType,
+            "bank_cash_vault",
+            vault.Id.Value,
+            toCash ? ConversionInKind : ConversionOutKind,
+            now);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        return Result<CashConversionView>.Success(
+            new CashConversionView(bank.Id, denomination.Id, quantity, amount));
+    }
+
+    private static long Held(
+        IBankingUnitOfWork unitOfWork,
+        CashHolderId holderId,
+        CurrencyDenominationId denominationId) =>
+        unitOfWork.Cash.FindCashPosition(holderId, denominationId) is { } position
+            ? position.OnHandCount - position.ReservedCount
+            : 0;
+
+    private Result PostConversion(
+        IBankingUnitOfWork unitOfWork,
+        AccountingBookId bookId,
+        BusinessOperation operation,
+        CurrencyId currencyId,
+        BusinessDate businessDate,
+        UtcTimestamp now,
+        LedgerPostingBuilder posting)
+    {
+        if (unitOfWork.AccountingPeriods.FindOpen(bookId, businessDate) is not { } periodId)
+        {
+            return Result.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                bookId,
+                operation.Id,
+                currencyId,
+                businessDate,
+                now,
+                now,
+                ConversionTransactionType,
+                ConversionDescriptionCode,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            periodId);
+
+        posting.ApplyProjections(unitOfWork, ordered, now);
+
+        return Result.Success();
     }
 
     private static bool IsChainValidAfter(

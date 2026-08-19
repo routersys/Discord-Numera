@@ -51,6 +51,8 @@ public sealed class AtmCashTests
 
         public AtmApplicationService Atm { get; private set; } = null!;
 
+        public CashAdministrationApplicationService Cash { get; private set; } = null!;
+
         public AtmTerminalId TerminalId { get; } = AtmTerminalId.FromValue(EntityIdValue.FromBits(60));
 
         public CurrencyId CurrencyId { get; } = CurrencyId.FromValue(EntityIdValue.FromBits(2));
@@ -87,6 +89,7 @@ public sealed class AtmCashTests
             harness.Cards = new BankCardApplicationService(
                 gateway, harness.Clock, ids, new StubAtmCardImageRenderer());
             harness.Atm = new AtmApplicationService(gateway, harness.Clock, ids);
+            harness.Cash = new CashAdministrationApplicationService(gateway, harness.Clock, ids);
 
             return harness;
         }
@@ -293,6 +296,51 @@ public sealed class AtmCashTests
             WHERE payment_network_id = {Blob(73)};
             """);
 
+        public void SeedCentralBank() => Execute($"""
+            INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+            VALUES({Blob(90)}, 'SYSTEM', '中央銀行', 'ACTIVE', 1, 1);
+
+            INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                created_at, version)
+            VALUES({Blob(91)}, {Blob(90)}, 'CENTRAL_BANK', 'OPEN', 1, 1);
+
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            VALUES({Blob(92)}, {Blob(91)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES
+                ({Blob(93)}, {Blob(91)}, NULL, '2100', 'CENTRAL_BANK_SETTLEMENT_LIABILITY', 'LIABILITY',
+                    'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(94)}, {Blob(91)}, NULL, '2900', 'CASH_OUTSTANDING_LIABILITY', 'LIABILITY',
+                    'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(95)}, {Blob(21)}, NULL, '1100', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+            INSERT INTO central_bank_settlement_accounts(central_bank_settlement_account_id, bank_id,
+                currency_id, central_bank_ledger_account_id, status, opened_at, closed_at, version)
+            VALUES({Blob(96)}, {Blob(22)}, {Blob(2)}, {Blob(93)}, 'ACTIVE', 1, NULL, 1);
+
+            INSERT INTO settlement_participations(settlement_participation_id, bank_id, mode,
+                settlement_agent_bank_id, central_bank_settlement_account_id, status, effective_from,
+                effective_to, version)
+            VALUES({Blob(97)}, {Blob(22)}, 'DIRECT', NULL, {Blob(96)}, 'ACTIVE', 1, NULL, 1);
+
+            INSERT INTO cash_holders(cash_holder_id, currency_id, holder_type, owner_reference_id,
+                created_at)
+            VALUES({Blob(98)}, {Blob(2)}, 'BANK_VAULT', {Blob(22)}, 1);
+
+            INSERT INTO bank_cash_vaults(bank_cash_vault_id, bank_id, currency_id, cash_holder_id,
+                status, version)
+            VALUES({Blob(99)}, {Blob(22)}, {Blob(2)}, {Blob(98)}, 'ACTIVE', 1);
+
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                version, updated_at)
+            VALUES({Blob(95)}, 100000, 0, 1, 1), ({Blob(93)}, 100000, 0, 1, 1);
+            """);
+
         public void Execute(string sql)
         {
             using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
@@ -393,6 +441,9 @@ public sealed class AtmCashTests
 
     private static AuthorizationContext Actor() =>
         new(AuthorizationLevel.Customer, CustomerUser, GuildId);
+
+    private static AuthorizationContext Owner() =>
+        new(AuthorizationLevel.GuildOperator, CustomerUser, GuildId);
 
     [TestMethod]
     public async Task AnOwnBankWithdrawalDebitsTheDepositAndMovesTheCash()
@@ -609,6 +660,123 @@ public sealed class AtmCashTests
         Assert.AreEqual(
             3_620L,
             harness.Scalar("SELECT amount_minor FROM clearing_instructions;"));
+    }
+
+    [TestMethod]
+    public async Task ReserveConvertsToVaultCashAgainstTheCentralBankLegs()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCentralBank();
+
+        Result<CashConversionView> result = await harness.Cash.ConvertReserveToCashAsync(
+            new ConvertReserveToCashCommand(
+                Owner(),
+                BankId.FromValue(EntityIdValue.FromBits(22)),
+                CurrencyDenominationId.FromValue(EntityIdValue.FromBits(10)),
+                5,
+                "convert-1"),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess, result.Error?.Code);
+        Assert.AreEqual(5_000L, result.Value.Amount.Value);
+        Assert.AreEqual(2L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(
+            1L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM cash_movements
+                WHERE movement_kind = 'CENTRAL_BANK_CONVERSION_IN';
+                """));
+        Assert.AreEqual(
+            5L,
+            harness.Scalar("""
+                SELECT p.on_hand_count FROM cash_positions AS p
+                JOIN cash_holders AS h ON h.cash_holder_id = p.cash_holder_id
+                WHERE h.holder_type = 'BANK_VAULT';
+                """));
+        Assert.AreEqual(
+            5_000L,
+            harness.Scalar("""
+                SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'CASH_ASSET'
+                  AND a.accounting_book_id = (
+                    SELECT general_ledger_book_id FROM banks WHERE institution_code = 'NUM0090');
+                """));
+        Assert.AreEqual(
+            95_000L,
+            harness.Scalar("""
+                SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'CENTRAL_BANK_RESERVE_ASSET';
+                """));
+        Assert.AreEqual(
+            5_000L,
+            harness.Scalar("""
+                SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'CASH_OUTSTANDING_LIABILITY';
+                """));
+    }
+
+    [TestMethod]
+    public async Task VaultCashConvertsBackToReserve()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCentralBank();
+
+        await harness.Cash.ConvertReserveToCashAsync(
+            new ConvertReserveToCashCommand(
+                Owner(),
+                BankId.FromValue(EntityIdValue.FromBits(22)),
+                CurrencyDenominationId.FromValue(EntityIdValue.FromBits(10)),
+                5,
+                "convert-1"),
+            CancellationToken.None);
+
+        Result<CashConversionView> back = await harness.Cash.ConvertCashToReserveAsync(
+            new ConvertCashToReserveCommand(
+                Owner(),
+                BankId.FromValue(EntityIdValue.FromBits(22)),
+                CurrencyDenominationId.FromValue(EntityIdValue.FromBits(10)),
+                5,
+                "convert-2"),
+            CancellationToken.None);
+
+        Assert.IsTrue(back.IsSuccess, back.Error?.Code);
+        Assert.AreEqual(
+            0L,
+            harness.Scalar("""
+                SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'CASH_OUTSTANDING_LIABILITY';
+                """));
+        Assert.AreEqual(
+            100_000L,
+            harness.Scalar("""
+                SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'CENTRAL_BANK_RESERVE_ASSET';
+                """));
+    }
+
+    [TestMethod]
+    public async Task ConvertingMoreCashThanTheVaultHoldsIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCentralBank();
+
+        Result<CashConversionView> result = await harness.Cash.ConvertCashToReserveAsync(
+            new ConvertCashToReserveCommand(
+                Owner(),
+                BankId.FromValue(EntityIdValue.FromBits(22)),
+                CurrencyDenominationId.FromValue(EntityIdValue.FromBits(10)),
+                5,
+                "convert-1"),
+            CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.BankCashInsufficient, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("cash_movements"));
     }
 
     [TestMethod]

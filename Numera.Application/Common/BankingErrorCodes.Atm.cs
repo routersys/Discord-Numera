@@ -2,6 +2,9 @@ namespace Numera.Application.Common;
 
 public static partial class BankingErrorCodes
 {
+    public static string BankCashInsufficient { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 253);
+
     public static string AtmSettlementAccountUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 40);
 
