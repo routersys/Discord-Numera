@@ -57,4 +57,20 @@ public static partial class BankingErrorCodes
     public static string BankNotRetirable { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 36);
 
     public static string BankHasCustomers { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 37);
+
+    public static string BankNotPendingActivation { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 38);
+
+    public static string BankSettlementModeUnsupported { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 39);
+
+    public static string BankCapitalInsufficient { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 40);
+
+    public static string BankOpeningBalanceMismatch { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 41);
+
+    public static string BankPrudentialFloorUnmet { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 42);
+
+    public static string BankCapitalAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 34);
 }

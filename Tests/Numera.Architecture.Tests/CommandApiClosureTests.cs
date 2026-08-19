@@ -14,6 +14,12 @@ public sealed class CommandApiClosureTests
     [
     ];
 
+    private static readonly string[] MembersOutsideSection52 =
+    [
+        "IBankAdministrationApplicationService.ActivateBankAsync",
+        "IBankAdministrationApplicationService.ContributeBankCapitalAsync",
+    ];
+
     private static readonly string[] EntriesWithoutCanonicalUseCase =
     [
         "/manage",
@@ -162,9 +168,12 @@ public sealed class CommandApiClosureTests
 
             foreach (MethodInfo method in service.GetMethods())
             {
-                if (!declared.Contains(method.Name, StringComparer.Ordinal))
+                string member = $"{name}.{method.Name}";
+
+                if (!declared.Contains(method.Name, StringComparer.Ordinal) &&
+                    !MembersOutsideSection52.Contains(member, StringComparer.Ordinal))
                 {
-                    undeclared.Add($"{name}.{method.Name}");
+                    undeclared.Add(member);
                 }
             }
         }
@@ -212,6 +221,34 @@ public sealed class CommandApiClosureTests
 
         Assert.AreEqual(string.Empty, string.Join(',', missing), "実装済み Interface に未実装 Member があります。");
         Assert.AreEqual(string.Empty, string.Join(',', stale), "保留一覧が古くなっています。");
+    }
+
+    [TestMethod]
+    public void MembersOutsideSection52StillExistAndRemainUndeclared()
+    {
+        List<string> missing = [];
+        List<string> declared = [];
+
+        foreach (string member in MembersOutsideSection52)
+        {
+            string[] parts = member.Split('.');
+            Type? service = ApplicationServiceTypes()
+                .FirstOrDefault(candidate => string.Equals(candidate.Name, parts[0], StringComparison.Ordinal));
+
+            if (service is null ||
+                !service.GetMethods().Any(method => string.Equals(method.Name, parts[1], StringComparison.Ordinal)))
+            {
+                missing.Add(member);
+            }
+
+            if (ClosureCatalog.ApiMembers.Contains(member, StringComparer.Ordinal))
+            {
+                declared.Add(member);
+            }
+        }
+
+        Assert.AreEqual(string.Empty, string.Join(',', missing), "乖離一覧が古くなっています。");
+        Assert.AreEqual(string.Empty, string.Join(',', declared), "§52 が既に宣言しています。");
     }
 
     [TestMethod]

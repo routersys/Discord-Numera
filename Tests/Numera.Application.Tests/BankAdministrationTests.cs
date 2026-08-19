@@ -216,6 +216,39 @@ public sealed class BankAdministrationTests
                 posted_balance_minor = {amount}, version = version + 1;
             """);
 
+        public void SeedIssuance(long amount) => Execute($"""
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES({Blob(9)}, {Blob(4)}, NULL, '2901-NMR', 'BASE_MONEY_ISSUANCE_LIABILITY', 'LIABILITY',
+                'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                version, updated_at)
+            VALUES({Blob(9)}, {amount}, 0, 1, 1);
+            """);
+
+        public long PostedBalance(string bookHex, string accountCode) => (long)ReadScalar($"""
+            SELECT COALESCE(p.posted_balance_minor, 0) FROM ledger_accounts a
+            LEFT JOIN ledger_balance_projections p ON p.ledger_account_id = a.ledger_account_id
+            WHERE a.account_code = '{accountCode}' AND a.accounting_book_id = x'{bookHex}';
+            """);
+
+        public const string CentralBankBookHex = "00000000000000000000000000000004";
+
+        public object ReadScalar(string sql)
+        {
+            using SqliteConnection connection = ConnectionFactory.OpenRuntimeConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = sql;
+            return command.ExecuteScalar() ?? 0L;
+        }
+
+        public string BookHex(BankId bankId) => ReadText($"""
+            SELECT hex(general_ledger_book_id) FROM banks
+            WHERE bank_id = x'{Convert.ToHexString(bankId.Value.ToByteArray())}';
+            """);
+
         public async Task<CustomerAccountId> RegisterAsync(ulong discordUserId, string handle)
         {
             Result<CustomerAccountView> result = await Registration.RegisterCustomerAccountAsync(
@@ -776,6 +809,216 @@ public sealed class BankAdministrationTests
 
         Assert.IsTrue(result.IsSuccess);
         Assert.AreEqual("CLOSING", harness.ReadText("SELECT status FROM banks;"));
+    }
+
+    [TestMethod]
+    public async Task IssuerFundedCapitalPostsBothLegsOfTheSameOperation()
+    {
+        await using Harness harness = Harness.Create();
+        BankView bank = await harness.CreateBankAsync(harness.CreateCommand()) is { IsSuccess: true } created
+            ? created.Value
+            : throw new InvalidOperationException();
+
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100_000_000);
+
+        Result<BankCapitalView> contributed = await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 1_000_000, "int-1"),
+            CancellationToken.None);
+
+        Assert.IsTrue(contributed.IsSuccess);
+        Assert.AreEqual(1_000_000L, contributed.Value.PaidInCapital.Value);
+
+        string book = harness.BookHex(bank.Id);
+
+        Assert.AreEqual(1_000_000L, harness.PostedBalance(book, "3000"));
+        Assert.AreEqual(1_000_000L, harness.PostedBalance(book, "1100"));
+        Assert.AreEqual(
+            1_000_000L, harness.PostedBalance(Harness.CentralBankBookHex, "2100-" + Institution));
+        Assert.AreEqual(
+            99_000_000L, harness.PostedBalance(Harness.CentralBankBookHex, "2901-NMR"));
+        Assert.AreEqual(2L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(2L, harness.Count("outbox_events"));
+    }
+
+    [TestMethod]
+    public async Task CapitalBeyondTheIssuerPositionMovesNoMoney()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.CreateBankAsync(harness.CreateCommand());
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100);
+
+        Result<BankCapitalView> contributed = await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 1_000_000, "int-2"),
+            CancellationToken.None);
+
+        Assert.IsFalse(contributed.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.AvailableBalanceInsufficient, contributed.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("accounting_transactions"));
+        Assert.AreEqual(
+            0L,
+            harness.ReadScalar(
+                "SELECT COUNT(*) FROM business_operations WHERE operation_type = 'BANK_CAPITAL_CONTRIBUTION';"));
+    }
+
+    [TestMethod]
+    public async Task TheSameIdempotencyTokenContributesOnce()
+    {
+        await using Harness harness = Harness.Create();
+        BankView bank = await harness.CreateBankAsync(harness.CreateCommand()) is { IsSuccess: true } created
+            ? created.Value
+            : throw new InvalidOperationException();
+
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100_000_000);
+
+        ContributeBankCapitalCommand command =
+            new(harness.Actor, Institution, null, 1_000_000, "int-3");
+
+        await harness.Administration.ContributeBankCapitalAsync(command, CancellationToken.None);
+        Result<BankCapitalView> replayed = await harness.Administration.ContributeBankCapitalAsync(
+            command, CancellationToken.None);
+
+        Assert.IsTrue(replayed.IsSuccess);
+        Assert.AreEqual(0L, replayed.Value.ContributedAmount.Value);
+        Assert.AreEqual(1_000_000L, harness.PostedBalance(harness.BookHex(bank.Id), "3000"));
+        Assert.AreEqual(2L, harness.Count("accounting_transactions"));
+    }
+
+    [TestMethod]
+    public async Task ActivationBelowTheMinimumInitialCapitalIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.CreateBankAsync(harness.CreateCommand());
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100_000_000);
+
+        await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 99_999, "int-4"),
+            CancellationToken.None);
+
+        Result<BankView> activated = await harness.Administration.ActivateBankAsync(
+            new ActivateBankCommand(harness.Actor, Institution, "act-4"), CancellationToken.None);
+
+        Assert.IsFalse(activated.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.BankCapitalInsufficient, activated.Error!.Code);
+        Assert.AreEqual("PENDING_ACTIVATION", harness.ReadText("SELECT status FROM banks;"));
+    }
+
+    [TestMethod]
+    public async Task ActivationOpensTheBankAndItsSettlementParticipation()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.CreateBankAsync(harness.CreateCommand());
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100_000_000);
+
+        await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 100_000, "int-5"),
+            CancellationToken.None);
+
+        Result<BankView> activated = await harness.Administration.ActivateBankAsync(
+            new ActivateBankCommand(harness.Actor, Institution, "act-5"), CancellationToken.None);
+
+        Assert.IsTrue(activated.IsSuccess);
+        Assert.AreEqual(BankStatus.Operating, activated.Value.Status);
+        Assert.AreEqual("OPERATING", harness.ReadText("SELECT status FROM banks;"));
+        Assert.AreEqual("ACTIVE", harness.ReadText("SELECT status FROM settlement_participations;"));
+    }
+
+    [TestMethod]
+    public async Task ActivationWithoutMirroredOpeningBalancesIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        BankView bank = await harness.CreateBankAsync(harness.CreateCommand()) is { IsSuccess: true } created
+            ? created.Value
+            : throw new InvalidOperationException();
+
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100_000_000);
+
+        await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 100_000, "int-6"),
+            CancellationToken.None);
+
+        harness.Execute($"""
+            UPDATE ledger_balance_projections SET posted_balance_minor = 1, version = version + 1
+            WHERE ledger_account_id IN (
+                SELECT ledger_account_id FROM ledger_accounts
+                WHERE account_code = '1100' AND accounting_book_id = x'{harness.BookHex(bank.Id)}');
+            """);
+
+        Result<BankView> activated = await harness.Administration.ActivateBankAsync(
+            new ActivateBankCommand(harness.Actor, Institution, "act-6"), CancellationToken.None);
+
+        Assert.IsFalse(activated.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.BankOpeningBalanceMismatch, activated.Error!.Code);
+        Assert.AreEqual("PENDING_ACTIVATION", harness.ReadText("SELECT status FROM banks;"));
+    }
+
+    [TestMethod]
+    public async Task AnOperatingBankRefusesFurtherCapitalContribution()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.CreateBankAsync(harness.CreateCommand());
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100_000_000);
+
+        await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 100_000, "int-7"),
+            CancellationToken.None);
+        await harness.Administration.ActivateBankAsync(
+            new ActivateBankCommand(harness.Actor, Institution, "act-7"), CancellationToken.None);
+
+        Result<BankCapitalView> again = await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 100_000, "int-8"),
+            CancellationToken.None);
+
+        Assert.IsFalse(again.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.BankNotPendingActivation, again.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task ContributorFundedCapitalMovesTheSettlementLiabilityBetweenBanks()
+    {
+        await using Harness harness = Harness.Create();
+        BankView funder = await harness.CreateBankAsync(harness.CreateCommand()) is { IsSuccess: true } first
+            ? first.Value
+            : throw new InvalidOperationException();
+
+        harness.OpenAccountingPeriods();
+        harness.SeedIssuance(100_000_000);
+
+        await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, Institution, null, 1_000_000, "int-9"),
+            CancellationToken.None);
+        await harness.Administration.ActivateBankAsync(
+            new ActivateBankCommand(harness.Actor, Institution, "act-9"), CancellationToken.None);
+
+        CustomerAccountId customer = await harness.RegisterAsync(Owner, "founder");
+        Result<AccountOpeningView> opened = await harness.OpenAsync(customer);
+        Assert.IsTrue(opened.IsSuccess);
+        harness.FundDeposit(opened.Value.Id, 500_000);
+
+        BankView target = await harness.CreateBankAsync(
+            harness.CreateCommand(institutionCode: "NUM0200")) is { IsSuccess: true } second
+            ? second.Value
+            : throw new InvalidOperationException();
+
+        Result<BankCapitalView> contributed = await harness.Administration.ContributeBankCapitalAsync(
+            new ContributeBankCapitalCommand(harness.Actor, "NUM0200", Institution, 200_000, "int-10"),
+            CancellationToken.None);
+
+        Assert.IsTrue(contributed.IsSuccess);
+        Assert.AreEqual(200_000L, contributed.Value.PaidInCapital.Value);
+        Assert.AreEqual(200_000L, harness.PostedBalance(harness.BookHex(target.Id), "3000"));
+        Assert.AreEqual(200_000L, harness.PostedBalance(harness.BookHex(target.Id), "1100"));
+        Assert.AreEqual(800_000L, harness.PostedBalance(harness.BookHex(funder.Id), "1100"));
+        Assert.AreEqual(
+            800_000L, harness.PostedBalance(Harness.CentralBankBookHex, "2100-" + Institution));
+        Assert.AreEqual(
+            200_000L, harness.PostedBalance(Harness.CentralBankBookHex, "2100-NUM0200"));
     }
 
     private static long ExpectedBankVersion(Harness harness, BankView bank) =>

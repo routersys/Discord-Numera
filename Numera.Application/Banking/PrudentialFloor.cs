@@ -18,14 +18,30 @@ internal static class PrudentialFloor
             return true;
         }
 
-        MoneyMinor capital = Balance(
-            unitOfWork, candidate, LedgerAccountKind.PaidInCapital);
+        return Satisfies(
+            unitOfWork, candidate, policy, Control(unitOfWork, candidate).Add(Control(unitOfWork, failing)));
+    }
 
-        MoneyMinor liquid = Balance(
-            unitOfWork, candidate, LedgerAccountKind.CentralBankReserveAsset)
-            .Add(Balance(unitOfWork, candidate, LedgerAccountKind.CashAsset));
+    internal static bool AdmitsActivation(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        PrudentialPolicyVersion policy)
+    {
+        ArgumentNullException.ThrowIfNull(bank);
 
-        MoneyMinor deposits = Control(unitOfWork, candidate).Add(Control(unitOfWork, failing));
+        return Satisfies(unitOfWork, bank, policy, Control(unitOfWork, bank));
+    }
+
+    private static bool Satisfies(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        PrudentialPolicyVersion policy,
+        MoneyMinor deposits)
+    {
+        MoneyMinor capital = Balance(unitOfWork, bank, LedgerAccountKind.PaidInCapital);
+
+        MoneyMinor liquid = Balance(unitOfWork, bank, LedgerAccountKind.CentralBankReserveAsset)
+            .Add(Balance(unitOfWork, bank, LedgerAccountKind.CashAsset));
 
         if (capital < policy.MinimumInitialBankCapital)
         {

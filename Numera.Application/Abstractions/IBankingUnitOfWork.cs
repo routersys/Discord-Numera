@@ -419,6 +419,8 @@ public partial interface IGuildEconomyRepository
 public interface ISettlementParticipationRepository
 {
     Numera.Domain.Banking.SettlementParticipation? FindLive(BankId bankId);
+
+    void Update(Numera.Domain.Banking.SettlementParticipation participation);
 }
 
 public sealed record CentralBankSettlementAccountView(

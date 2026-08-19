@@ -103,9 +103,17 @@ public interface IBankAdministrationApplicationService
     Task<Result<AccountOpeningApplicationView>> RejectAccountOpeningAsync(
         RejectAccountOpeningCommand command,
         CancellationToken cancellationToken);
+
+    Task<Result<BankCapitalView>> ContributeBankCapitalAsync(
+        ContributeBankCapitalCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<BankView>> ActivateBankAsync(
+        ActivateBankCommand command,
+        CancellationToken cancellationToken);
 }
 
-public sealed class BankAdministrationApplicationService : IBankAdministrationApplicationService
+public sealed partial class BankAdministrationApplicationService : IBankAdministrationApplicationService
 {
     public const string CreateOperationType = "BANK_CREATE";
     public const string PolicyUpdateOperationType = "BANK_POLICY_UPDATE";
@@ -127,6 +135,7 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
     private const string CentralBankLiabilityPrefix = "2100-";
     private const string ClientBankDepositPrefix = "2500-";
     private const int DefaultDebitCardValidityMonths = 60;
+    private const string EstablishmentPeriodKey = "ESTABLISHMENT";
 
     private static readonly string[] BankCreateWizardSteps =
     [
@@ -517,6 +526,12 @@ public sealed class BankAdministrationApplicationService : IBankAdministrationAp
 
         unitOfWork.Parties.Add(party);
         unitOfWork.BankAdministration.AddAccountingBook(bookId, party.Id, now);
+        unitOfWork.AccountingPeriods.Open(
+            AccountingPeriodId.FromValue(idGenerator.NextId()),
+            bookId,
+            EstablishmentPeriodKey,
+            BusinessDate.FromDayNumber(DateOnly.MinValue.DayNumber),
+            BusinessDate.FromDayNumber(DateOnly.MaxValue.DayNumber));
         unitOfWork.BankAdministration.AddBank(bank);
         unitOfWork.BankAdministration.AddBranch(
             BranchId.FromValue(idGenerator.NextId()), bank.Id, branchCode.Value, branchName.Value, now);

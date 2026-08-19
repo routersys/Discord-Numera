@@ -231,6 +231,29 @@ public sealed class SqliteSettlementParticipationRepository : ISettlementPartici
                 reader.GetInt64(8))
             : null;
     }
+
+    public void Update(SettlementParticipation participation)
+    {
+        ArgumentNullException.ThrowIfNull(participation);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE settlement_participations
+            SET status = $status,
+                effective_to = $to,
+                version = $version
+            WHERE settlement_participation_id = $id AND version = $expected;
+            """);
+        command.Parameters.AddWithValue("$status", participation.Status.ToToken());
+        command.Parameters.AddWithValue("$to", SqliteValueMapper.ToParameter(participation.EffectiveTo));
+        command.Parameters.AddWithValue("$version", participation.Version);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(participation.Id.Value));
+        command.Parameters.AddWithValue("$expected", participation.PersistedVersion);
+
+        if (command.ExecuteNonQuery() != 1)
+        {
+            throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
+        }
+    }
 }
 
 public sealed class SqliteCentralBankSettlementAccountRepository : ICentralBankSettlementAccountRepository
