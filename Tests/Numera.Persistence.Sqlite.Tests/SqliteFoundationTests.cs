@@ -379,4 +379,19 @@ public sealed class SingleInstanceLockTests
         instanceLock.Dispose();
         instanceLock.Dispose();
     }
+
+    [TestMethod]
+    public void AFreshDatabaseBecomesRuntimeReadyWithoutMigrations()
+    {
+        using SqliteDatabaseFixture fixture = SqliteDatabaseFixture.Create();
+        SqliteDatabaseInitializer initializer = fixture.CreateInitializer();
+
+        Assert.IsTrue(initializer.IsFreshDatabase);
+
+        initializer.VerifyRuntimeReadiness();
+
+        Assert.IsFalse(initializer.IsFreshDatabase);
+
+        initializer.VerifyRuntimeReadiness();
+    }
 }

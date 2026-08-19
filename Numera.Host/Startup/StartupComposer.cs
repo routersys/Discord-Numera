@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Numera.Application.Common;
 using Numera.Host.Configuration;
+using Numera.Host.Console;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Migrations;
 
@@ -39,6 +40,8 @@ internal sealed class StartupComposer
     private SqliteConnectionFactory? connectionFactory;
     private RuntimeStateMarker? marker;
     private NumeraOptions? effectiveOptions;
+    private ConsoleCommandExecutor? recoveryConsole;
+    private bool freshDatabase;
 
     internal StartupComposer(
         IConfiguration configuration,
@@ -59,6 +62,19 @@ internal sealed class StartupComposer
     internal NumeraOptions? EffectiveOptions => effectiveOptions;
 
     internal RuntimeStateMarker? Marker => marker;
+
+    internal ShellSession RunRecoveryShell(
+        TextReader input,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+
+        return recoveryConsole is null
+            ? new ShellSession(ShellExitReason.InputClosed, 0, 0)
+            : new BootstrapShell(recoveryConsole, input, output).Run(cancellationToken);
+    }
 
     internal static NumeraOptions ReadOptions(IConfiguration configuration, string environmentName)
     {
@@ -221,8 +237,9 @@ internal sealed class StartupComposer
             : StartupCheckResult.Failed(protection.Detail);
     }
 
-    private StartupCheckResult VerifyConnection() => Guarded(static initializer =>
+    private StartupCheckResult VerifyConnection() => Guarded(initializer =>
     {
+        freshDatabase = initializer.IsFreshDatabase;
         initializer.VerifyRuntimeReadiness();
 
         return StartupCheckResult.Passed;
@@ -311,7 +328,28 @@ internal sealed class StartupComposer
         SqliteConnectionFactory factory) =>
         new(factory, static () => Guid.CreateVersion7().ToByteArray(bigEndian: true));
 
-    private StartupCheckResult ResolveBootstrapShell() => StartupCheckResult.NotAvailable;
+    private StartupCheckResult ResolveBootstrapShell()
+    {
+        if (databaseOptions is null || connectionFactory is null)
+        {
+            return StartupCheckResult.Failed(BankingErrorCodes.SystemBusy);
+        }
+
+        SqliteDatabaseBackupService backups = new(
+            databaseOptions, connectionFactory, timeProvider, HostVersion.Current);
+
+        recoveryConsole = new ConsoleCommandExecutor(
+            new SqliteDatabaseIntegrityProbe(connectionFactory),
+            CreateReconciliationRunner(connectionFactory),
+            backups,
+            new SqliteDatabaseRestoreService(
+                databaseOptions, backups, new MigrationRunner([.. EmbeddedMigrationCatalog.Load()])),
+            new WriteAdmissionMaintenanceGate(static () => false),
+            timeProvider,
+            ReadPreviousMarker);
+
+        return StartupCheckResult.Passed;
+    }
 
     private StartupCheckResult ValidateEffectiveOptions(string environmentName)
     {
@@ -366,7 +404,7 @@ internal sealed class StartupComposer
             return StartupCheckResult.Failed(BankingErrorCodes.SystemBusy);
         }
 
-        if (!File.Exists(databaseOptions.FullPath))
+        if (freshDatabase || !File.Exists(databaseOptions.FullPath))
         {
             return StartupCheckResult.NotAvailable;
         }

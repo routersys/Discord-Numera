@@ -78,6 +78,9 @@ internal static class NumeraHost
                     "Startup entered RECOVERY_REQUIRED and neither Discord nor write admission was started.",
                     recovery.Detail);
 
+                composer.RunRecoveryShell(
+                    System.Console.In, System.Console.Out, CancellationToken.None);
+
                 return NumeraHostExitCode.RecoveryRequired;
             }
 

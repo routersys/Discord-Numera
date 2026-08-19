@@ -46,8 +46,18 @@ public sealed class SqliteDatabaseInitializer
         return outcome;
     }
 
+    public bool IsFreshDatabase => !File.Exists(options.FullPath);
+
     public void VerifyRuntimeReadiness()
     {
+        if (IsFreshDatabase)
+        {
+            EnsureDirectory();
+
+            using SqliteConnection bootstrap = connectionFactory.OpenBootstrapConnection();
+            SqlitePragmaGuard.ApplyDatabaseWide(bootstrap);
+        }
+
         using SqliteConnection connection = connectionFactory.OpenRuntimeConnection();
         SqlitePragmaGuard.EnsureIntegrity(connection);
     }
