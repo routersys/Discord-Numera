@@ -143,6 +143,7 @@ internal static class NumeraHost
         builder.Services.AddHostedService<DiscordGatewayShutdownService>();
         builder.Services.AddHostedService<SqliteWriteAdmissionService>();
         builder.Services.AddHostedService<SettlementMaintenanceWorker>();
+        builder.Services.AddHostedService<AutomaticBackupWorker>();
         builder.Services.AddHostedService<DiscordHostedService>();
     }
 

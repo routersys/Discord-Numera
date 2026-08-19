@@ -21,6 +21,8 @@ public static class ConsoleText
     public const string Yes = "yes";
     public const string No = "no";
     public const string LocalOnly = "LOCAL_ONLY";
+    public const string SecondaryOk = "SECONDARY_OK";
+    public const string SecondaryDegraded = "SECONDARY_DEGRADED";
     public const string UnknownCommand = "Unknown command. Type help for the command list.";
     public const string NotImplemented = "This command is not available in this build.";
     public const string BackupCreated = "Backup created:";
@@ -192,11 +194,18 @@ internal sealed class ConsoleCommandExecutor
                 "Automatic Backup Count: " + Number(summary.AutomaticCount),
                 "Manual Backup Count: " + Number(summary.ManualCount),
                 "Backup Total Bytes: " + Number(summary.TotalBytes),
-                "Backup Redundancy: " + ConsoleText.LocalOnly,
+                "Backup Redundancy: " + RedundancyToken(summary.Redundancy),
                 "Recovery Point Age: " + ConsoleText.None,
                 "Recovery Copy Present: " + ConsoleText.No,
             ]);
     }
+
+    private static string RedundancyToken(BackupRedundancy redundancy) => redundancy switch
+    {
+        BackupRedundancy.SecondaryOk => ConsoleText.SecondaryOk,
+        BackupRedundancy.SecondaryDegraded => ConsoleText.SecondaryDegraded,
+        _ => ConsoleText.LocalOnly,
+    };
 
     private string ReconciliationToken() =>
         reconciliation.LastRunStatus(SqliteDatabaseReconciliationRunner.ScopeFinancial) switch

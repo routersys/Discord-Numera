@@ -9,13 +9,18 @@ public sealed class SqliteDatabaseOptions
     public const string LockFileSuffix = ".lock";
     public const string BackupDirectoryName = "backups";
 
-    private SqliteDatabaseOptions(string path, int busyTimeoutSeconds)
+    private SqliteDatabaseOptions(string path, int busyTimeoutSeconds, string? secondaryBackupDirectory)
     {
         Path = path;
         BusyTimeoutSeconds = busyTimeoutSeconds;
+        SecondaryBackupDirectory = secondaryBackupDirectory;
     }
 
     public string Path { get; }
+
+    public string? SecondaryBackupDirectory { get; }
+
+    public bool HasSecondaryBackupTarget => SecondaryBackupDirectory is not null;
 
     public int BusyTimeoutSeconds { get; }
 
@@ -30,7 +35,10 @@ public sealed class SqliteDatabaseOptions
     public string BackupDirectoryPath =>
         System.IO.Path.Combine(DirectoryPath ?? ".", BackupDirectoryName);
 
-    public static SqliteDatabaseOptions Create(string path, int busyTimeoutSeconds)
+    public static SqliteDatabaseOptions Create(
+        string path,
+        int busyTimeoutSeconds,
+        string? secondaryBackupDirectory = null)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -47,7 +55,43 @@ public sealed class SqliteDatabaseOptions
             throw PersistenceFailureException.Create(PersistenceFailureCode.BusyTimeoutInvalid);
         }
 
-        return new SqliteDatabaseOptions(path, busyTimeoutSeconds);
+        string? secondary = Normalize(secondaryBackupDirectory);
+
+        if (secondary is not null)
+        {
+            string primary = System.IO.Path.GetFullPath(
+                System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path)) ?? ".",
+                    BackupDirectoryName));
+
+            if (string.Equals(secondary, primary, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    secondary,
+                    System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path)),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw PersistenceFailureException.Create(
+                    PersistenceFailureCode.SecondaryBackupDirectoryInvalid);
+            }
+        }
+
+        return new SqliteDatabaseOptions(path, busyTimeoutSeconds, secondary);
+    }
+
+    private static string? Normalize(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return null;
+        }
+
+        if (candidate.IndexOfAny(System.IO.Path.GetInvalidPathChars()) >= 0)
+        {
+            throw PersistenceFailureException.Create(
+                PersistenceFailureCode.SecondaryBackupDirectoryInvalid);
+        }
+
+        return System.IO.Path.GetFullPath(candidate);
     }
 
     public static SqliteDatabaseOptions CreateDefault() => Create(DefaultPath, DefaultBusyTimeoutSeconds);

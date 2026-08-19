@@ -65,6 +65,8 @@ public sealed class ConsoleCommandExecutorTests
         public string? FindLatestVerified() => Latest;
 
         public int PruneAutomatic() => 0;
+
+        public string? NewestAutomaticCreatedAtUtc() => null;
     }
 
     private sealed class StubRestores : IDatabaseRestoreService

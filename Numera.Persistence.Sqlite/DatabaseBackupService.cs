@@ -46,13 +46,21 @@ public sealed record BackupVerificationResult(bool IsSuccess, string Detail)
 
 internal sealed record BackupEntry(string DatabasePath, string ManifestPath, BackupManifest Manifest);
 
+public enum BackupRedundancy
+{
+    LocalOnly = 1,
+    SecondaryOk = 2,
+    SecondaryDegraded = 3,
+}
+
 public sealed record BackupSummary(
     int AutomaticCount,
     int ManualCount,
     int PreMigrationCount,
     long TotalBytes,
     string OldestCreatedAtUtc,
-    string NewestCreatedAtUtc)
+    string NewestCreatedAtUtc,
+    BackupRedundancy Redundancy = BackupRedundancy.LocalOnly)
 {
     public static BackupSummary Empty { get; } = new(0, 0, 0, 0L, string.Empty, string.Empty);
 
@@ -70,6 +78,8 @@ public interface IDatabaseBackupService
     string? FindLatestVerified();
 
     int PruneAutomatic();
+
+    string? NewestAutomaticCreatedAtUtc();
 }
 
 internal static class BackupFailure
@@ -84,6 +94,7 @@ internal static class BackupFailure
     internal const string ForeignKeyCheckFailed = "FOREIGN_KEY_CHECK_FAILED";
     internal const string IntegrityCheckFailed = "INTEGRITY_CHECK_FAILED";
     internal const string DatabaseMissing = "DATABASE_MISSING";
+    internal const string SecondaryCopyFailed = "SECONDARY_COPY_FAILED";
 }
 
 public sealed class SqliteDatabaseBackupService : IDatabaseBackupService
@@ -198,7 +209,8 @@ public sealed class SqliteDatabaseBackupService : IDatabaseBackupService
                 return BackupCreationResult.Failed(verified.Detail);
             }
 
-            return new BackupCreationResult(true, databasePath, manifestPath, string.Empty);
+            return new BackupCreationResult(
+                true, databasePath, manifestPath, CopyToSecondary(databasePath, manifestPath, manifest));
         }
         catch (Exception exception) when (exception is IOException or SqliteException or UnauthorizedAccessException)
         {
@@ -324,7 +336,7 @@ public sealed class SqliteDatabaseBackupService : IDatabaseBackupService
 
         if (entries.Length == 0)
         {
-            return BackupSummary.Empty;
+            return BackupSummary.Empty with { Redundancy = Redundancy(entries) };
         }
 
         string[] created = [.. entries.Select(static entry => entry.Manifest.CreatedAtUtc).Order(StringComparer.Ordinal)];
@@ -335,7 +347,8 @@ public sealed class SqliteDatabaseBackupService : IDatabaseBackupService
             entries.Count(static entry => IsKind(entry, BackupKind.PreMigration)),
             entries.Sum(static entry => entry.Manifest.DatabaseLengthBytes),
             created[0],
-            created[^1]);
+            created[^1],
+            Redundancy(entries));
     }
 
     private static bool IsKind(BackupEntry entry, BackupKind kind) =>
@@ -363,6 +376,76 @@ public sealed class SqliteDatabaseBackupService : IDatabaseBackupService
 
         return removed;
     }
+
+    private string CopyToSecondary(string databasePath, string manifestPath, BackupManifest manifest)
+    {
+        if (options.SecondaryBackupDirectory is not { } secondary)
+        {
+            return string.Empty;
+        }
+
+        string databaseTarget = Path.Combine(secondary, Path.GetFileName(databasePath));
+        string manifestTarget = Path.Combine(secondary, Path.GetFileName(manifestPath));
+        string databaseTemp = databaseTarget + PartialExtension;
+        string manifestTemp = manifestTarget + PartialExtension;
+
+        try
+        {
+            Directory.CreateDirectory(secondary);
+
+            File.Copy(databasePath, databaseTemp, overwrite: true);
+            File.Copy(manifestPath, manifestTemp, overwrite: true);
+
+            if (new FileInfo(databaseTemp).Length != manifest.DatabaseLengthBytes
+                || !string.Equals(Digest(databaseTemp), manifest.DatabaseSha256, StringComparison.Ordinal))
+            {
+                Delete(databaseTemp);
+                Delete(manifestTemp);
+
+                return BackupFailure.SecondaryCopyFailed;
+            }
+
+            File.Move(databaseTemp, databaseTarget, overwrite: true);
+            File.Move(manifestTemp, manifestTarget, overwrite: true);
+
+            return string.Empty;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Delete(databaseTemp);
+            Delete(manifestTemp);
+
+            return BackupFailure.SecondaryCopyFailed;
+        }
+    }
+
+    private BackupRedundancy Redundancy(IReadOnlyList<BackupEntry> entries)
+    {
+        if (options.SecondaryBackupDirectory is not { } secondary)
+        {
+            return BackupRedundancy.LocalOnly;
+        }
+
+        foreach (BackupEntry entry in entries)
+        {
+            string target = Path.Combine(secondary, Path.GetFileName(entry.DatabasePath));
+            string manifest = Path.Combine(secondary, Path.GetFileName(entry.ManifestPath));
+
+            if (!File.Exists(target) || !File.Exists(manifest)
+                || new FileInfo(target).Length != entry.Manifest.DatabaseLengthBytes)
+            {
+                return BackupRedundancy.SecondaryDegraded;
+            }
+        }
+
+        return BackupRedundancy.SecondaryOk;
+    }
+
+    public string? NewestAutomaticCreatedAtUtc() => List()
+        .Where(static entry => IsKind(entry, BackupKind.Automatic))
+        .Select(static entry => entry.Manifest.CreatedAtUtc)
+        .OrderByDescending(static created => created, StringComparer.Ordinal)
+        .FirstOrDefault();
 
     internal static string Token(BackupKind kind) => kind switch
     {

@@ -22,7 +22,8 @@ public sealed record NumeraOptions(
     string DatabasePath,
     int DatabaseBusyTimeoutSeconds,
     int InteractionSessionMinutes,
-    int StatementPageSize);
+    int StatementPageSize,
+    string? SecondaryBackupDirectory = null);
 
 public sealed record OptionsViolation(string Setting, string Code);
 

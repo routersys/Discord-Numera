@@ -33,6 +33,7 @@ public static class PersistenceFailureCode
     public const string Unspecified = "PERSISTENCE_UNSPECIFIED";
     public const string DatabasePathInvalid = "DATABASE_PATH_INVALID";
     public const string BusyTimeoutInvalid = "BUSY_TIMEOUT_INVALID";
+    public const string SecondaryBackupDirectoryInvalid = "SECONDARY_BACKUP_DIRECTORY_INVALID";
     public const string SingleInstanceLockUnavailable = "SINGLE_INSTANCE_LOCK_UNAVAILABLE";
     public const string PragmaVerificationFailed = "PRAGMA_VERIFICATION_FAILED";
     public const string JournalModeNotWal = "JOURNAL_MODE_NOT_WAL";

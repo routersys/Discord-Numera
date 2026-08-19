@@ -3,6 +3,7 @@ using Numera.Application.Abstractions;
 using Numera.Application.Banking;
 using Numera.Application.Common;
 using Numera.Host.Configuration;
+using Numera.Host.Startup;
 using Numera.Host.Workers;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Repositories;
@@ -17,7 +18,8 @@ internal static class BankingRegistration
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
 
-        services.AddSingleton(SqliteDatabaseOptions.Create(options.DatabasePath, options.DatabaseBusyTimeoutSeconds));
+        services.AddSingleton(SqliteDatabaseOptions.Create(
+            options.DatabasePath, options.DatabaseBusyTimeoutSeconds, options.SecondaryBackupDirectory));
         services.AddSingleton(static provider =>
             new SqliteConnectionFactory(provider.GetRequiredService<SqliteDatabaseOptions>()));
         services.AddSingleton(static _ => new SqliteRetryPolicy());
@@ -26,6 +28,15 @@ internal static class BankingRegistration
             provider.GetRequiredService<SqliteRetryPolicy>()));
         services.AddSingleton(static provider =>
             new FinancialWriteCoordinator(provider.GetRequiredService<SqliteWriteCoordinator>()));
+
+        services.AddSingleton<IDatabaseBackupService>(static provider => new SqliteDatabaseBackupService(
+            provider.GetRequiredService<SqliteDatabaseOptions>(),
+            provider.GetRequiredService<SqliteConnectionFactory>(),
+            provider.GetRequiredService<TimeProvider>(),
+            HostVersion.Current));
+        services.AddSingleton<IDatabaseIntegrityProbe>(static provider =>
+            new SqliteDatabaseIntegrityProbe(provider.GetRequiredService<SqliteConnectionFactory>()));
+        services.AddSingleton<IAutomaticBackupScheduler, AutomaticBackupScheduler>();
 
         services.AddSingleton<IClock>(static provider => new SystemClock(provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<IIdGenerator, UuidVersion7IdGenerator>();

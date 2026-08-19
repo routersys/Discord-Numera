@@ -99,6 +99,8 @@ internal sealed class RecordingMaintenanceDiagnostics : IMaintenanceDiagnostics
 
     public void SettlementMaintenanceFailed(Exception exception) => Calls.Add(nameof(SettlementMaintenanceFailed));
 
+    public void AutomaticBackupFailed(string detail) => Calls.Add(nameof(AutomaticBackupFailed));
+
     public void WriteAdmissionOpened() => Calls.Add(nameof(WriteAdmissionOpened));
 
     public void WriteAdmissionClosed() => Calls.Add(nameof(WriteAdmissionClosed));

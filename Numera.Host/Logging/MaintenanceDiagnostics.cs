@@ -11,6 +11,9 @@ internal static class MaintenanceLogEvents
     internal const int SettlementMaintenanceFailedId = 5002;
     internal const string SettlementMaintenanceFailedName = "Settlement.Maintenance.Failed";
 
+    internal const int AutomaticBackupFailedId = 5003;
+    internal const string AutomaticBackupFailedName = "Database.Backup.Failed";
+
     internal const int WriteAdmissionOpenedId = 1001;
     internal const string WriteAdmissionOpenedName = "Application.Started";
 
@@ -23,6 +26,8 @@ internal interface IMaintenanceDiagnostics
     void SettlementMaintenanceCompleted(int examined, int settled);
 
     void SettlementMaintenanceFailed(Exception exception);
+
+    void AutomaticBackupFailed(string detail);
 
     void WriteAdmissionOpened();
 
@@ -45,6 +50,8 @@ internal sealed partial class MaintenanceDiagnostics : IMaintenanceDiagnostics
     public void SettlementMaintenanceFailed(Exception exception) =>
         LogSettlementMaintenanceFailed(exception, BankingErrorCodes.SystemBusy);
 
+    public void AutomaticBackupFailed(string detail) => LogAutomaticBackupFailed(detail);
+
     public void WriteAdmissionOpened() => LogWriteAdmissionOpened();
 
     public void WriteAdmissionClosed() => LogWriteAdmissionClosed();
@@ -62,6 +69,13 @@ internal sealed partial class MaintenanceDiagnostics : IMaintenanceDiagnostics
         Level = LogLevel.Error,
         Message = "Settlement maintenance failed: {errorCode}.")]
     private partial void LogSettlementMaintenanceFailed(Exception exception, string errorCode);
+
+    [LoggerMessage(
+        EventId = MaintenanceLogEvents.AutomaticBackupFailedId,
+        EventName = MaintenanceLogEvents.AutomaticBackupFailedName,
+        Level = LogLevel.Error,
+        Message = "Automatic backup reported {detail}.")]
+    private partial void LogAutomaticBackupFailed(string detail);
 
     [LoggerMessage(
         EventId = MaintenanceLogEvents.WriteAdmissionOpenedId,

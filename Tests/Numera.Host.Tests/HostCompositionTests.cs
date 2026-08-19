@@ -89,6 +89,7 @@ public sealed class HostCompositionTests
                 nameof(DiscordGatewayShutdownService),
                 nameof(SqliteWriteAdmissionService),
                 nameof(SettlementMaintenanceWorker),
+                nameof(AutomaticBackupWorker),
                 nameof(DiscordHostedService),
             },
             started);
@@ -99,6 +100,7 @@ public sealed class HostCompositionTests
             new[]
             {
                 nameof(DiscordHostedService),
+                nameof(AutomaticBackupWorker),
                 nameof(SettlementMaintenanceWorker),
                 nameof(SqliteWriteAdmissionService),
                 nameof(DiscordGatewayShutdownService),

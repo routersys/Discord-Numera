@@ -28,6 +28,8 @@ public sealed class BootstrapShellTests
         public string? FindLatestVerified() => null;
 
         public int PruneAutomatic() => 0;
+
+        public string? NewestAutomaticCreatedAtUtc() => null;
     }
 
     private sealed class UnusedRestores : IDatabaseRestoreService

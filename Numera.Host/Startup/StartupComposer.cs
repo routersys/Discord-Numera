@@ -92,7 +92,8 @@ internal sealed class StartupComposer
             ReadInt32(
                 configuration,
                 $"{ConfigurationSectionBanking}:StatementPageSize",
-                NumeraOptionsValidator.CanonicalStatementPageSize));
+                NumeraOptionsValidator.CanonicalStatementPageSize),
+            configuration[$"{ConfigurationSectionDatabase}:SecondaryBackupDirectory"]);
     }
 
     internal IReadOnlyList<StartupStepBinding> Bind(string environmentName) =>
@@ -163,7 +164,10 @@ internal sealed class StartupComposer
         try
         {
             databaseOptions =
-                SqliteDatabaseOptions.Create(options.DatabasePath, options.DatabaseBusyTimeoutSeconds);
+                SqliteDatabaseOptions.Create(
+                    options.DatabasePath,
+                    options.DatabaseBusyTimeoutSeconds,
+                    options.SecondaryBackupDirectory);
         }
         catch (PersistenceFailureException exception)
         {
