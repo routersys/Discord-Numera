@@ -15,7 +15,7 @@ public sealed record GetFxBoardVisualQuery(FxMarketId MarketId);
 
 public sealed record GetFxChartVisualQuery(FxMarketId MarketId, int BucketSeconds);
 
-public sealed record ListFxOrdersQuery(PartyId ParticipantPartyId, string? Cursor);
+public sealed record ListFxOrdersQuery(CustomerAccountId CustomerAccountId, string? Cursor);
 
 public sealed record GetFxHistoryQuery(FxMarketId MarketId, string? Cursor);
 
@@ -23,21 +23,20 @@ public sealed record PlaceFxOrderCommand(
     AuthorizationContext Actor,
     FxMarketId MarketId,
     CustomerAccountId CustomerAccountId,
-    PartyId ParticipantPartyId,
     FxOrderSide Side,
     FxOrderType OrderType,
     long BaseMinor,
     long? PriceUnits,
     int? MaximumSlippageBps,
-    FxFundingEndpointId SourceFundingEndpointId,
-    FxSettlementEndpointId DestinationSettlementEndpointId,
-    HoldId SourceHoldId,
+    DepositAccountId SourceDepositAccountId,
+    DepositAccountId DestinationDepositAccountId,
     IdempotencyKey IdempotencyKey);
 
 public sealed record CancelFxOrderCommand(
     AuthorizationContext Actor,
-    PartyId ParticipantPartyId,
-    FxOrderId FxOrderId);
+    CustomerAccountId CustomerAccountId,
+    FxOrderId FxOrderId,
+    IdempotencyKey IdempotencyKey);
 
 public sealed record FxOrderView(
     FxOrderId Id,
@@ -123,7 +122,7 @@ public interface IFxApplicationService
         CancellationToken cancellationToken);
 }
 
-public sealed class FxApplicationService : IFxApplicationService
+public sealed partial class FxApplicationService : IFxApplicationService
 {
     public const int DepthLevels = 10;
 
@@ -204,8 +203,14 @@ public sealed class FxApplicationService : IFxApplicationService
         return writeGateway.ExecuteAsync(
             unitOfWork =>
             {
+                if (unitOfWork.CustomerAccounts.Find(query.CustomerAccountId) is not { } customer)
+                {
+                    return Result<FxOrderPageView>.Failure(
+                        ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+                }
+
                 IReadOnlyList<FxOrder> fetched = unitOfWork.Fx.ListParticipantOrders(
-                    query.ParticipantPartyId,
+                    customer.PartyId,
                     Cursor(query.Cursor),
                     PaginationBudget.ListPageSize + PaginationBudget.QueryLookAhead);
 
@@ -230,11 +235,7 @@ public sealed class FxApplicationService : IFxApplicationService
         ArgumentNullException.ThrowIfNull(query);
 
         return writeGateway.ExecuteAsync(
-            unitOfWork => unitOfWork.Fx.FindMarket(query.MarketId) is null
-                ? Result<FxTradeHistoryPageView>.Failure(
-                    ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound)
-                : Result<FxTradeHistoryPageView>.Success(
-                    new FxTradeHistoryPageView([], null)),
+            unitOfWork => History(unitOfWork, query),
             cancellationToken);
     }
 
@@ -256,152 +257,35 @@ public sealed class FxApplicationService : IFxApplicationService
         return writeGateway.ExecuteAsync(unitOfWork => Cancel(unitOfWork, command), cancellationToken);
     }
 
-    private Result<FxOrderView> Place(IBankingUnitOfWork unitOfWork, PlaceFxOrderCommand command)
-    {
-        if (unitOfWork.Fx.FindMarket(command.MarketId) is not { } market)
-        {
-            return Result<FxOrderView>.Failure(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
-        }
-
-        if (!market.IsTradable)
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FxMarketNotTradable);
-        }
-
-        if (!FxPricing.IsLotMultiple(command.BaseMinor, market.LotSizeBaseMinor))
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.Validation, BankingErrorCodes.FxAmountNotRepresentable);
-        }
-
-        if (command.OrderType == FxOrderType.Limit
-            && !FxPricing.IsTickMultiple(command.PriceUnits ?? 0, market.TickSizePriceUnits))
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.Validation, BankingErrorCodes.FxPriceNotOnTick);
-        }
-
-        if (market.CurrentPolicyVersionId is not { } policyVersionId)
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FxMarketPolicyMissing);
-        }
-
-        if (Crosses(unitOfWork, market, command))
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.FxMatchingUnavailable);
-        }
-
-        if (command.OrderType != FxOrderType.Limit)
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.FxMatchingUnavailable);
-        }
-
-        FxOrder order;
-
-        try
-        {
-            order = FxOrder.Place(
-                FxOrderId.FromValue(idGenerator.NextId()),
-                market.Id,
-                FxParticipantKind.Customer,
-                command.ParticipantPartyId,
-                command.CustomerAccountId,
-                command.Side,
-                command.OrderType,
-                FxTimeInForce.GoodTilCancelled,
-                command.PriceUnits,
-                command.MaximumSlippageBps,
-                command.BaseMinor,
-                market.TakeOrderSequence(),
-                command.SourceFundingEndpointId,
-                command.DestinationSettlementEndpointId,
-                command.SourceHoldId,
-                policyVersionId,
-                clock.Now());
-        }
-        catch (InvariantViolationException)
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.Validation, BankingErrorCodes.FxOrderInvalid);
-        }
-
-        unitOfWork.Fx.AddOrder(order);
-        unitOfWork.Fx.UpdateMarket(market);
-        BumpOrderBook(unitOfWork, market.Id);
-
-        return Result<FxOrderView>.Success(ToView(order));
-    }
-
-    private Result<FxOrderView> Cancel(IBankingUnitOfWork unitOfWork, CancelFxOrderCommand command)
-    {
-        if (unitOfWork.Fx.FindOrder(command.FxOrderId) is not { } order
-            || order.ParticipantPartyId != command.ParticipantPartyId)
-        {
-            return Result<FxOrderView>.Failure(ErrorCategory.NotFound, BankingErrorCodes.FxOrderNotFound);
-        }
-
-        if (order.IsTerminal)
-        {
-            return Result<FxOrderView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FxOrderAlreadyTerminal);
-        }
-
-        UtcTimestamp now = clock.Now();
-
-        order.Cancel(now);
-        unitOfWork.Fx.UpdateOrder(order);
-
-        if (unitOfWork.Holds.Find(order.SourceHoldId) is { } hold && hold.Status == HoldStatus.Active)
-        {
-            hold.Release(now);
-            unitOfWork.Holds.Update(hold);
-        }
-
-        BumpOrderBook(unitOfWork, order.MarketId);
-
-        return Result<FxOrderView>.Success(ToView(order));
-    }
-
-    private static bool Crosses(
+    private Result<FxTradeHistoryPageView> History(
         IBankingUnitOfWork unitOfWork,
-        FxMarket market,
-        PlaceFxOrderCommand command)
+        GetFxHistoryQuery query)
     {
-        if (command.OrderType != FxOrderType.Limit || command.PriceUnits is not { } price)
+        if (unitOfWork.Fx.FindMarket(query.MarketId) is null)
         {
-            return true;
+            return Result<FxTradeHistoryPageView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
-        FxOrderSide opposite = command.Side == FxOrderSide.BuyBase
-            ? FxOrderSide.SellBase
-            : FxOrderSide.BuyBase;
+        IReadOnlyList<FxTradeRecord> fetched = unitOfWork.Fx.ListTrades(
+            query.MarketId,
+            Cursor(query.Cursor),
+            PaginationBudget.HistoryPageSize + PaginationBudget.QueryLookAhead);
 
-        IReadOnlyList<FxDepthLevel> best = unitOfWork.Fx.ReadDepth(market.Id, opposite, 1);
+        IReadOnlyList<FxTradeRecord> page = fetched.Count <= PaginationBudget.HistoryPageSize
+            ? fetched
+            : [.. fetched.Take(PaginationBudget.HistoryPageSize)];
 
-        if (best.Count == 0)
-        {
-            return false;
-        }
-
-        return command.Side == FxOrderSide.BuyBase
-            ? price >= best[0].PriceUnits
-            : price <= best[0].PriceUnits;
-    }
-
-    private void BumpOrderBook(IBankingUnitOfWork unitOfWork, FxMarketId marketId)
-    {
-        FxMarketSummary current = unitOfWork.Fx.FindSummary(marketId)
-            ?? new FxMarketSummary(marketId, null, null, 1, 1, clock.Now());
-
-        unitOfWork.Fx.UpsertSummary(current with
-        {
-            OrderBookVersion = checked(current.OrderBookVersion + 1),
-            UpdatedAt = clock.Now(),
-        });
+        return Result<FxTradeHistoryPageView>.Success(new FxTradeHistoryPageView(
+            [.. page.Select(static trade => new FxTradeHistoryItem(
+                trade.SequenceNo,
+                trade.PriceUnits,
+                trade.BaseMinor,
+                trade.QuoteMinor,
+                trade.ExecutedAt.UnixMilliseconds))],
+            fetched.Count > PaginationBudget.HistoryPageSize
+                ? page[^1].SequenceNo.ToString(CultureInfo.InvariantCulture)
+                : null));
     }
 
     private Result<FxRateVisualView> RateVisual(IBankingUnitOfWork unitOfWork, GetFxRateVisualQuery query)

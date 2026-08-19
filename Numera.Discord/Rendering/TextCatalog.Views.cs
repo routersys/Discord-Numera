@@ -77,6 +77,8 @@ internal static class ViewKeys
     public const string FxHistoryEmpty = "view.fx.history_empty";
     public const string FxOrderCancelled = "view.fx.order_cancelled";
 
+    public const string FxOrderPlaced = "view.fx.order_placed";
+
     public const string ShopStores = "view.shop.stores";
     public const string ShopStoresEmpty = "view.shop.stores_empty";
     public const string ShopProducts = "view.shop.products";
@@ -346,6 +348,9 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.FxHistory + ".description"] = "{count}件の約定があります。",
             [ViewKeys.FxHistoryEmpty + ".title"] = "約定がありません",
             [ViewKeys.FxHistoryEmpty + ".description"] = "この市場にはまだ約定がありません。",
+            [ViewKeys.FxOrderPlaced + ".title"] = "注文を受け付けました",
+            [ViewKeys.FxOrderPlaced + ".description"] =
+                "状態は{status}で、約定数量は{filled}、残数量は{remaining}です。",
             [ViewKeys.FxOrderCancelled + ".title"] = "注文を取り消しました",
             [ViewKeys.FxOrderCancelled + ".description"] = "注文の状態は{status}です。",
             [ViewKeys.StatusUnknown] = "状態を表示できません",

@@ -18,6 +18,12 @@ public sealed class FxEndpoints : IEconomyEndpoint
     private const int FiveMinuteBucket = 300;
     private const int HourBucket = 3600;
 
+    private const string TypeLimit = "LIMIT";
+
+    private const string TypeMarketIoc = "MARKET_IOC";
+
+    private const string TypeMarketFok = "MARKET_FOK";
+
     private readonly IFxApplicationService markets;
     private readonly ICustomerAccountApplicationService customers;
     private readonly ITextCatalog catalog;
@@ -202,7 +208,7 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         Result<FxOrderPageView> result = await markets
             .ListFxOrdersAsync(
-                new ListFxOrdersQuery(PartyId.FromValue(customer.Value.Id.Value), cursor),
+                new ListFxOrdersQuery(customer.Value.Id, cursor),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -270,8 +276,16 @@ public sealed class FxEndpoints : IEconomyEndpoint
         [EconomyChoice("基軸通貨を買う", "BUY_BASE")]
         [EconomyChoice("基軸通貨を売る", "SELL_BASE")]
         string side,
+        [EconomyOption("type", "注文の種類を選びます。", true)]
+        [EconomyChoice("指値", TypeLimit)]
+        [EconomyChoice("成行（残数量は失効）", TypeMarketIoc)]
+        [EconomyChoice("成行（全量約定のみ）", TypeMarketFok)]
+        string type,
         [EconomyOption("amount", "基軸通貨の数量を入力します。", true)] long amount,
-        [EconomyOption("price", "指値を入力します。", true)] long price,
+        [EconomyOption("source", "支払う通貨の口座を選びます。", true)] string source,
+        [EconomyOption("destination", "受け取る通貨の口座を選びます。", true)] string destination,
+        [EconomyOption("price", "指値の価格を入力します。", false)] string? price,
+        [EconomyOption("slippage", "成行の許容スリッページをbpsで入力します。", false)] string? slippage,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -281,14 +295,76 @@ public sealed class FxEndpoints : IEconomyEndpoint
             return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
         }
 
+        if (!DepositAccountReference.TryParse(source, out DepositAccountId sourceAccountId) ||
+            !DepositAccountReference.TryParse(destination, out DepositAccountId destinationAccountId))
+        {
+            return EndpointFailures.From(
+                ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+        }
+
+        FxOrderType orderType = type switch
+        {
+            TypeMarketIoc => FxOrderType.MarketIoc,
+            TypeMarketFok => FxOrderType.MarketFok,
+            _ => FxOrderType.Limit,
+        };
+
+        long? priceUnits = orderType == FxOrderType.Limit ? Number(price) : null;
+        int? slippageBps = orderType == FxOrderType.Limit ? null : (int?)Number(slippage);
+
+        if (orderType == FxOrderType.Limit && priceUnits is null)
+        {
+            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxPriceNotOnTick);
+        }
+
+        if (orderType != FxOrderType.Limit && slippageBps is null)
+        {
+            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxSlippageInvalid);
+        }
+
         Result<CustomerAccountStatusView> customer = await ResolveAsync(context, cancellationToken)
             .ConfigureAwait(false);
 
-        return customer.IsSuccess
-            ? EndpointFailures.From(
-                ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.FxMatchingUnavailable)
-            : EndpointFailures.From(customer.Error!);
+        if (!customer.IsSuccess)
+        {
+            return EndpointFailures.From(customer.Error!);
+        }
+
+        Result<FxOrderView> result = await markets
+            .PlaceFxOrderAsync(
+                new PlaceFxOrderCommand(
+                    EndpointAuthorization.ToActor(context),
+                    id,
+                    customer.Value.Id,
+                    side == "SELL_BASE" ? FxOrderSide.SellBase : FxOrderSide.BuyBase,
+                    orderType,
+                    amount,
+                    priceUnits,
+                    slippageBps,
+                    sourceAccountId,
+                    destinationAccountId,
+                    IdempotencyKey.Create(
+                        "fx-order", context.InteractionId.ToString(CultureInfo.InvariantCulture))),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? DiscordEndpointResponse.Message(
+                ViewKeys.FxOrderPlaced,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["status"] = Status(result.Value.Status.ToToken()),
+                    ["filled"] = result.Value.FilledBaseMinor.ToString(CultureInfo.InvariantCulture),
+                    ["remaining"] =
+                        result.Value.RemainingBaseMinor.ToString(CultureInfo.InvariantCulture),
+                })
+            : EndpointFailures.From(result.Error!);
     }
+
+    private static long? Number(string? text) =>
+        long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed)
+            ? parsed
+            : null;
 
     [EconomySlashCommand("cancel", "為替注文を取り消します。")]
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
@@ -316,8 +392,10 @@ public sealed class FxEndpoints : IEconomyEndpoint
             .CancelFxOrderAsync(
                 new CancelFxOrderCommand(
                     EndpointAuthorization.ToActor(context),
-                    PartyId.FromValue(customer.Value.Id.Value),
-                    id),
+                    customer.Value.Id,
+                    id,
+                    IdempotencyKey.Create(
+                        "fx-cancel", context.InteractionId.ToString(CultureInfo.InvariantCulture))),
                 cancellationToken)
             .ConfigureAwait(false);
 

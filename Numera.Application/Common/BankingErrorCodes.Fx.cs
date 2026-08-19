@@ -45,6 +45,16 @@ public static partial class BankingErrorCodes
 
     public static string FxBucketInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 147);
 
+    public static string FxOperatorFeeAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 148);
+
+    public static string FxMarketNoLiquidity { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 149);
+
+    public static string FxSlippageInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 148);
+
     public static string FxMatchingUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 140);
+
+    public static string FxInterbankSettlementUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 141);
 }

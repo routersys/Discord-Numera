@@ -21,6 +21,17 @@ internal sealed class SqliteFxRepository : IFxRepository
         "maker_received_gross_minor, maker_fee_charged_minor, taker_received_gross_minor, " +
         "taker_fee_charged_minor, created_at, terminal_at, version";
 
+    private const string TradeColumns =
+        "fx_trade_id, market_id, maker_order_id, taker_order_id, maker_fee_policy_version_id, " +
+        "taker_fee_policy_version_id, business_operation_id, price_units, base_minor, quote_minor, " +
+        "maker_fee_currency_id, maker_fee_minor, taker_fee_currency_id, taker_fee_minor, " +
+        "sequence_no, executed_at";
+
+    private const string BucketColumns =
+        "market_id, bucket_seconds, bucket_start, open_price_units, high_price_units, " +
+        "low_price_units, close_price_units, base_volume_minor, quote_volume_minor, " +
+        "last_trade_sequence_no, projection_version";
+
     private const string PolicyColumns =
         "fx_market_policy_version_id, market_id, maker_fee_bps, taker_fee_bps, " +
         "maximum_market_slippage_bps, effective_from, created_at, version";
@@ -421,11 +432,8 @@ internal sealed class SqliteFxRepository : IFxRepository
         long windowStart,
         long windowEnd)
     {
-        using SqliteCommand command = unitOfWork.CreateCommand("""
-            SELECT market_id, bucket_seconds, bucket_start, open_price_units, high_price_units,
-                   low_price_units, close_price_units, base_volume_minor, quote_volume_minor,
-                   last_trade_sequence_no, projection_version
-            FROM fx_ohlc_buckets
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {BucketColumns} FROM fx_ohlc_buckets
             WHERE market_id = $market AND bucket_seconds = $seconds
               AND bucket_start >= $start AND bucket_start < $end
             ORDER BY bucket_start ASC;
@@ -441,18 +449,7 @@ internal sealed class SqliteFxRepository : IFxRepository
 
         while (reader.Read())
         {
-            buckets.Add(new FxOhlcBucket(
-                FxMarketId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),
-                reader.GetInt32(1),
-                reader.GetInt64(2),
-                reader.GetInt64(3),
-                reader.GetInt64(4),
-                reader.GetInt64(5),
-                reader.GetInt64(6),
-                reader.GetInt64(7),
-                reader.GetInt64(8),
-                reader.GetInt64(9),
-                reader.GetInt64(10)));
+            buckets.Add(ReadBucket(reader));
         }
 
         return buckets;
@@ -577,6 +574,334 @@ internal sealed class SqliteFxRepository : IFxRepository
                 reader.GetInt64(5))
             : null;
     }
+
+    public void AddFundingEndpoint(FxFundingEndpointRecord endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO fx_funding_endpoints(fx_funding_endpoint_id, currency_id, endpoint_kind,
+                owner_party_id, deposit_account_id, ledger_account_id, bank_id, monetary_authority_id,
+                created_at)
+            VALUES($id, $currency, $kind, $owner, $deposit, $ledger, $bank, NULL, $created);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(endpoint.Id.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(endpoint.CurrencyId.Value));
+        command.Parameters.AddWithValue("$kind", endpoint.EndpointKind);
+        command.Parameters.AddWithValue("$owner", SqliteValueMapper.ToBlob(endpoint.OwnerPartyId.Value));
+        command.Parameters.AddWithValue("$deposit", Blob(endpoint.DepositAccountId?.Value));
+        command.Parameters.AddWithValue("$ledger", Blob(endpoint.LedgerAccountId?.Value));
+        command.Parameters.AddWithValue("$bank", Blob(endpoint.BankId?.Value));
+        command.Parameters.AddWithValue("$created", endpoint.CreatedAt.UnixMilliseconds);
+
+        command.ExecuteNonQuery();
+    }
+
+    public FxFundingEndpointRecord? FindFundingEndpoint(FxFundingEndpointId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT fx_funding_endpoint_id, currency_id, endpoint_kind, owner_party_id,
+                   deposit_account_id, ledger_account_id, bank_id, created_at
+            FROM fx_funding_endpoints WHERE fx_funding_endpoint_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new FxFundingEndpointRecord(
+                FxFundingEndpointId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                reader.GetString(2),
+                PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                reader.IsDBNull(4)
+                    ? null
+                    : DepositAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                reader.IsDBNull(5)
+                    ? null
+                    : LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+                reader.IsDBNull(6) ? null : BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(7)))
+            : null;
+    }
+
+    public void AddSettlementEndpoint(FxSettlementEndpointRecord endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO fx_settlement_endpoints(fx_settlement_endpoint_id, currency_id, endpoint_kind,
+                deposit_account_id, atm_terminal_id, customer_cash_holder_id, business_operation_id,
+                destination_ledger_account_id, destination_party_id, merchant_profile_id,
+                commerce_order_id, created_at)
+            VALUES($id, $currency, $kind, $deposit, NULL, NULL, $operation, $ledger, $party, NULL,
+                NULL, $created);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(endpoint.Id.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(endpoint.CurrencyId.Value));
+        command.Parameters.AddWithValue("$kind", endpoint.EndpointKind);
+        command.Parameters.AddWithValue("$deposit", Blob(endpoint.DepositAccountId?.Value));
+        command.Parameters.AddWithValue("$operation", Blob(endpoint.BusinessOperationId?.Value));
+        command.Parameters.AddWithValue("$ledger", Blob(endpoint.DestinationLedgerAccountId?.Value));
+        command.Parameters.AddWithValue("$party", Blob(endpoint.DestinationPartyId?.Value));
+        command.Parameters.AddWithValue("$created", endpoint.CreatedAt.UnixMilliseconds);
+
+        command.ExecuteNonQuery();
+    }
+
+    public FxSettlementEndpointRecord? FindSettlementEndpoint(FxSettlementEndpointId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT fx_settlement_endpoint_id, currency_id, endpoint_kind, deposit_account_id,
+                   business_operation_id, destination_ledger_account_id, destination_party_id, created_at
+            FROM fx_settlement_endpoints WHERE fx_settlement_endpoint_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new FxSettlementEndpointRecord(
+                FxSettlementEndpointId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                reader.GetString(2),
+                reader.IsDBNull(3)
+                    ? null
+                    : DepositAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                reader.IsDBNull(4)
+                    ? null
+                    : BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                reader.IsDBNull(5)
+                    ? null
+                    : LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+                reader.IsDBNull(6) ? null : PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(7)))
+            : null;
+    }
+
+    public void AddTrade(FxTradeRecord trade)
+    {
+        ArgumentNullException.ThrowIfNull(trade);
+
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            INSERT INTO fx_trades({TradeColumns})
+            VALUES($id, $market, $maker, $taker, $makerPolicy, $takerPolicy, $operation, $price,
+                $base, $quote, $makerFeeCurrency, $makerFee, $takerFeeCurrency, $takerFee, $sequence,
+                $executed);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(trade.Id.Value));
+        command.Parameters.AddWithValue("$market", SqliteValueMapper.ToBlob(trade.MarketId.Value));
+        command.Parameters.AddWithValue("$maker", SqliteValueMapper.ToBlob(trade.MakerOrderId.Value));
+        command.Parameters.AddWithValue("$taker", SqliteValueMapper.ToBlob(trade.TakerOrderId.Value));
+        command.Parameters.AddWithValue(
+            "$makerPolicy", SqliteValueMapper.ToBlob(trade.MakerFeePolicyVersionId.Value));
+        command.Parameters.AddWithValue(
+            "$takerPolicy", SqliteValueMapper.ToBlob(trade.TakerFeePolicyVersionId.Value));
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(trade.BusinessOperationId.Value));
+        command.Parameters.AddWithValue("$price", trade.PriceUnits);
+        command.Parameters.AddWithValue("$base", trade.BaseMinor);
+        command.Parameters.AddWithValue("$quote", trade.QuoteMinor);
+        command.Parameters.AddWithValue(
+            "$makerFeeCurrency", SqliteValueMapper.ToBlob(trade.MakerFeeCurrencyId.Value));
+        command.Parameters.AddWithValue("$makerFee", trade.MakerFee.Value);
+        command.Parameters.AddWithValue(
+            "$takerFeeCurrency", SqliteValueMapper.ToBlob(trade.TakerFeeCurrencyId.Value));
+        command.Parameters.AddWithValue("$takerFee", trade.TakerFee.Value);
+        command.Parameters.AddWithValue("$sequence", trade.SequenceNo);
+        command.Parameters.AddWithValue("$executed", trade.ExecutedAt.UnixMilliseconds);
+
+        command.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<FxTradeRecord> ListTrades(
+        FxMarketId marketId,
+        long? beforeSequenceNo,
+        int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {TradeColumns} FROM fx_trades
+            WHERE market_id = $market AND ($before IS NULL OR sequence_no < $before)
+            ORDER BY sequence_no DESC
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$market", SqliteValueMapper.ToBlob(marketId.Value));
+        command.Parameters.AddWithValue("$before", (object?)beforeSequenceNo ?? DBNull.Value);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<FxTradeRecord> trades = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            trades.Add(new FxTradeRecord(
+                FxTradeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                FxMarketId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                FxOrderId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+                FxOrderId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                FxMarketPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                FxMarketPolicyVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+                BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+                reader.GetInt64(7),
+                reader.GetInt64(8),
+                reader.GetInt64(9),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 10)),
+                MoneyMinor.FromMinor(reader.GetInt64(11)),
+                CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 12)),
+                MoneyMinor.FromMinor(reader.GetInt64(13)),
+                reader.GetInt64(14),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(15))));
+        }
+
+        return trades;
+    }
+
+    public void AddSettlementLeg(FxSettlementLeg leg)
+    {
+        ArgumentNullException.ThrowIfNull(leg);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO fx_settlement_legs(fx_settlement_leg_id, fx_trade_id, business_operation_id,
+                leg_kind, currency_id, source_funding_endpoint_id, destination_settlement_endpoint_id,
+                gross_minor, recipient_net_minor, operator_fee_minor,
+                operator_fee_treasury_ledger_account_id, status, created_at, version)
+            VALUES($id, $trade, $operation, $kind, $currency, $funding, $settlement, $gross, $net,
+                $fee, $treasury, $status, $created, $version);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(leg.Id.Value));
+        command.Parameters.AddWithValue("$trade", SqliteValueMapper.ToBlob(leg.TradeId.Value));
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(leg.BusinessOperationId.Value));
+        command.Parameters.AddWithValue("$kind", leg.LegKind.ToToken());
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(leg.CurrencyId.Value));
+        command.Parameters.AddWithValue(
+            "$funding", SqliteValueMapper.ToBlob(leg.SourceFundingEndpointId.Value));
+        command.Parameters.AddWithValue(
+            "$settlement", SqliteValueMapper.ToBlob(leg.DestinationSettlementEndpointId.Value));
+        command.Parameters.AddWithValue("$gross", leg.Gross.Value);
+        command.Parameters.AddWithValue("$net", leg.RecipientNet.Value);
+        command.Parameters.AddWithValue("$fee", leg.OperatorFee.Value);
+        command.Parameters.AddWithValue(
+            "$treasury", Blob(leg.OperatorFeeTreasuryLedgerAccountId?.Value));
+        command.Parameters.AddWithValue("$status", leg.Status.ToToken());
+        command.Parameters.AddWithValue("$created", leg.CreatedAt.UnixMilliseconds);
+        command.Parameters.AddWithValue("$version", leg.Version);
+
+        command.ExecuteNonQuery();
+    }
+
+    public void AddSettlementLegComponent(FxSettlementLegComponent component)
+    {
+        ArgumentNullException.ThrowIfNull(component);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO fx_settlement_leg_components(fx_settlement_leg_component_id,
+                fx_settlement_leg_id, component_kind, source_party_id, destination_party_id,
+                source_bank_id, destination_bank_id, settlement_path,
+                destination_settlement_endpoint_id, destination_ledger_account_id, amount_minor,
+                clearing_instruction_id, status, created_at, settled_at, version)
+            VALUES($id, $leg, $kind, $sourceParty, $destinationParty, $sourceBank, $destinationBank,
+                $path, $settlement, $ledger, $amount, $clearing, $status, $created, $settled,
+                $version);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(component.Id.Value));
+        command.Parameters.AddWithValue("$leg", SqliteValueMapper.ToBlob(component.LegId.Value));
+        command.Parameters.AddWithValue("$kind", component.ComponentKind.ToToken());
+        command.Parameters.AddWithValue(
+            "$sourceParty", SqliteValueMapper.ToBlob(component.SourcePartyId.Value));
+        command.Parameters.AddWithValue(
+            "$destinationParty", SqliteValueMapper.ToBlob(component.DestinationPartyId.Value));
+        command.Parameters.AddWithValue("$sourceBank", Blob(component.SourceBankId?.Value));
+        command.Parameters.AddWithValue("$destinationBank", Blob(component.DestinationBankId?.Value));
+        command.Parameters.AddWithValue("$path", component.SettlementPath.ToToken());
+        command.Parameters.AddWithValue(
+            "$settlement", Blob(component.DestinationSettlementEndpointId?.Value));
+        command.Parameters.AddWithValue("$ledger", Blob(component.DestinationLedgerAccountId?.Value));
+        command.Parameters.AddWithValue("$amount", component.Amount.Value);
+        command.Parameters.AddWithValue("$clearing", Blob(component.ClearingInstructionId?.Value));
+        command.Parameters.AddWithValue("$status", component.Status.ToToken());
+        command.Parameters.AddWithValue("$created", component.CreatedAt.UnixMilliseconds);
+        command.Parameters.AddWithValue(
+            "$settled", (object?)component.SettledAt?.UnixMilliseconds ?? DBNull.Value);
+        command.Parameters.AddWithValue("$version", component.Version);
+
+        command.ExecuteNonQuery();
+    }
+
+    public FxOhlcBucket? FindBucket(FxMarketId marketId, int bucketSeconds, long bucketStart)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {BucketColumns} FROM fx_ohlc_buckets
+            WHERE market_id = $market AND bucket_seconds = $seconds AND bucket_start = $start;
+            """);
+
+        command.Parameters.AddWithValue("$market", SqliteValueMapper.ToBlob(marketId.Value));
+        command.Parameters.AddWithValue("$seconds", bucketSeconds);
+        command.Parameters.AddWithValue("$start", bucketStart);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadBucket(reader) : null;
+    }
+
+    public void UpsertBucket(FxOhlcBucket bucket)
+    {
+        ArgumentNullException.ThrowIfNull(bucket);
+
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            INSERT INTO fx_ohlc_buckets({BucketColumns})
+            VALUES($market, $seconds, $start, $open, $high, $low, $close, $baseVolume, $quoteVolume,
+                $sequence, $projection)
+            ON CONFLICT(market_id, bucket_seconds, bucket_start) DO UPDATE
+            SET open_price_units = excluded.open_price_units,
+                high_price_units = excluded.high_price_units,
+                low_price_units = excluded.low_price_units,
+                close_price_units = excluded.close_price_units,
+                base_volume_minor = excluded.base_volume_minor,
+                quote_volume_minor = excluded.quote_volume_minor,
+                last_trade_sequence_no = excluded.last_trade_sequence_no,
+                projection_version = excluded.projection_version;
+            """);
+
+        command.Parameters.AddWithValue("$market", SqliteValueMapper.ToBlob(bucket.MarketId.Value));
+        command.Parameters.AddWithValue("$seconds", bucket.BucketSeconds);
+        command.Parameters.AddWithValue("$start", bucket.BucketStart);
+        command.Parameters.AddWithValue("$open", bucket.OpenPriceUnits);
+        command.Parameters.AddWithValue("$high", bucket.HighPriceUnits);
+        command.Parameters.AddWithValue("$low", bucket.LowPriceUnits);
+        command.Parameters.AddWithValue("$close", bucket.ClosePriceUnits);
+        command.Parameters.AddWithValue("$baseVolume", bucket.BaseVolumeMinor);
+        command.Parameters.AddWithValue("$quoteVolume", bucket.QuoteVolumeMinor);
+        command.Parameters.AddWithValue("$sequence", bucket.LastTradeSequenceNo);
+        command.Parameters.AddWithValue("$projection", bucket.ProjectionVersion);
+
+        command.ExecuteNonQuery();
+    }
+
+    private static FxOhlcBucket ReadBucket(SqliteDataReader reader) =>
+        new(
+            FxMarketId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+            reader.GetInt32(1),
+            reader.GetInt64(2),
+            reader.GetInt64(3),
+            reader.GetInt64(4),
+            reader.GetInt64(5),
+            reader.GetInt64(6),
+            reader.GetInt64(7),
+            reader.GetInt64(8),
+            reader.GetInt64(9),
+            reader.GetInt64(10));
+
+    private static object Blob(EntityIdValue? value) =>
+        value is { } id ? SqliteValueMapper.ToBlob(id) : DBNull.Value;
 
     private static void BindTreasuryAccount(
         SqliteCommand command,

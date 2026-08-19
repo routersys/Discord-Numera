@@ -35,6 +35,44 @@ public sealed record FxOhlcBucket(
 
 public sealed record FxDepthLevel(long PriceUnits, long BaseMinor);
 
+public sealed record FxFundingEndpointRecord(
+    FxFundingEndpointId Id,
+    CurrencyId CurrencyId,
+    string EndpointKind,
+    PartyId OwnerPartyId,
+    DepositAccountId? DepositAccountId,
+    LedgerAccountId? LedgerAccountId,
+    BankId? BankId,
+    UtcTimestamp CreatedAt);
+
+public sealed record FxSettlementEndpointRecord(
+    FxSettlementEndpointId Id,
+    CurrencyId CurrencyId,
+    string EndpointKind,
+    DepositAccountId? DepositAccountId,
+    BusinessOperationId? BusinessOperationId,
+    LedgerAccountId? DestinationLedgerAccountId,
+    PartyId? DestinationPartyId,
+    UtcTimestamp CreatedAt);
+
+public sealed record FxTradeRecord(
+    FxTradeId Id,
+    FxMarketId MarketId,
+    FxOrderId MakerOrderId,
+    FxOrderId TakerOrderId,
+    FxMarketPolicyVersionId MakerFeePolicyVersionId,
+    FxMarketPolicyVersionId TakerFeePolicyVersionId,
+    BusinessOperationId BusinessOperationId,
+    long PriceUnits,
+    long BaseMinor,
+    long QuoteMinor,
+    CurrencyId MakerFeeCurrencyId,
+    MoneyMinor MakerFee,
+    CurrencyId TakerFeeCurrencyId,
+    MoneyMinor TakerFee,
+    long SequenceNo,
+    UtcTimestamp ExecutedAt);
+
 public sealed record BankTreasuryFxAccountRecord(
     BankTreasuryFxAccountId Id,
     BankId BankId,
@@ -88,6 +126,26 @@ public interface IFxRepository
         int bucketSeconds,
         long windowStart,
         long windowEnd);
+
+    void AddFundingEndpoint(FxFundingEndpointRecord endpoint);
+
+    FxFundingEndpointRecord? FindFundingEndpoint(FxFundingEndpointId id);
+
+    void AddSettlementEndpoint(FxSettlementEndpointRecord endpoint);
+
+    FxSettlementEndpointRecord? FindSettlementEndpoint(FxSettlementEndpointId id);
+
+    void AddTrade(FxTradeRecord trade);
+
+    IReadOnlyList<FxTradeRecord> ListTrades(FxMarketId marketId, long? beforeSequenceNo, int limit);
+
+    void AddSettlementLeg(FxSettlementLeg leg);
+
+    void AddSettlementLegComponent(FxSettlementLegComponent component);
+
+    FxOhlcBucket? FindBucket(FxMarketId marketId, int bucketSeconds, long bucketStart);
+
+    void UpsertBucket(FxOhlcBucket bucket);
 }
 
 public partial interface IBankingUnitOfWork
