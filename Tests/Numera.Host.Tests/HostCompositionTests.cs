@@ -61,6 +61,8 @@ public sealed class HostCompositionTests
             {
                 "bank:v1:btn:transfer-execute:*",
                 "bank:v1:btn:transfer-input:*",
+                "bank:v1:sel:panel-action:*",
+                "bank:v1:sel:panel-category:*",
                 "bank:v1:sel:transfer-source:*",
             },
             interactions.ComponentCommands.Select(static command => command.Name)

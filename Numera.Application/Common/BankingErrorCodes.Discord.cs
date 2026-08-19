@@ -13,4 +13,7 @@ public static partial class BankingErrorCodes
 
     public static string DiscordCredentialMissing { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 3);
+
+    public static string ManagementActionUnknown { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 251);
 }

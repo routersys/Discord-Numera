@@ -1,3 +1,5 @@
+using Numera.Discord.Sessions;
+
 namespace Numera.Discord.Rendering;
 
 internal static class ViewKeys
@@ -15,6 +17,18 @@ internal static class ViewKeys
     public const string ManageCurrencyBurned = "view.manage.currency_burned";
     public const string BankAccountClosing = "view.bank.closing";
     public const string ManagePanel = "view.manage.panel";
+    public const string ManagePanelPlaceholder = "view.manage.panel.placeholder";
+    public const string ManagePanelCategory = "view.manage.panel.category";
+    public const string ManagePanelActionPlaceholder = "view.manage.panel.action.placeholder";
+    public const string ManagePanelRoute = "view.manage.panel.route";
+    public const string ManagePanelPending = "view.manage.panel.pending";
+
+    public static string PanelCategoryLabel(string category) =>
+        "view.manage.panel.category." + category;
+
+    public static string PanelActionLabel(string category, string action) =>
+        "view.manage.panel.category." + category + "." + action;
+
     public const string SystemPanel = "view.system.panel";
     public const string SystemCommandsSynced = "view.system.commands_synced";
     public const string AccountLinkIssued = "view.account.link_issued";
@@ -155,8 +169,58 @@ public static partial class CanonicalTextCatalog
                 "{amount} を償却しました。発行済のベースマネーは {baseMoneySupply} です。",
             [ViewKeys.BankAccountClosing + ".title"] = "解約を申し込みました",
             [ViewKeys.BankAccountClosing + ".description"] = "口座の解約手続を開始しました。",
+            [ViewKeys.ManagePanelPlaceholder] = "管理項目を選択",
+            [ViewKeys.ManagePanelCategory + ".title"] = "{category}",
+            [ViewKeys.ManagePanelCategory + ".description"] = "操作を選択してください。",
+            [ViewKeys.ManagePanelActionPlaceholder] = "操作を選択",
+            [ViewKeys.ManagePanelRoute + ".title"] = "{action}",
+            [ViewKeys.ManagePanelRoute + ".description"] = "{category} の {action} は {route} から実行します。",
+            [ViewKeys.ManagePanelPending + ".title"] = "{action}",
+            [ViewKeys.ManagePanelPending + ".description"] = "{category} の {action} は編集画面を実装していません。",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.EconomyCalendar)] = "経済・営業日",
+            [ViewKeys.PanelActionLabel("economy-calendar", "calendar")] = "営業日カレンダー",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.CurrencyIssuance)] = "通貨・発行",
+            [ViewKeys.PanelActionLabel("currency-issuance", "currency-create")] = "通貨の作成",
+            [ViewKeys.PanelActionLabel("currency-issuance", "currency-issue")] = "追加発行",
+            [ViewKeys.PanelActionLabel("currency-issuance", "currency-burn")] = "償却",
+            [ViewKeys.PanelActionLabel("currency-issuance", "currency-edit")] = "通貨情報の変更",
+            [ViewKeys.PanelActionLabel("currency-issuance", "currency-retire")] = "通貨の廃止",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.CurrencyTrust)] = "通貨信頼性",
+            [ViewKeys.PanelActionLabel("currency-trust", "trust")] = "信頼性の審査",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.BankBranch)] = "銀行・支店",
+            [ViewKeys.PanelActionLabel("bank-branch", "bank-create")] = "銀行の設立",
+            [ViewKeys.PanelActionLabel("bank-branch", "bank-edit")] = "銀行方針の更新",
+            [ViewKeys.PanelActionLabel("bank-branch", "bank-retire")] = "銀行の廃止",
+            [ViewKeys.PanelActionLabel("bank-branch", "branch")] = "支店の管理",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.BankOperator)] = "銀行運営権限",
+            [ViewKeys.PanelActionLabel("bank-operator", "operator-grant")] = "運営者の権限付与",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.DepositProduct)] = "預金商品・口座開設",
+            [ViewKeys.PanelActionLabel("deposit-product", "account-product")] = "預金商品の版",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.FeeLimitDormancy)] = "手数料・取引上限・休眠",
+            [ViewKeys.PanelActionLabel("fee-limit-dormancy", "fee-schedule")] = "手数料表の版",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.CardDesign)] = "カード・銀行デザイン",
+            [ViewKeys.PanelActionLabel("card-design", "card-design")] = "カード意匠の版",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.AtmCash)] = "ATM・現金・設置メッセージ",
+            [ViewKeys.PanelActionLabel("atm-cash", "atm-network")] = "ATM 網の管理",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.MerchantCommerce)] = "加盟店・商品・定期決済",
+            [ViewKeys.PanelActionLabel("merchant-commerce", "merchant-profile")] = "加盟店の管理",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.PaymentNetwork)] = "決済参加・Payment Network",
+            [ViewKeys.PanelActionLabel("payment-network", "network-policy")] = "決済網方針の版",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.FxMarket)] = "為替市場",
+            [ViewKeys.PanelActionLabel("fx-market", "fx-market")] = "為替市場の管理",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.CentralBank)] = "中央銀行・為替介入",
+            [ViewKeys.PanelActionLabel("central-bank", "reserve-position")] = "準備資産の管理",
+            [ViewKeys.PanelActionLabel("central-bank", "intervention")] = "為替介入",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.DepositInsurance)] = "預金保険",
+            [ViewKeys.PanelActionLabel("deposit-insurance", "insurance-scheme")] = "保険制度の版",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.PrudentialResolution)] = "健全性・Resolution",
+            [ViewKeys.PanelActionLabel("prudential-resolution", "prudential-policy")] = "健全性方針の版",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.Presentation)] = "表示設定",
+            [ViewKeys.PanelActionLabel("presentation", "presentation-profile")] = "表示プロファイルの版",
+            [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.Audit)] = "監査",
+            [ViewKeys.PanelActionLabel("audit", "reconcile")] = "整合性検査",
             [ViewKeys.ManagePanel + ".title"] = "管理メニュー",
-            [ViewKeys.ManagePanel + ".description"] = "銀行と通貨の管理は /manage の各サブコマンドから行います。",
+            [ViewKeys.ManagePanel + ".description"] = "管理する項目を選択してください。",
             [ViewKeys.SystemPanel + ".title"] = "システムメニュー",
             [ViewKeys.SystemPanel + ".description"] = "Command 同期は /system commands-sync から行います。",
             [ViewKeys.SystemCommandsSynced + ".title"] = "Command を同期しました",

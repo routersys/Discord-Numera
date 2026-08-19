@@ -7,21 +7,68 @@ using Numera.Discord.Rendering;
 namespace Numera.Discord.Endpoints;
 
 [EconomyCommandGroup("manage", "経済圏を管理します。")]
-public sealed class ManagePanelEndpoints : IEconomyEndpoint
+public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
 {
     private static readonly IReadOnlyDictionary<string, string> NoViewData =
         new Dictionary<string, string>(StringComparer.Ordinal);
 
+    private readonly Sessions.InteractionSessionService sessions;
+    private readonly ITextCatalog catalog;
+
+    public ManagePanelEndpoints(Sessions.InteractionSessionService sessions, ITextCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(sessions);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        this.sessions = sessions;
+        this.catalog = catalog;
+    }
+
     [EconomySlashCommand("panel", "管理メニューを表示します。")]
     [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
-    public Task<DiscordEndpointResponse> ShowAsync(
+    public async Task<DiscordEndpointResponse> ShowAsync(
         DiscordEndpointContext context,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        cancellationToken.ThrowIfCancellationRequested();
 
-        return Task.FromResult(DiscordEndpointResponse.Message(ViewKeys.ManagePanel, NoViewData));
+        if (sessions.FindEconomyScope(context.GuildId) is not { } scope)
+        {
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
+        Result<Sessions.InteractionSessionTicket> ticket = await sessions
+            .OpenAsync(
+                new Sessions.OpenInteractionSessionRequest(
+                    context.UserId,
+                    context.GuildId,
+                    scope,
+                    Sessions.ManagePanelFlow.FlowType,
+                    Sessions.ManagePanelFlow.CategoryState,
+                    Sessions.ManagePanelPayloadCodec.Write(Sessions.ManagePanelPayloadCodec.Empty)),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!ticket.IsSuccess)
+        {
+            return EndpointFailures.From(ticket.Error!);
+        }
+
+        return DiscordEndpointResponse.Message(
+            ViewKeys.ManagePanel,
+            NoViewData,
+            DiscordResponseBody.WithComponents(new DiscordResponseComponents(
+                new DiscordResponseSelect(
+                    DiscordCustomId.Select(
+                        Sessions.ManagePanelFlow.CategoryAction, ticket.Value.RawToken),
+                    ViewKeys.ManagePanelPlaceholder,
+                    [
+                        .. Sessions.ManagementPanelCatalog.Categories.Select(
+                            category => new DiscordResponseSelectOption(
+                                catalog.Resolve(ViewKeys.PanelCategoryLabel(category.Value)),
+                                category.Value)),
+                    ]),
+                [])));
     }
 }
 

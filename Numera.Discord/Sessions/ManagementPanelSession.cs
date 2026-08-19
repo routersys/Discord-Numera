@@ -1,0 +1,149 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Numera.Discord.Sessions;
+
+internal static class ManagePanelFlow
+{
+    internal const string FlowType = "MANAGE_PANEL";
+    internal const string CategoryState = "CATEGORY_SELECT";
+    internal const string ActionState = "ACTION_SELECT";
+    internal const string ReviewState = "REVIEW";
+    internal const string CategoryAction = "panel-category";
+    internal const string ActionAction = "panel-action";
+    internal const string BackAction = "panel-back";
+}
+
+internal sealed record ManagePanelPayload(
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("scope")] string TargetGuildId);
+
+[JsonSerializable(typeof(ManagePanelPayload))]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Default)]
+internal sealed partial class ManagePanelPayloadContext : JsonSerializerContext;
+
+internal static class ManagePanelPayloadCodec
+{
+    internal static readonly ManagePanelPayload Empty =
+        new(string.Empty, string.Empty, string.Empty);
+
+    internal static string Write(ManagePanelPayload payload) =>
+        JsonSerializer.Serialize(payload, ManagePanelPayloadContext.Default.ManagePanelPayload);
+
+    internal static ManagePanelPayload Read(string json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return Empty;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize(
+                json, ManagePanelPayloadContext.Default.ManagePanelPayload) ?? Empty;
+        }
+        catch (JsonException)
+        {
+            return Empty;
+        }
+    }
+}
+
+internal sealed record ManagementPanelAction(string Value, string Route)
+{
+    internal bool IsImplemented => Route.Length > 0;
+}
+
+internal sealed record ManagementPanelCategory(
+    string Value,
+    IReadOnlyList<ManagementPanelAction> Actions);
+
+internal static class ManagementPanelCatalog
+{
+    internal const string EconomyCalendar = "economy-calendar";
+    internal const string CurrencyIssuance = "currency-issuance";
+    internal const string CurrencyTrust = "currency-trust";
+    internal const string BankBranch = "bank-branch";
+    internal const string BankOperator = "bank-operator";
+    internal const string DepositProduct = "deposit-product";
+    internal const string FeeLimitDormancy = "fee-limit-dormancy";
+    internal const string CardDesign = "card-design";
+    internal const string AtmCash = "atm-cash";
+    internal const string MerchantCommerce = "merchant-commerce";
+    internal const string PaymentNetwork = "payment-network";
+    internal const string FxMarket = "fx-market";
+    internal const string CentralBank = "central-bank";
+    internal const string DepositInsurance = "deposit-insurance";
+    internal const string PrudentialResolution = "prudential-resolution";
+    internal const string Presentation = "presentation";
+    internal const string Audit = "audit";
+
+    internal const string Pending = "";
+
+    internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
+    [
+        new(EconomyCalendar, [new("calendar", Pending)]),
+        new(CurrencyIssuance,
+        [
+            new("currency-create", "/manage currency-create"),
+            new("currency-issue", "/manage currency-issue"),
+            new("currency-burn", "/manage currency-burn"),
+            new("currency-edit", "/manage currency-edit"),
+            new("currency-retire", "/manage currency-retire"),
+        ]),
+        new(CurrencyTrust, [new("trust", Pending)]),
+        new(BankBranch,
+        [
+            new("bank-create", "/manage bank-create"),
+            new("bank-edit", "/manage bank-edit"),
+            new("bank-retire", "/manage bank-retire"),
+            new("branch", Pending),
+        ]),
+        new(BankOperator, [new("operator-grant", Pending)]),
+        new(DepositProduct, [new("account-product", Pending)]),
+        new(FeeLimitDormancy, [new("fee-schedule", Pending)]),
+        new(CardDesign, [new("card-design", Pending)]),
+        new(AtmCash, [new("atm-network", Pending)]),
+        new(MerchantCommerce, [new("merchant-profile", Pending)]),
+        new(PaymentNetwork, [new("network-policy", Pending)]),
+        new(FxMarket, [new("fx-market", "/manage fx-market")]),
+        new(CentralBank,
+        [
+            new("reserve-position", "/manage bank-asset"),
+            new("intervention", Pending),
+        ]),
+        new(DepositInsurance, [new("insurance-scheme", Pending)]),
+        new(PrudentialResolution, [new("prudential-policy", Pending)]),
+        new(Presentation, [new("presentation-profile", Pending)]),
+        new(Audit, [new("reconcile", "/system reconcile")]),
+    ];
+
+    internal static ManagementPanelCategory? Find(string value)
+    {
+        foreach (ManagementPanelCategory category in Categories)
+        {
+            if (string.Equals(category.Value, value, StringComparison.Ordinal))
+            {
+                return category;
+            }
+        }
+
+        return null;
+    }
+
+    internal static ManagementPanelAction? FindAction(ManagementPanelCategory category, string value)
+    {
+        ArgumentNullException.ThrowIfNull(category);
+
+        foreach (ManagementPanelAction action in category.Actions)
+        {
+            if (string.Equals(action.Value, value, StringComparison.Ordinal))
+            {
+                return action;
+            }
+        }
+
+        return null;
+    }
+}
