@@ -55,6 +55,4 @@ public static partial class BankingErrorCodes
     public static string FxMatchingUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 140);
 
-    public static string FxInterbankSettlementUnavailable { get; } =
-        ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 141);
 }

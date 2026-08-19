@@ -44,6 +44,16 @@ public sealed class SqliteBankRepository : IBankRepository
         return reader.Read() ? Read(reader) : null;
     }
 
+    public Bank? FindByParty(PartyId partyId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand(
+            $"SELECT {Columns} FROM banks WHERE party_id = $party;");
+        command.Parameters.AddWithValue("$party", SqliteValueMapper.ToBlob(partyId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? Read(reader) : null;
+    }
+
     private static Bank Read(SqliteDataReader reader) => Bank.Rehydrate(
         BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
         EconomyScopeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),

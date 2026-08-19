@@ -452,6 +452,15 @@ public static class FxSettlementCatalog
         }
     }
 
+    public static FxSettlementPath ParsePathToken(ReadOnlySpan<char> token) => token switch
+    {
+        "INTERNAL_BOOK" => FxSettlementPath.InternalBook,
+        "BANK_CLEARING" => FxSettlementPath.BankClearing,
+        "CENTRAL_BANK_DIRECT" => FxSettlementPath.CentralBankDirect,
+        _ => throw InvariantViolationException.Create(
+            InvariantViolationCode.FxSettlementComponentPathInvalid),
+    };
+
     public static FxSettlementLegStatus ParseToken(ReadOnlySpan<char> token) =>
         TryParseToken(token, out FxSettlementLegStatus status)
             ? status

@@ -143,6 +143,17 @@ public interface IFxRepository
 
     void AddSettlementLegComponent(FxSettlementLegComponent component);
 
+    void UpdateSettlementLeg(FxSettlementLeg leg);
+
+    void UpdateSettlementLegComponent(FxSettlementLegComponent component);
+
+    FxSettlementLeg? FindSettlementLeg(FxSettlementLegId id);
+
+    IReadOnlyList<FxSettlementLegComponent> ListSettlementLegComponents(FxSettlementLegId legId);
+
+    IReadOnlyList<FxSettlementLegComponent> ListClearingComponents(
+        ClearingInstructionId clearingInstructionId);
+
     FxOhlcBucket? FindBucket(FxMarketId marketId, int bucketSeconds, long bucketStart);
 
     void UpsertBucket(FxOhlcBucket bucket);

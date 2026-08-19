@@ -27,6 +27,18 @@ internal sealed class SqliteFxRepository : IFxRepository
         "maker_fee_currency_id, maker_fee_minor, taker_fee_currency_id, taker_fee_minor, " +
         "sequence_no, executed_at";
 
+    private const string LegColumns =
+        "fx_settlement_leg_id, fx_trade_id, business_operation_id, leg_kind, currency_id, " +
+        "source_funding_endpoint_id, destination_settlement_endpoint_id, gross_minor, " +
+        "recipient_net_minor, operator_fee_minor, operator_fee_treasury_ledger_account_id, status, " +
+        "created_at, version";
+
+    private const string ComponentColumns =
+        "fx_settlement_leg_component_id, fx_settlement_leg_id, component_kind, source_party_id, " +
+        "destination_party_id, source_bank_id, destination_bank_id, settlement_path, " +
+        "destination_settlement_endpoint_id, destination_ledger_account_id, amount_minor, " +
+        "clearing_instruction_id, status, created_at, settled_at, version";
+
     private const string BucketColumns =
         "market_id, bucket_seconds, bucket_start, open_price_units, high_price_units, " +
         "low_price_units, close_price_units, base_volume_minor, quote_volume_minor, " +
@@ -835,6 +847,147 @@ internal sealed class SqliteFxRepository : IFxRepository
 
         command.ExecuteNonQuery();
     }
+
+    public void UpdateSettlementLeg(FxSettlementLeg leg)
+    {
+        ArgumentNullException.ThrowIfNull(leg);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE fx_settlement_legs SET status = $status, version = $version
+            WHERE fx_settlement_leg_id = $id AND version = $expected;
+            """);
+
+        command.Parameters.AddWithValue("$status", leg.Status.ToToken());
+        command.Parameters.AddWithValue("$version", leg.Version);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(leg.Id.Value));
+        command.Parameters.AddWithValue("$expected", leg.PersistedVersion);
+
+        if (command.ExecuteNonQuery() != 1)
+        {
+            throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
+        }
+    }
+
+    public void UpdateSettlementLegComponent(FxSettlementLegComponent component)
+    {
+        ArgumentNullException.ThrowIfNull(component);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE fx_settlement_leg_components
+            SET status = $status, settled_at = $settled, version = $version
+            WHERE fx_settlement_leg_component_id = $id AND version = $expected;
+            """);
+
+        command.Parameters.AddWithValue("$status", component.Status.ToToken());
+        command.Parameters.AddWithValue(
+            "$settled", (object?)component.SettledAt?.UnixMilliseconds ?? DBNull.Value);
+        command.Parameters.AddWithValue("$version", component.Version);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(component.Id.Value));
+        command.Parameters.AddWithValue("$expected", component.PersistedVersion);
+
+        if (command.ExecuteNonQuery() != 1)
+        {
+            throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
+        }
+    }
+
+    public FxSettlementLeg? FindSettlementLeg(FxSettlementLegId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {LegColumns} FROM fx_settlement_legs WHERE fx_settlement_leg_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadLeg(reader) : null;
+    }
+
+    public IReadOnlyList<FxSettlementLegComponent> ListSettlementLegComponents(FxSettlementLegId legId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {ComponentColumns} FROM fx_settlement_leg_components
+            WHERE fx_settlement_leg_id = $leg ORDER BY component_kind ASC;
+            """);
+
+        command.Parameters.AddWithValue("$leg", SqliteValueMapper.ToBlob(legId.Value));
+
+        return ReadComponents(command);
+    }
+
+    public IReadOnlyList<FxSettlementLegComponent> ListClearingComponents(
+        ClearingInstructionId clearingInstructionId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {ComponentColumns} FROM fx_settlement_leg_components
+            WHERE clearing_instruction_id = $instruction ORDER BY component_kind ASC;
+            """);
+
+        command.Parameters.AddWithValue(
+            "$instruction", SqliteValueMapper.ToBlob(clearingInstructionId.Value));
+
+        return ReadComponents(command);
+    }
+
+    private static IReadOnlyList<FxSettlementLegComponent> ReadComponents(SqliteCommand command)
+    {
+        List<FxSettlementLegComponent> components = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            components.Add(ReadComponent(reader));
+        }
+
+        return components;
+    }
+
+    private static FxSettlementLeg ReadLeg(SqliteDataReader reader) =>
+        FxSettlementLeg.Rehydrate(
+            FxSettlementLegId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+            FxTradeId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+            BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+            reader.GetString(3) == "BASE" ? FxSettlementLegKind.Base : FxSettlementLegKind.Quote,
+            CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+            FxFundingEndpointId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+            FxSettlementEndpointId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+            MoneyMinor.FromMinor(reader.GetInt64(7)),
+            MoneyMinor.FromMinor(reader.GetInt64(8)),
+            MoneyMinor.FromMinor(reader.GetInt64(9)),
+            reader.IsDBNull(10)
+                ? null
+                : LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 10)),
+            FxSettlementCatalog.ParseToken(reader.GetString(11)),
+            UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(12)),
+            reader.GetInt64(13));
+
+    private static FxSettlementLegComponent ReadComponent(SqliteDataReader reader) =>
+        FxSettlementLegComponent.Rehydrate(
+            FxSettlementLegComponentId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+            FxSettlementLegId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+            reader.GetString(2) == "RECIPIENT_NET"
+                ? FxSettlementComponentKind.RecipientNet
+                : FxSettlementComponentKind.OperatorFee,
+            PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+            PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+            reader.IsDBNull(5) ? null : BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+            reader.IsDBNull(6) ? null : BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+            FxSettlementCatalog.ParsePathToken(reader.GetString(7)),
+            reader.IsDBNull(8)
+                ? null
+                : FxSettlementEndpointId.FromValue(SqliteValueMapper.ReadEntityId(reader, 8)),
+            reader.IsDBNull(9)
+                ? null
+                : LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 9)),
+            MoneyMinor.FromMinor(reader.GetInt64(10)),
+            reader.IsDBNull(11)
+                ? null
+                : ClearingInstructionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 11)),
+            FxSettlementCatalog.ParseComponentToken(reader.GetString(12)),
+            UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(13)),
+            reader.IsDBNull(14) ? null : UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(14)),
+            reader.GetInt64(15));
 
     public FxOhlcBucket? FindBucket(FxMarketId marketId, int bucketSeconds, long bucketStart)
     {

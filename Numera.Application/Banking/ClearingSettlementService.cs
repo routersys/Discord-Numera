@@ -91,7 +91,7 @@ internal sealed class ClearingSettlementService
         BusinessDate businessDate = BusinessDateOf(now);
 
         Result<ParticipantSettlement[]> participants = ResolveParticipants(
-            unitOfWork, positions, cycle.CurrencyId);
+            unitOfWork, positions, cycle.CurrencyId, ForeignSplits(unitOfWork, cycleId));
 
         if (!participants.IsSuccess)
         {
@@ -141,6 +141,8 @@ internal sealed class ClearingSettlementService
             unitOfWork.Clearing.UpdateInstruction(instruction);
             settledOperations.Add(instruction.BusinessOperationId);
 
+            SettleFxComponents(unitOfWork, instruction.Id, now);
+
             if (instruction.PaymentOrderId is not { } orderId ||
                 unitOfWork.PaymentOrders.Find(orderId) is not { } order ||
                 order.Status != PaymentOrderStatus.Accepted)
@@ -159,6 +161,43 @@ internal sealed class ClearingSettlementService
 
         return Result<ClearingSettlementOutcome>.Success(
             new ClearingSettlementOutcome(cycleId, settledOperations));
+    }
+
+    private static void SettleFxComponents(
+        IBankingUnitOfWork unitOfWork,
+        ClearingInstructionId instructionId,
+        UtcTimestamp now)
+    {
+        foreach (FxSettlementLegComponent component in
+            unitOfWork.Fx.ListClearingComponents(instructionId))
+        {
+            if (component.Status != FxSettlementLegComponentStatus.Clearing)
+            {
+                continue;
+            }
+
+            component.Settle(now);
+            unitOfWork.Fx.UpdateSettlementLegComponent(component);
+
+            bool outstanding = false;
+
+            foreach (FxSettlementLegComponent sibling in
+                unitOfWork.Fx.ListSettlementLegComponents(component.LegId))
+            {
+                outstanding |= sibling.Id != component.Id &&
+                    sibling.Status == FxSettlementLegComponentStatus.Clearing;
+            }
+
+            if (outstanding ||
+                unitOfWork.Fx.FindSettlementLeg(component.LegId) is not
+                    { Status: FxSettlementLegStatus.Clearing } leg)
+            {
+                continue;
+            }
+
+            leg.Settle();
+            unitOfWork.Fx.UpdateSettlementLeg(leg);
+        }
     }
 
     internal Result Close(IBankingUnitOfWork unitOfWork, ClearingCycleId cycleId)
@@ -195,18 +234,82 @@ internal sealed class ClearingSettlementService
         return Result.Success();
     }
 
+    private readonly record struct ClearingSplit(MoneyMinor Payable, MoneyMinor Receivable);
+
+    private readonly record struct ParticipantLeg(
+        LedgerAccount? Payable,
+        LedgerAccount? Receivable,
+        MoneyMinor GrossPayable,
+        MoneyMinor GrossReceivable);
+
     private readonly record struct ParticipantSettlement(
         SettlementSide Side,
-        LedgerAccount Payable,
-        LedgerAccount Receivable,
-        MoneyMinor GrossPayable,
-        MoneyMinor GrossReceivable,
+        ParticipantLeg Retail,
+        ParticipantLeg Foreign,
         MoneyMinor Net);
+
+    private static Dictionary<BankId, ClearingSplit> ForeignSplits(
+        IBankingUnitOfWork unitOfWork,
+        ClearingCycleId cycleId)
+    {
+        Dictionary<BankId, ClearingSplit> splits = [];
+
+        foreach (ClearingInstruction instruction in unitOfWork.Clearing.ListInstructions(cycleId))
+        {
+            if (instruction.InstructionKind != FxApplicationService.ClearingInstructionKind ||
+                instruction.Status != ClearingInstructionStatus.Locked)
+            {
+                continue;
+            }
+
+            splits.TryGetValue(instruction.SourceBankId, out ClearingSplit source);
+            splits[instruction.SourceBankId] = source with
+            {
+                Payable = source.Payable.Add(instruction.Amount),
+            };
+
+            splits.TryGetValue(instruction.DestinationBankId, out ClearingSplit destination);
+            splits[instruction.DestinationBankId] = destination with
+            {
+                Receivable = destination.Receivable.Add(instruction.Amount),
+            };
+        }
+
+        return splits;
+    }
+
+    private static Result<ParticipantLeg> ResolveLeg(
+        IBankingUnitOfWork unitOfWork,
+        Bank bank,
+        CurrencyId currencyId,
+        LedgerAccountKind payableKind,
+        LedgerAccountKind receivableKind,
+        MoneyMinor grossPayable,
+        MoneyMinor grossReceivable)
+    {
+        LedgerAccount? payable = grossPayable.IsPositive
+            ? unitOfWork.LedgerAccounts.FindPostingByKind(
+                bank.GeneralLedgerBookId, payableKind, currencyId)
+            : null;
+
+        LedgerAccount? receivable = grossReceivable.IsPositive
+            ? unitOfWork.LedgerAccounts.FindPostingByKind(
+                bank.GeneralLedgerBookId, receivableKind, currencyId)
+            : null;
+
+        return (grossPayable.IsPositive && payable is null) ||
+            (grossReceivable.IsPositive && receivable is null)
+            ? Result<ParticipantLeg>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable)
+            : Result<ParticipantLeg>.Success(
+                new ParticipantLeg(payable, receivable, grossPayable, grossReceivable));
+    }
 
     private static Result<ParticipantSettlement[]> ResolveParticipants(
         IBankingUnitOfWork unitOfWork,
         IReadOnlyList<ClearingPosition> positions,
-        CurrencyId currencyId)
+        CurrencyId currencyId,
+        Dictionary<BankId, ClearingSplit> foreignSplits)
     {
         ParticipantSettlement[] participants = new ParticipantSettlement[positions.Count];
 
@@ -228,25 +331,38 @@ internal sealed class ClearingSettlementService
                 return Result<ParticipantSettlement[]>.Failure(side.Error!);
             }
 
-            LedgerAccount? payable = unitOfWork.LedgerAccounts.FindPostingByKind(
-                bank.GeneralLedgerBookId, LedgerAccountKind.ClearingPayable, currencyId);
+            foreignSplits.TryGetValue(position.BankId, out ClearingSplit foreign);
 
-            LedgerAccount? receivable = unitOfWork.LedgerAccounts.FindPostingByKind(
-                bank.GeneralLedgerBookId, LedgerAccountKind.ClearingReceivable, currencyId);
+            Result<ParticipantLeg> retail = ResolveLeg(
+                unitOfWork,
+                bank,
+                currencyId,
+                LedgerAccountKind.ClearingPayable,
+                LedgerAccountKind.ClearingReceivable,
+                position.GrossPayable.Subtract(foreign.Payable),
+                position.GrossReceivable.Subtract(foreign.Receivable));
 
-            if (payable is null || receivable is null)
+            if (!retail.IsSuccess)
             {
-                return Result<ParticipantSettlement[]>.Failure(
-                    ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+                return Result<ParticipantSettlement[]>.Failure(retail.Error!);
+            }
+
+            Result<ParticipantLeg> external = ResolveLeg(
+                unitOfWork,
+                bank,
+                currencyId,
+                LedgerAccountKind.FxClearingPayable,
+                LedgerAccountKind.FxClearingReceivable,
+                foreign.Payable,
+                foreign.Receivable);
+
+            if (!external.IsSuccess)
+            {
+                return Result<ParticipantSettlement[]>.Failure(external.Error!);
             }
 
             participants[index] = new ParticipantSettlement(
-                side.Value,
-                payable,
-                receivable,
-                position.GrossPayable,
-                position.GrossReceivable,
-                position.Net);
+                side.Value, retail.Value, external.Value, position.Net);
         }
 
         return Result<ParticipantSettlement[]>.Success(participants);
@@ -264,17 +380,8 @@ internal sealed class ClearingSettlementService
         {
             LedgerPostingBuilder unwind = new();
 
-            if (participant.GrossPayable.IsPositive)
-            {
-                unwind.Add(PostingLine.Institutional(
-                    participant.Payable, EntrySide.Debit, participant.GrossPayable));
-            }
-
-            if (participant.GrossReceivable.IsPositive)
-            {
-                unwind.Add(PostingLine.Institutional(
-                    participant.Receivable, EntrySide.Credit, participant.GrossReceivable));
-            }
+            Unwind(unwind, participant.Retail);
+            Unwind(unwind, participant.Foreign);
 
             if (participant.Net.IsPositive)
             {
@@ -316,6 +423,19 @@ internal sealed class ClearingSettlementService
         }
 
         return Result.Success();
+    }
+
+    private static void Unwind(LedgerPostingBuilder builder, ParticipantLeg leg)
+    {
+        if (leg.GrossPayable.IsPositive)
+        {
+            builder.Add(PostingLine.Institutional(leg.Payable!, EntrySide.Debit, leg.GrossPayable));
+        }
+
+        if (leg.GrossReceivable.IsPositive)
+        {
+            builder.Add(PostingLine.Institutional(leg.Receivable!, EntrySide.Credit, leg.GrossReceivable));
+        }
     }
 
     private Result PostAgentLeg(

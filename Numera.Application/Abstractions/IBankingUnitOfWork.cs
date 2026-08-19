@@ -185,6 +185,8 @@ public interface IBankRepository
     Numera.Domain.Banking.Bank? FindByInstitutionCode(EconomyScopeId economyScopeId, string institutionCode);
 
     Numera.Domain.Banking.Bank? Find(BankId id);
+
+    Numera.Domain.Banking.Bank? FindByParty(PartyId partyId);
 }
 
 public interface IBankCustomerRelationshipRepository

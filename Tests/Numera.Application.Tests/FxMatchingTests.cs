@@ -52,6 +52,8 @@ public sealed class FxMatchingTests
 
         public FxApplicationService Markets { get; private set; } = null!;
 
+        public SettlementMaintenanceService Maintenance { get; private set; } = null!;
+
         public FxMarketId MarketId { get; } = FxMarketId.FromValue(EntityIdValue.FromBits(100));
 
         public static Harness Create(int makerFeeBps = 0, int takerFeeBps = 0)
@@ -75,15 +77,16 @@ public sealed class FxMatchingTests
             SqliteBankingWriteGateway gateway = new(new FinancialWriteCoordinator(harness.Coordinator));
             SequentialIdGenerator ids = new(9_000);
 
+            PaymentApplicationService payments = new(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
+
             harness.Registration = new CustomerAccountApplicationService(
                 gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Accounts = new BankAccountApplicationService(
-                gateway,
-                new PaymentApplicationService(
-                    gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
-                harness.Clock,
-                ids);
+                gateway, payments, harness.Clock, ids);
             harness.Markets = new FxApplicationService(gateway, harness.Clock, ids);
+            harness.Maintenance = new SettlementMaintenanceService(
+                gateway, payments, harness.Clock, ids);
 
             return harness;
         }
@@ -111,6 +114,8 @@ public sealed class FxMatchingTests
             SeedBank(16, BaseInstitution, scopeSeed: 1, currencySeed: 2);
             SeedBank(48, QuoteInstitution, scopeSeed: 5, currencySeed: 3);
             SeedBank(80, ForeignInstitution, scopeSeed: 5, currencySeed: 3);
+            SeedPaymentNetwork(120, scopeSeed: 1, currencySeed: 2, networkCode: "BASENET");
+            SeedPaymentNetwork(130, scopeSeed: 5, currencySeed: 3, networkCode: "QUOTENET");
 
             Execute($"""
                 INSERT INTO fx_markets(market_id, base_currency_id, quote_currency_id, operator_party_id,
@@ -129,6 +134,96 @@ public sealed class FxMatchingTests
                 """);
         }
 
+        public void SeedQuoteSettlement()
+        {
+            Execute($"""
+                INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+                VALUES({Blob(140)}, 'SYSTEM', '中央銀行', 'ACTIVE', 1, 1);
+
+                INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                    created_at, version)
+                VALUES({Blob(141)}, {Blob(140)}, 'CENTRAL_BANK', 'OPEN', 1, 1);
+
+                INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                    starts_on, ends_on, status, closed_at, version)
+                VALUES({Blob(142)}, {Blob(141)}, '2026', '2000-01-01', '2100-12-31', 'OPEN', NULL, 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                    account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                    owner_reference_type, owner_reference_id, status, created_at, version)
+                VALUES
+                    ({Blob(143)}, {Blob(141)}, NULL, '2100-1', 'CENTRAL_BANK_SETTLEMENT_LIABILITY',
+                        'LIABILITY', 'CREDIT', {Blob(3)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(144)}, {Blob(141)}, NULL, '2100-2', 'CENTRAL_BANK_SETTLEMENT_LIABILITY',
+                        'LIABILITY', 'CREDIT', {Blob(3)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(145)}, {Blob(49)}, NULL, '1100', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                        {Blob(3)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(146)}, {Blob(81)}, NULL, '1100', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                        {Blob(3)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO central_bank_settlement_accounts(central_bank_settlement_account_id, bank_id,
+                    currency_id, central_bank_ledger_account_id, status, opened_at, closed_at, version)
+                VALUES
+                    ({Blob(147)}, {Blob(50)}, {Blob(3)}, {Blob(143)}, 'ACTIVE', 1, NULL, 1),
+                    ({Blob(148)}, {Blob(82)}, {Blob(3)}, {Blob(144)}, 'ACTIVE', 1, NULL, 1);
+
+                INSERT INTO settlement_participations(settlement_participation_id, bank_id, mode,
+                    settlement_agent_bank_id, central_bank_settlement_account_id, status, effective_from,
+                    effective_to, version)
+                VALUES
+                    ({Blob(149)}, {Blob(50)}, 'DIRECT', NULL, {Blob(147)}, 'ACTIVE', 1, NULL, 1),
+                    ({Blob(150)}, {Blob(82)}, 'DIRECT', NULL, {Blob(148)}, 'ACTIVE', 1, NULL, 1);
+
+                INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                    version, updated_at)
+                VALUES({Blob(145)}, 100000, 0, 1, 1), ({Blob(143)}, 100000, 0, 1, 1);
+                """);
+        }
+
+        private void SeedPaymentNetwork(
+            int partySeed,
+            int scopeSeed,
+            int currencySeed,
+            string networkCode)
+        {
+            int book = partySeed + 1;
+            int liquid = partySeed + 2;
+            int network = partySeed + 3;
+            int policy = partySeed + 4;
+
+            Execute($"""
+                INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+                VALUES({Blob(partySeed)}, 'SYSTEM', '決済網主体', 'ACTIVE', 1, 1);
+
+                INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                    created_at, version)
+                VALUES({Blob(book)}, {Blob(partySeed)}, 'SYSTEM', 'OPEN', 1, 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                    account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                    owner_reference_type, owner_reference_id, status, created_at, version)
+                VALUES({Blob(liquid)}, {Blob(book)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT',
+                    {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code,
+                    operator_party_id, accounting_book_id, liquid_asset_ledger_account_id, status,
+                    current_policy_version_id, version)
+                VALUES({Blob(network)}, {Blob(scopeSeed)}, '{networkCode}', {Blob(partySeed)}, {Blob(book)},
+                    {Blob(liquid)}, 'DRAFT', NULL, 1);
+
+                INSERT INTO payment_network_policy_versions(payment_network_policy_version_id,
+                    payment_network_id, settlement_mode, beneficiary_posting_policy, rtgs_threshold_minor,
+                    clearing_cycle_interval_seconds, precredit_enabled, precredit_prefund_ratio_bps,
+                    per_bank_precredit_exposure_limit_minor, created_at, version)
+                VALUES({Blob(policy)}, {Blob(network)}, 'CLEARING', 'AFTER_FINAL_SETTLEMENT', NULL, 3600,
+                    0, 10000, 0, 1, 1);
+
+                UPDATE payment_networks
+                SET status = 'ACTIVE', current_policy_version_id = {Blob(policy)}, version = version + 1
+                WHERE payment_network_id = {Blob(network)};
+                """);
+        }
+
         private void SeedBank(int partySeed, string institutionCode, int scopeSeed, int currencySeed)
         {
             int book = partySeed + 1;
@@ -141,6 +236,8 @@ public sealed class FxMatchingTests
             int schedule = partySeed + 8;
             int period = partySeed + 9;
             int revenue = partySeed + 10;
+            int payable = partySeed + 11;
+            int receivable = partySeed + 12;
 
             Execute($"""
                 INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
@@ -173,8 +270,13 @@ public sealed class FxMatchingTests
                 INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
                     account_code, account_kind, accounting_type, normal_side, currency_id, posting_allowed,
                     owner_reference_type, owner_reference_id, status, created_at, version)
-                VALUES({Blob(revenue)}, {Blob(book)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
-                    {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+                VALUES
+                    ({Blob(revenue)}, {Blob(book)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
+                        {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(payable)}, {Blob(book)}, NULL, '2500', 'FX_CLEARING_PAYABLE', 'LIABILITY',
+                        'CREDIT', {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(receivable)}, {Blob(book)}, NULL, '1500', 'FX_CLEARING_RECEIVABLE', 'ASSET',
+                        'DEBIT', {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
 
                 INSERT INTO account_products(product_id, bank_id, product_code, name, deposit_class,
                     version_application_policy, status, created_at, version)
@@ -557,7 +659,7 @@ public sealed class FxMatchingTests
     }
 
     [TestMethod]
-    public async Task AMakerSettlingAtAnotherBankRejectsTheWholeOrder()
+    public async Task ALegCrossingBanksIsSettledThroughClearing()
     {
         await using Harness harness = Harness.Create();
         (Trader maker, Trader taker) = await TradersAsync(harness);
@@ -580,16 +682,95 @@ public sealed class FxMatchingTests
                 IdempotencyKey.Create("fx-test", "sell-foreign")),
             CancellationToken.None);
 
-        Assert.IsTrue(resting.IsSuccess);
+        Assert.IsTrue(resting.IsSuccess, resting.Error?.Code);
 
         Result<FxOrderView> result = await BuyAsync(harness, taker, 1_000, 150, "buy-1");
 
-        Assert.IsFalse(result.IsSuccess);
+        Assert.IsTrue(result.IsSuccess, result.Error?.Code);
+        Assert.AreEqual(FxOrderStatus.Filled, result.Value.Status);
+        Assert.AreEqual(1L, harness.Count("fx_trades"));
+        Assert.AreEqual(1L, harness.Count("clearing_instructions"));
+        Assert.AreEqual(1L, harness.Count("clearing_cycles"));
+        Assert.AreEqual(2L, harness.Count("clearing_positions"));
+
         Assert.AreEqual(
-            BankingErrorCodes.FxInterbankSettlementUnavailable, result.Error!.Code);
-        Assert.AreEqual(0L, harness.Count("fx_trades"));
+            1L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM fx_settlement_leg_components
+                WHERE settlement_path = 'BANK_CLEARING' AND status = 'CLEARING';
+                """));
         Assert.AreEqual(
-            1L, harness.Scalar("SELECT COUNT(*) FROM fx_orders;"));
+            1L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM fx_settlement_leg_components
+                WHERE settlement_path = 'INTERNAL_BOOK' AND status = 'INTERNAL_FINAL';
+                """));
+        Assert.AreEqual(
+            1L, harness.Scalar("SELECT COUNT(*) FROM fx_settlement_legs WHERE status = 'CLEARING';"));
+        Assert.AreEqual(
+            1L, harness.Scalar("SELECT COUNT(*) FROM fx_settlement_legs WHERE status = 'SETTLED';"));
+
+        Assert.AreEqual(11_000L, harness.Balance(taker.BaseAccount));
+        Assert.AreEqual(8_500L, harness.Balance(taker.QuoteAccount));
+        Assert.AreEqual(9_000L, harness.Balance(maker.BaseAccount));
+        Assert.AreEqual(11_500L, harness.Balance(foreignQuote));
+        Assert.AreEqual(1_500L, harness.Scalar(ClearingBalance("FX_CLEARING_PAYABLE")));
+        Assert.AreEqual(1_500L, harness.Scalar(ClearingBalance("FX_CLEARING_RECEIVABLE")));
+    }
+
+    private static string ClearingBalance(string kind) => $"""
+        SELECT COALESCE(SUM(p.posted_balance_minor), 0) FROM ledger_balance_projections AS p
+        JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+        WHERE a.account_kind = '{kind}';
+        """;
+
+    [TestMethod]
+    public async Task ClearingFinalitySettlesTheForeignLegAndUnwindsTheFxAccounts()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedQuoteSettlement();
+        (Trader maker, Trader taker) = await TradersAsync(harness);
+
+        DepositAccountId foreignQuote = await harness.ForeignQuoteAccountAsync(maker.Customer);
+        harness.Fund(foreignQuote, 10_000);
+
+        await harness.Markets.PlaceFxOrderAsync(
+            new PlaceFxOrderCommand(
+                Actor(),
+                harness.MarketId,
+                maker.Customer,
+                FxOrderSide.SellBase,
+                FxOrderType.Limit,
+                1_000,
+                150,
+                null,
+                maker.BaseAccount,
+                foreignQuote,
+                IdempotencyKey.Create("fx-test", "sell-foreign")),
+            CancellationToken.None);
+
+        Result<FxOrderView> filled = await BuyAsync(harness, taker, 1_000, 150, "buy-1");
+
+        Assert.IsTrue(filled.IsSuccess, filled.Error?.Code);
+
+        harness.Clock.Advance(7_200_000);
+
+        SettlementMaintenanceReport report =
+            await harness.Maintenance.ProcessClearingCyclesAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, report.Settled);
+        Assert.AreEqual(
+            1L,
+            harness.Scalar("SELECT COUNT(*) FROM clearing_instructions WHERE status = 'SETTLED';"));
+        Assert.AreEqual(
+            0L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM fx_settlement_leg_components WHERE status = 'CLEARING';
+                """));
+        Assert.AreEqual(
+            2L, harness.Scalar("SELECT COUNT(*) FROM fx_settlement_legs WHERE status = 'SETTLED';"));
+        Assert.AreEqual(0L, harness.Scalar(ClearingBalance("FX_CLEARING_PAYABLE")));
+        Assert.AreEqual(0L, harness.Scalar(ClearingBalance("FX_CLEARING_RECEIVABLE")));
     }
 
     [TestMethod]

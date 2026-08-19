@@ -29,6 +29,8 @@ public sealed partial class FxApplicationService
 
     public const string CancelledEventType = "FX_ORDER_CANCELLED";
 
+    public const string ClearingInstructionKind = "FX_SETTLEMENT";
+
     private static readonly int[] BucketIntervals = [60, 300, 3600];
 
     private readonly record struct PlannedFill(FxOrder Maker, long BaseMinor, long QuoteMinor);
@@ -291,7 +293,7 @@ public sealed partial class FxApplicationService
         }
 
         Result<IReadOnlyList<PlannedFill>> planned = BuildPlan(
-            unitOfWork, market, command, bound.Value, source.BankId, destination.BankId);
+            unitOfWork, market, command, bound.Value);
 
         if (!planned.IsSuccess)
         {
@@ -399,9 +401,7 @@ public sealed partial class FxApplicationService
         IBankingUnitOfWork unitOfWork,
         FxMarket market,
         PlaceFxOrderCommand command,
-        long boundPriceUnits,
-        BankId sourceBankId,
-        BankId destinationBankId)
+        long boundPriceUnits)
     {
         IReadOnlyList<FxOrder> resting = unitOfWork.Fx.ListRestingOrders(
             market.Id, Opposite(command.Side), FxPricing.MaximumFokMakerOrders + 1);
@@ -422,24 +422,14 @@ public sealed partial class FxApplicationService
             }
 
             if (unitOfWork.Fx.FindFundingEndpoint(maker.SourceFundingEndpointId) is not
-                    { DepositAccountId: not null } makerFunding ||
+                    { DepositAccountId: { } makerFundingAccount } ||
                 unitOfWork.Fx.FindSettlementEndpoint(maker.DestinationSettlementEndpointId) is not
-                    { DepositAccountId: not null } makerSettlement)
+                    { DepositAccountId: { } makerSettlementAccount } ||
+                unitOfWork.DepositAccounts.Find(makerFundingAccount) is null ||
+                unitOfWork.DepositAccounts.Find(makerSettlementAccount) is null)
             {
                 return Result<IReadOnlyList<PlannedFill>>.Failure(
-                    ErrorCategory.InfrastructureUnavailable,
-                    BankingErrorCodes.FxInterbankSettlementUnavailable);
-            }
-
-            if (unitOfWork.DepositAccounts.Find(makerFunding.DepositAccountId!.Value) is not { } makerSource ||
-                unitOfWork.DepositAccounts.Find(makerSettlement.DepositAccountId!.Value)
-                    is not { } makerDestination ||
-                makerSource.BankId != destinationBankId ||
-                makerDestination.BankId != sourceBankId)
-            {
-                return Result<IReadOnlyList<PlannedFill>>.Failure(
-                    ErrorCategory.InfrastructureUnavailable,
-                    BankingErrorCodes.FxInterbankSettlementUnavailable);
+                    ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.FxMatchingUnavailable);
             }
 
             long fillBase = Math.Min(remaining, maker.RemainingBaseMinor);
@@ -622,57 +612,245 @@ public sealed partial class FxApplicationService
         DepositAccount recipientAccount =
             unitOfWork.DepositAccounts.Find(settlement.DepositAccountId!.Value)!;
 
-        if (payerAccount.BankId != recipientAccount.BankId)
+        Bank sourceBank = unitOfWork.Banks.Find(payerAccount.BankId)!;
+        Bank recipientBank = unitOfWork.Banks.Find(recipientAccount.BankId)!;
+
+        MoneyMinor gross = MoneyMinor.FromMinor(grossMinor);
+        MoneyMinor fee = MoneyMinor.FromMinor(feeMinor);
+        MoneyMinor net = gross.Subtract(fee);
+
+        Bank? operatorBank = null;
+        LedgerAccount? feeLedger = null;
+
+        if (fee.IsPositive)
         {
-            return Result.Failure(
-                ErrorCategory.InfrastructureUnavailable,
-                BankingErrorCodes.FxInterbankSettlementUnavailable);
+            operatorBank = unitOfWork.Banks.FindByParty(context.Market.OperatorPartyId);
+            feeLedger = operatorBank is null
+                ? null
+                : unitOfWork.LedgerAccounts.FindPostingByKind(
+                    operatorBank.GeneralLedgerBookId, LedgerAccountKind.FeeRevenue, currencyId);
+
+            if (feeLedger is null)
+            {
+                return Result.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.FxOperatorFeeAccountUnavailable);
+            }
         }
 
-        if (unitOfWork.Banks.Find(payerAccount.BankId) is not { } legBank)
+        bool recipientExternal = recipientBank.Id != sourceBank.Id;
+        bool feeExternal = feeLedger is not null && operatorBank!.Id != sourceBank.Id;
+        MoneyMinor external = MoneyMinor.FromMinor(
+            (recipientExternal ? net.Value : 0) + (feeExternal ? fee.Value : 0));
+
+        LedgerAccount? payable = null;
+        LedgerAccount? recipientReceivable = null;
+        LedgerAccount? operatorReceivable = null;
+        ClearingCycle? cycle = null;
+
+        if (external.IsPositive)
         {
-            return Result.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+            payable = unitOfWork.LedgerAccounts.FindPostingByKind(
+                sourceBank.GeneralLedgerBookId, LedgerAccountKind.FxClearingPayable, currencyId);
+
+            recipientReceivable = recipientExternal
+                ? unitOfWork.LedgerAccounts.FindPostingByKind(
+                    recipientBank.GeneralLedgerBookId, LedgerAccountKind.FxClearingReceivable, currencyId)
+                : null;
+
+            operatorReceivable = feeExternal
+                ? unitOfWork.LedgerAccounts.FindPostingByKind(
+                    operatorBank!.GeneralLedgerBookId, LedgerAccountKind.FxClearingReceivable, currencyId)
+                : null;
+
+            if (payable is null || (recipientExternal && recipientReceivable is null) ||
+                (feeExternal && operatorReceivable is null))
+            {
+                return Result.Failure(
+                    ErrorCategory.BankUnavailable, BankingErrorCodes.SettlementAccountUnavailable);
+            }
+
+            Result<ClearingCycle> resolved = ResolveCycle(unitOfWork, sourceBank, currencyId, context.Now);
+
+            if (!resolved.IsSuccess)
+            {
+                return Result.Failure(resolved.Error!);
+            }
+
+            cycle = resolved.Value;
         }
 
-        if (unitOfWork.AccountingPeriods.FindOpen(legBank.GeneralLedgerBookId, context.BusinessDate)
+        Result posted = PostSourceBook(
+            unitOfWork,
+            context,
+            operation,
+            sourceBank,
+            payerAccount,
+            recipientAccount,
+            payerHold,
+            currencyId,
+            gross,
+            net,
+            fee,
+            external,
+            recipientExternal,
+            feeExternal,
+            payable,
+            feeLedger,
+            transactionType,
+            descriptionCode);
+
+        if (!posted.IsSuccess)
+        {
+            return posted;
+        }
+
+        ClearingInstructionId? recipientInstruction = null;
+        ClearingInstructionId? operatorInstruction = null;
+
+        if (recipientExternal)
+        {
+            Result claim = PostClaimBook(
+                unitOfWork,
+                context,
+                operation,
+                recipientBank,
+                currencyId,
+                recipientReceivable!,
+                PostingLine.Deposit(
+                    unitOfWork.LedgerAccounts.Find(recipientAccount.LedgerAccountId)!, EntrySide.Credit, net),
+                net,
+                transactionType,
+                descriptionCode);
+
+            if (!claim.IsSuccess)
+            {
+                return claim;
+            }
+
+            recipientInstruction = Instruct(
+                unitOfWork, operation, cycle!, currencyId, sourceBank.Id, recipientBank.Id, net, context.Now);
+        }
+
+        if (feeExternal)
+        {
+            Result claim = PostClaimBook(
+                unitOfWork,
+                context,
+                operation,
+                operatorBank!,
+                currencyId,
+                operatorReceivable!,
+                PostingLine.Institutional(feeLedger!, EntrySide.Credit, fee),
+                fee,
+                transactionType,
+                descriptionCode);
+
+            if (!claim.IsSuccess)
+            {
+                return claim;
+            }
+
+            operatorInstruction = Instruct(
+                unitOfWork, operation, cycle!, currencyId, sourceBank.Id, operatorBank!.Id, fee, context.Now);
+        }
+
+        FxSettlementLeg leg = FxSettlementLeg.Create(
+            FxSettlementLegId.FromValue(idGenerator.NextId()),
+            tradeId,
+            operation.Id,
+            legKind,
+            currencyId,
+            funding.Id,
+            settlement.Id,
+            gross,
+            fee,
+            feeLedger?.Id,
+            external.IsPositive,
+            context.Now);
+
+        unitOfWork.Fx.AddSettlementLeg(leg);
+
+        unitOfWork.Fx.AddSettlementLegComponent(FxSettlementLegComponent.Create(
+            FxSettlementLegComponentId.FromValue(idGenerator.NextId()),
+            leg.Id,
+            FxSettlementComponentKind.RecipientNet,
+            payer.ParticipantPartyId,
+            recipient.ParticipantPartyId,
+            sourceBank.Id,
+            recipientBank.Id,
+            recipientExternal ? FxSettlementPath.BankClearing : FxSettlementPath.InternalBook,
+            settlement.Id,
+            destinationLedgerAccountId: null,
+            net,
+            recipientInstruction,
+            context.Now));
+
+        if (feeLedger is not null)
+        {
+            unitOfWork.Fx.AddSettlementLegComponent(FxSettlementLegComponent.Create(
+                FxSettlementLegComponentId.FromValue(idGenerator.NextId()),
+                leg.Id,
+                FxSettlementComponentKind.OperatorFee,
+                payer.ParticipantPartyId,
+                context.Market.OperatorPartyId,
+                sourceBank.Id,
+                operatorBank!.Id,
+                feeExternal ? FxSettlementPath.BankClearing : FxSettlementPath.InternalBook,
+                destinationSettlementEndpointId: null,
+                feeLedger.Id,
+                fee,
+                operatorInstruction,
+                context.Now));
+        }
+
+        return Result.Success();
+    }
+
+    private Result PostSourceBook(
+        IBankingUnitOfWork unitOfWork,
+        PlacementContext context,
+        BusinessOperation operation,
+        Bank sourceBank,
+        DepositAccount payerAccount,
+        DepositAccount recipientAccount,
+        Hold payerHold,
+        CurrencyId currencyId,
+        MoneyMinor gross,
+        MoneyMinor net,
+        MoneyMinor fee,
+        MoneyMinor external,
+        bool recipientExternal,
+        bool feeExternal,
+        LedgerAccount? payable,
+        LedgerAccount? feeLedger,
+        string transactionType,
+        string descriptionCode)
+    {
+        if (unitOfWork.AccountingPeriods.FindOpen(sourceBank.GeneralLedgerBookId, context.BusinessDate)
             is not { } periodId)
         {
             return Result.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
         }
 
-        LedgerAccount payerLedger = unitOfWork.LedgerAccounts.Find(payerAccount.LedgerAccountId)!;
-        LedgerAccount recipientLedger = unitOfWork.LedgerAccounts.Find(recipientAccount.LedgerAccountId)!;
-
-        MoneyMinor gross = MoneyMinor.FromMinor(grossMinor);
-        MoneyMinor fee = MoneyMinor.FromMinor(feeMinor);
-        MoneyMinor net = gross.Subtract(fee);
-
-        if (fee.IsPositive && legBank.PartyId != context.Market.OperatorPartyId)
-        {
-            return Result.Failure(
-                ErrorCategory.InfrastructureUnavailable,
-                BankingErrorCodes.FxInterbankSettlementUnavailable);
-        }
-
-        LedgerAccount? feeLedger = fee.IsPositive
-            ? unitOfWork.LedgerAccounts.FindPostingByKind(
-                legBank.GeneralLedgerBookId, LedgerAccountKind.FeeRevenue, currencyId)
-            : null;
-
-        if (fee.IsPositive && feeLedger is null)
-        {
-            return Result.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FxOperatorFeeAccountUnavailable);
-        }
-
         LedgerPostingBuilder posting = new();
-        posting.Add(PostingLine.DepositReleasingHold(payerLedger, EntrySide.Debit, gross, gross));
-        posting.Add(PostingLine.Deposit(recipientLedger, EntrySide.Credit, net));
+        posting.Add(PostingLine.DepositReleasingHold(
+            unitOfWork.LedgerAccounts.Find(payerAccount.LedgerAccountId)!, EntrySide.Debit, gross, gross));
 
-        if (feeLedger is not null)
+        if (!recipientExternal)
+        {
+            posting.Add(PostingLine.Deposit(
+                unitOfWork.LedgerAccounts.Find(recipientAccount.LedgerAccountId)!, EntrySide.Credit, net));
+        }
+
+        if (feeLedger is not null && !feeExternal)
         {
             posting.Add(PostingLine.Institutional(feeLedger, EntrySide.Credit, fee));
+        }
+
+        if (external.IsPositive)
+        {
+            posting.Add(PostingLine.Institutional(payable!, EntrySide.Credit, external));
         }
 
         LedgerAccount[] ordered = posting.OrderedAccounts();
@@ -680,7 +858,7 @@ public sealed partial class FxApplicationService
         unitOfWork.AccountingTransactions.Add(
             AccountingTransaction.Post(
                 AccountingTransactionId.FromValue(idGenerator.NextId()),
-                legBank.GeneralLedgerBookId,
+                sourceBank.GeneralLedgerBookId,
                 operation.Id,
                 currencyId,
                 context.BusinessDate,
@@ -695,56 +873,131 @@ public sealed partial class FxApplicationService
         payerHold.Capture(gross, context.Now);
         posting.ApplyProjections(unitOfWork, ordered, context.Now);
 
-        FxSettlementLeg leg = FxSettlementLeg.Create(
-            FxSettlementLegId.FromValue(idGenerator.NextId()),
-            tradeId,
-            operation.Id,
-            legKind,
-            currencyId,
-            funding.Id,
-            settlement.Id,
-            gross,
-            fee,
-            feeLedger?.Id,
-            hasExternalComponent: false,
-            context.Now);
+        return Result.Success();
+    }
 
-        unitOfWork.Fx.AddSettlementLeg(leg);
-
-        unitOfWork.Fx.AddSettlementLegComponent(FxSettlementLegComponent.Create(
-            FxSettlementLegComponentId.FromValue(idGenerator.NextId()),
-            leg.Id,
-            FxSettlementComponentKind.RecipientNet,
-            payer.ParticipantPartyId,
-            recipient.ParticipantPartyId,
-            payerAccount.BankId,
-            recipientAccount.BankId,
-            FxSettlementPath.InternalBook,
-            settlement.Id,
-            destinationLedgerAccountId: null,
-            net,
-            clearingInstructionId: null,
-            context.Now));
-
-        if (feeLedger is not null)
+    private Result PostClaimBook(
+        IBankingUnitOfWork unitOfWork,
+        PlacementContext context,
+        BusinessOperation operation,
+        Bank claimBank,
+        CurrencyId currencyId,
+        LedgerAccount receivable,
+        PostingLine credit,
+        MoneyMinor amount,
+        string transactionType,
+        string descriptionCode)
+    {
+        if (unitOfWork.AccountingPeriods.FindOpen(claimBank.GeneralLedgerBookId, context.BusinessDate)
+            is not { } periodId)
         {
-            unitOfWork.Fx.AddSettlementLegComponent(FxSettlementLegComponent.Create(
-                FxSettlementLegComponentId.FromValue(idGenerator.NextId()),
-                leg.Id,
-                FxSettlementComponentKind.OperatorFee,
-                payer.ParticipantPartyId,
-                context.Market.OperatorPartyId,
-                payerAccount.BankId,
-                legBank.Id,
-                FxSettlementPath.InternalBook,
-                destinationSettlementEndpointId: null,
-                feeLedger.Id,
-                fee,
-                clearingInstructionId: null,
-                context.Now));
+            return Result.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
         }
 
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.Institutional(receivable, EntrySide.Debit, amount));
+        posting.Add(credit);
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                claimBank.GeneralLedgerBookId,
+                operation.Id,
+                currencyId,
+                context.BusinessDate,
+                context.Now,
+                context.Now,
+                transactionType,
+                descriptionCode,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            periodId);
+
+        posting.ApplyProjections(unitOfWork, ordered, context.Now);
+
         return Result.Success();
+    }
+
+    private ClearingInstructionId Instruct(
+        IBankingUnitOfWork unitOfWork,
+        BusinessOperation operation,
+        ClearingCycle cycle,
+        CurrencyId currencyId,
+        BankId sourceBankId,
+        BankId destinationBankId,
+        MoneyMinor amount,
+        UtcTimestamp now)
+    {
+        ClearingInstruction instruction = ClearingInstruction.Create(
+            ClearingInstructionId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            paymentOrderId: null,
+            currencyId,
+            sourceBankId,
+            destinationBankId,
+            amount,
+            ClearingInstructionKind,
+            now);
+
+        instruction.Accept(cycle.Id);
+        unitOfWork.Clearing.AddInstruction(instruction);
+
+        unitOfWork.Clearing.AccumulatePosition(
+            ClearingPositionId.FromValue(idGenerator.NextId()),
+            cycle.Id,
+            sourceBankId,
+            currencyId,
+            MoneyMinor.Zero,
+            amount);
+
+        unitOfWork.Clearing.AccumulatePosition(
+            ClearingPositionId.FromValue(idGenerator.NextId()),
+            cycle.Id,
+            destinationBankId,
+            currencyId,
+            amount,
+            MoneyMinor.Zero);
+
+        return instruction.Id;
+    }
+
+    private Result<ClearingCycle> ResolveCycle(
+        IBankingUnitOfWork unitOfWork,
+        Bank sourceBank,
+        CurrencyId currencyId,
+        UtcTimestamp now)
+    {
+        if (unitOfWork.PaymentNetworks.FindRouting(sourceBank.EconomyScopeId) is not
+                { CurrentPolicyVersionId: { } policyVersionId } ||
+            unitOfWork.PaymentNetworks.FindPolicy(policyVersionId) is not { } policy)
+        {
+            return Result<ClearingCycle>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.PaymentNetworkPolicyUnavailable);
+        }
+
+        string cycleKey = PaymentRoutePolicy.CycleKeyOf(policy, now);
+
+        if (unitOfWork.Clearing.FindCycle(sourceBank.EconomyScopeId, currencyId, cycleKey) is { } existing)
+        {
+            return existing.AcceptsNewInstructions
+                ? Result<ClearingCycle>.Success(existing)
+                : Result<ClearingCycle>.Failure(
+                    ErrorCategory.ConcurrencyConflict, BankingErrorCodes.ConcurrentModification);
+        }
+
+        ClearingCycle opened = ClearingCycle.Open(
+            ClearingCycleId.FromValue(idGenerator.NextId()),
+            sourceBank.EconomyScopeId,
+            currencyId,
+            cycleKey,
+            now);
+
+        unitOfWork.Clearing.AddCycle(opened);
+
+        return Result<ClearingCycle>.Success(opened);
     }
 
     private void Terminate(
