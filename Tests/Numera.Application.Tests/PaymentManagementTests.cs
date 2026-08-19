@@ -161,6 +161,16 @@ public sealed class PaymentManagementTests
             VALUES({Blob(33)}, {Blob(4)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
                 {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
 
+            INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id, account_code,
+                account_kind, accounting_type, normal_side, currency_id, posting_allowed,
+                owner_reference_type, owner_reference_id, status, created_at, version)
+            VALUES({Blob(35)}, {Blob(4)}, NULL, '1000', 'CASH_ASSET', 'ASSET', 'DEBIT',
+                {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+            INSERT INTO ledger_balance_projections(ledger_account_id, posted_balance_minor, held_minor,
+                version, updated_at)
+            VALUES({Blob(35)}, 0, 0, 1, 1);
+
             INSERT INTO fee_rules(fee_rule_id, fee_schedule_version_id, fee_type, priority, channel,
                 account_product_id, atm_network_id, counterparty_bank_id, amount_min_minor,
                 amount_max_minor, day_class, local_start_minute, local_end_minute, fixed_minor,
@@ -225,6 +235,45 @@ public sealed class PaymentManagementTests
             command.Parameters.AddWithValue("$id", accountId.Value.ToByteArray());
             command.ExecuteNonQuery();
         }
+
+        public void FundByJournal(DepositAccountId accountId, long amount, int seed)
+        {
+            Execute($"""
+                INSERT INTO business_operations(business_operation_id, operation_type, economy_scope_id,
+                    actor_party_id, correlation_id, idempotency_scope, idempotency_key, status,
+                    created_at, committed_at, version)
+                VALUES({Blob(seed)}, 'TEST_FUNDING', {Blob(1)}, {Blob(3)}, {Blob(seed + 1)},
+                    'TEST_FUNDING', 'fund-{seed}', 'COMMITTED', 1, 1, 1);
+
+                INSERT INTO accounting_transactions(accounting_transaction_id, accounting_book_id,
+                    accounting_period_id, business_operation_id, currency_id, transaction_type,
+                    business_date, occurred_at, posted_at, reverses_transaction_id, status, version)
+                VALUES({Blob(seed + 2)}, {Blob(4)}, {Blob(32)}, {Blob(seed)}, {Blob(2)}, 'TEST_FUNDING',
+                    '2026-04-12', 1, 1, NULL, 'POSTED', 1);
+
+                INSERT INTO journal_entries(journal_entry_id, accounting_transaction_id,
+                    ledger_account_id, entry_sequence, side, amount_minor, created_at)
+                VALUES({Blob(seed + 3)}, {Blob(seed + 2)}, {Blob(35)}, 0, 'DEBIT', {amount}, 1);
+
+                INSERT INTO journal_entries(journal_entry_id, accounting_transaction_id,
+                    ledger_account_id, entry_sequence, side, amount_minor, created_at)
+                SELECT {Blob(seed + 4)}, {Blob(seed + 2)}, ledger_account_id, 1, 'CREDIT', {amount}, 1
+                FROM deposit_accounts WHERE deposit_account_id = {Literal(accountId)};
+
+                UPDATE ledger_balance_projections
+                SET posted_balance_minor = posted_balance_minor + {amount}, version = version + 1
+                WHERE ledger_account_id = {Blob(35)};
+
+                UPDATE ledger_balance_projections
+                SET posted_balance_minor = posted_balance_minor + {amount}, version = version + 1
+                WHERE ledger_account_id = (
+                    SELECT ledger_account_id FROM deposit_accounts
+                    WHERE deposit_account_id = {Literal(accountId)});
+                """);
+        }
+
+        private static string Literal(DepositAccountId accountId) =>
+            "x'" + Convert.ToHexString(accountId.Value.ToByteArray()).ToLowerInvariant() + "'";
 
         public long Count(string table)
         {
@@ -931,5 +980,38 @@ public sealed class PaymentManagementTests
         Assert.IsTrue(second.IsSuccess);
         Assert.AreEqual(first.Value.Id, second.Value.Id);
         Assert.AreEqual(1L, harness.Count("direct_debit_collections"));
+    }
+
+    [TestMethod]
+    public async Task ARealTransferLeavesTheLedgerReconciled()
+    {
+        await using Harness harness = Harness.Create();
+        (_, DepositAccountId source, _) =
+            await PlanAsync(harness, ScheduledPaymentKind.Weekly, 1_000);
+
+        harness.FundByJournal(source, 10_000, 200);
+        harness.Clock.Advance(ThirtyDays);
+
+        await harness.Scheduled.ProcessDueAsync(CancellationToken.None);
+
+        int next = 0xE0;
+        SqliteDatabaseReconciliationRunner runner = new(
+            harness.ConnectionFactory,
+            () =>
+            {
+                byte[] id = new byte[16];
+                id[14] = (byte)(next >> 8);
+                id[15] = (byte)next++;
+                return id;
+            });
+
+        ReconciliationOutcome financial = runner.RunFinancialReconciliation(
+            harness.Clock.Now().UnixMilliseconds);
+        ReconciliationOutcome orphans = runner.VerifyNoOrphanState(
+            harness.Clock.Now().UnixMilliseconds);
+
+        Assert.IsTrue(financial.IsOk, string.Join(",", financial.Findings.Select(f => f.IssueCode)));
+        Assert.IsTrue(orphans.IsOk, string.Join(",", orphans.Findings.Select(f => f.IssueCode)));
+        Assert.AreEqual(0L, harness.Count("reconciliation_issues"));
     }
 }

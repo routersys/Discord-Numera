@@ -4,6 +4,20 @@ using Numera.Persistence.Sqlite;
 
 namespace Numera.Host.Tests;
 
+internal sealed class StubReconciliation : IDatabaseReconciliationRunner
+{
+    internal string? Status { get; set; }
+
+    public ReconciliationOutcome RunFinancialReconciliation(long nowMilliseconds) =>
+        ReconciliationOutcome.Ok;
+
+    public LeaseRecoveryOutcome RecoverExpiredLeases(long nowMilliseconds) => new(0);
+
+    public ReconciliationOutcome VerifyNoOrphanState(long nowMilliseconds) => ReconciliationOutcome.Ok;
+
+    public string? LastRunStatus(string scopeType) => Status;
+}
+
 [TestClass]
 public sealed class ConsoleCommandExecutorTests
 {
@@ -79,14 +93,36 @@ public sealed class ConsoleCommandExecutorTests
         StubBackups? backups = null,
         StubRestores? restores = null,
         bool quiesced = true,
-        PreviousStartupClassification previous = PreviousStartupClassification.Clean) =>
+        PreviousStartupClassification previous = PreviousStartupClassification.Clean,
+        StubReconciliation? reconciliation = null) =>
         new ConsoleCommandExecutor(
             probe ?? new StubProbe(),
+            reconciliation ?? new StubReconciliation(),
             backups ?? new StubBackups(),
             restores ?? new StubRestores(),
             new StubGate(quiesced),
             TimeProvider.System,
             () => previous).Execute(ConsoleCommandLine.Parse(line));
+
+    [TestMethod]
+    public void HealthReportsTheLastFinancialReconciliation()
+    {
+        ConsoleCommandResult unknown = Run("health");
+
+        CollectionAssert.Contains(unknown.Lines.ToArray(), "Financial Reconciliation: UNKNOWN");
+
+        ConsoleCommandResult succeeded = Run(
+            "health", reconciliation: new StubReconciliation { Status = "SUCCEEDED" });
+
+        Assert.IsTrue(succeeded.IsSuccess);
+        CollectionAssert.Contains(succeeded.Lines.ToArray(), "Financial Reconciliation: OK");
+
+        ConsoleCommandResult issues = Run(
+            "health", reconciliation: new StubReconciliation { Status = "ISSUES_FOUND" });
+
+        Assert.IsFalse(issues.IsSuccess);
+        CollectionAssert.Contains(issues.Lines.ToArray(), "Financial Reconciliation: FAILED");
+    }
 
     [TestMethod]
     public void AHealthyDatabaseVerifies()

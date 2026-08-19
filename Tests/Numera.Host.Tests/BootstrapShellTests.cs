@@ -45,6 +45,7 @@ public sealed class BootstrapShellTests
     {
         ConsoleCommandExecutor executor = new(
             new HealthyProbe(),
+            new StubReconciliation(),
             new SilentBackups(),
             new UnusedRestores(),
             new OpenGate(),

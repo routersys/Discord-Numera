@@ -34,6 +34,7 @@ public static class ConsoleText
 internal sealed class ConsoleCommandExecutor
 {
     private readonly IDatabaseIntegrityProbe probe;
+    private readonly IDatabaseReconciliationRunner reconciliation;
     private readonly IDatabaseBackupService backups;
     private readonly IDatabaseRestoreService restores;
     private readonly IMaintenanceGate maintenance;
@@ -42,6 +43,7 @@ internal sealed class ConsoleCommandExecutor
 
     internal ConsoleCommandExecutor(
         IDatabaseIntegrityProbe probe,
+        IDatabaseReconciliationRunner reconciliation,
         IDatabaseBackupService backups,
         IDatabaseRestoreService restores,
         IMaintenanceGate maintenance,
@@ -49,6 +51,7 @@ internal sealed class ConsoleCommandExecutor
         Func<PreviousStartupClassification> runtimeState)
     {
         ArgumentNullException.ThrowIfNull(probe);
+        ArgumentNullException.ThrowIfNull(reconciliation);
         ArgumentNullException.ThrowIfNull(backups);
         ArgumentNullException.ThrowIfNull(restores);
         ArgumentNullException.ThrowIfNull(maintenance);
@@ -56,6 +59,7 @@ internal sealed class ConsoleCommandExecutor
         ArgumentNullException.ThrowIfNull(runtimeState);
 
         this.probe = probe;
+        this.reconciliation = reconciliation;
         this.backups = backups;
         this.restores = restores;
         this.maintenance = maintenance;
@@ -173,15 +177,16 @@ internal sealed class ConsoleCommandExecutor
         DatabaseProbeResult foreignKeys = probe.ForeignKeyCheck();
         DatabaseProbeResult integrity = probe.IntegrityCheck();
         BackupSummary summary = backups.Summarize();
+        string financial = ReconciliationToken();
 
         return new ConsoleCommandResult(
-            quick.IsOk && foreignKeys.IsOk && integrity.IsOk,
+            quick.IsOk && foreignKeys.IsOk && integrity.IsOk && financial != ConsoleText.Failed,
             [
                 "Runtime State: " + RuntimeStateToken(),
                 "Current Database Quick Check: " + Token(quick),
                 "Current Database Integrity Check: " + Token(integrity),
                 "Foreign Key Check: " + Token(foreignKeys),
-                "Financial Reconciliation: " + ConsoleText.Unknown,
+                "Financial Reconciliation: " + financial,
                 "Last Successful Backup: " + Present(summary.NewestCreatedAtUtc),
                 "Last Full-Verified Backup: " + Present(summary.NewestCreatedAtUtc),
                 "Automatic Backup Count: " + Number(summary.AutomaticCount),
@@ -192,6 +197,14 @@ internal sealed class ConsoleCommandExecutor
                 "Recovery Copy Present: " + ConsoleText.No,
             ]);
     }
+
+    private string ReconciliationToken() =>
+        reconciliation.LastRunStatus(SqliteDatabaseReconciliationRunner.ScopeFinancial) switch
+        {
+            "SUCCEEDED" => ConsoleText.Ok,
+            null => ConsoleText.Unknown,
+            _ => ConsoleText.Failed,
+        };
 
     private string RuntimeStateToken() => runtimeState() switch
     {

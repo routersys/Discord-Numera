@@ -1,3 +1,5 @@
+using System.Globalization;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Numera.Application.Common;
 using Numera.Host.Configuration;
@@ -123,8 +125,8 @@ internal sealed class StartupComposer
         ForeignKeyCheck: ForeignKeyCheck,
         IntegrityCheck: IntegrityCheck,
         FinancialReconciliation: Reconciliation,
-        RecoverIncompleteWork: static () => StartupCheckResult.NotAvailable,
-        VerifyNoOrphanState: static () => StartupCheckResult.NotAvailable,
+        RecoverIncompleteWork: RecoverExpiredLeases,
+        VerifyNoOrphanState: VerifyNoOrphanState,
         EnableWriteAdmission: static () => StartupCheckResult.Passed,
         StartBackgroundWorkers: static () => StartupCheckResult.Passed,
         ConnectDiscord: connectDiscord);
@@ -243,7 +245,67 @@ internal sealed class StartupComposer
         return StartupCheckResult.Passed;
     });
 
-    private StartupCheckResult Reconciliation() => StartupCheckResult.NotAvailable;
+    private StartupCheckResult Reconciliation() =>
+        Reconcile(static (runner, now) => runner.RunFinancialReconciliation(now));
+
+    private StartupCheckResult VerifyNoOrphanState() =>
+        Reconcile(static (runner, now) => runner.VerifyNoOrphanState(now));
+
+    private StartupCheckResult RecoverExpiredLeases()
+    {
+        if (connectionFactory is null)
+        {
+            return StartupCheckResult.Failed(BankingErrorCodes.SystemBusy);
+        }
+
+        try
+        {
+            CreateReconciliationRunner(connectionFactory)
+                .RecoverExpiredLeases(timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+
+            return StartupCheckResult.Passed;
+        }
+        catch (PersistenceFailureException exception)
+        {
+            return StartupCheckResult.Failed(exception.Code);
+        }
+        catch (SqliteException exception)
+        {
+            return StartupCheckResult.Failed(
+                exception.SqliteErrorCode.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    private StartupCheckResult Reconcile(
+        Func<IDatabaseReconciliationRunner, long, ReconciliationOutcome> action)
+    {
+        if (connectionFactory is null)
+        {
+            return StartupCheckResult.Failed(BankingErrorCodes.SystemBusy);
+        }
+
+        try
+        {
+            ReconciliationOutcome outcome = action(
+                CreateReconciliationRunner(connectionFactory),
+                timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+
+            return outcome.IsOk ? StartupCheckResult.Passed : StartupCheckResult.Failed(outcome.Detail);
+        }
+        catch (PersistenceFailureException exception)
+        {
+            return StartupCheckResult.Failed(exception.Code);
+        }
+        catch (SqliteException exception)
+        {
+            return StartupCheckResult.Failed(
+                exception.SqliteErrorCode.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static SqliteDatabaseReconciliationRunner CreateReconciliationRunner(
+        SqliteConnectionFactory factory) =>
+        new(factory, static () => Guid.CreateVersion7().ToByteArray(bigEndian: true));
 
     private StartupCheckResult ResolveBootstrapShell() => StartupCheckResult.NotAvailable;
 
