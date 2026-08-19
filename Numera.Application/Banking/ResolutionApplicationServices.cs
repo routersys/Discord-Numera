@@ -1,5 +1,6 @@
 using Numera.Application.Abstractions;
 using Numera.Application.Common;
+using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
 
@@ -14,8 +15,7 @@ public sealed record SelectResolutionSuccessorBankCommand(
 
 public sealed record CreateResolutionBridgeBankCommand(
     AuthorizationContext Actor,
-    ResolutionCaseId ResolutionCaseId,
-    BankId BridgeBankId);
+    ResolutionCaseId ResolutionCaseId);
 
 public sealed record StartResolutionTransferCommand(
     AuthorizationContext Actor,
@@ -60,14 +60,26 @@ public sealed class ResolutionAdministrationApplicationService
 {
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
+    private readonly IIdGenerator idGenerator;
+    private readonly ResolutionBridgeService bridges;
+    private readonly ResolutionTransferService transfers;
+    private readonly DepositInsuranceClaimService claims;
 
-    public ResolutionAdministrationApplicationService(IBankingWriteGateway writeGateway, IClock clock)
+    public ResolutionAdministrationApplicationService(
+        IBankingWriteGateway writeGateway,
+        IClock clock,
+        IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
         this.clock = clock;
+        this.idGenerator = idGenerator;
+        bridges = new ResolutionBridgeService(idGenerator);
+        transfers = new ResolutionTransferService(idGenerator);
+        claims = new DepositInsuranceClaimService(idGenerator);
     }
 
     public Task<Result<ResolutionCaseView>> GetCaseAsync(
@@ -107,12 +119,7 @@ public sealed class ResolutionAdministrationApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(
-            unitOfWork => Designate(
-                unitOfWork,
-                command.Actor,
-                command.ResolutionCaseId,
-                command.BridgeBankId,
-                bridge: true),
+            unitOfWork => Bridge(unitOfWork, command),
             cancellationToken);
     }
 
@@ -123,11 +130,7 @@ public sealed class ResolutionAdministrationApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(
-            unitOfWork => Advance(
-                unitOfWork,
-                command.Actor,
-                command.ResolutionCaseId,
-                ResolutionCaseStatus.TransferInProgress),
+            unitOfWork => Transfer(unitOfWork, command),
             cancellationToken);
     }
 
@@ -138,13 +141,256 @@ public sealed class ResolutionAdministrationApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(
-            unitOfWork => Advance(
-                unitOfWork,
-                command.Actor,
-                command.ResolutionCaseId,
-                ResolutionCaseStatus.Liquidated),
+            unitOfWork => Liquidate(unitOfWork, command),
             cancellationToken);
     }
+
+    private static ApplicationError? Qualifies(
+        IBankingUnitOfWork unitOfWork,
+        ResolutionCaseRecord resolution,
+        Bank candidate)
+    {
+        if (unitOfWork.Banks.Find(resolution.BankId) is not { } failing ||
+            candidate.EconomyScopeId != failing.EconomyScopeId)
+        {
+            return ApplicationError.Create(
+                ErrorCategory.Validation, BankingErrorCodes.ResolutionSuccessorInvalid);
+        }
+
+        if (candidate.Status is not (BankStatus.Operating or BankStatus.Restricted))
+        {
+            return ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.BankNotOperating);
+        }
+
+        if (unitOfWork.LedgerAccounts.FindByCode(
+                candidate.GeneralLedgerBookId, AccountOpeningWorkflow.DemandDepositControlCode)
+            is not { } candidateControl ||
+            unitOfWork.LedgerAccounts.FindByCode(
+                failing.GeneralLedgerBookId, AccountOpeningWorkflow.DemandDepositControlCode)
+            is not { } failingControl ||
+            candidateControl.CurrencyId != failingControl.CurrencyId)
+        {
+            return ApplicationError.Create(
+                ErrorCategory.Validation, BankingErrorCodes.ResolutionSuccessorInvalid);
+        }
+
+        return PrudentialFloor.Admits(unitOfWork, candidate, failing)
+            ? null
+            : ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.ResolutionSuccessorInvalid);
+    }
+
+    private Result<ResolutionCaseView> Bridge(
+        IBankingUnitOfWork unitOfWork,
+        CreateResolutionBridgeBankCommand command)
+    {
+        Result<ResolutionCaseRecord> resolved = Resolve(
+            unitOfWork, command.Actor, command.ResolutionCaseId);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<ResolutionCaseView>.Failure(resolved.Error!);
+        }
+
+        ResolutionCaseRecord resolution = resolved.Value;
+
+        if (resolution.BridgeBankId is not null)
+        {
+            return Result<ResolutionCaseView>.Success(ToView(resolution));
+        }
+
+        if (resolution.Status is not (ResolutionCaseStatus.Open or ResolutionCaseStatus.Restricted))
+        {
+            return Result<ResolutionCaseView>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.ResolutionCaseNotAmendable);
+        }
+
+        if (unitOfWork.Banks.Find(resolution.BankId) is not { } failing)
+        {
+            return Result<ResolutionCaseView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        Result<Bank> bridge = bridges.Establish(unitOfWork, resolution, failing, clock.Now());
+
+        if (!bridge.IsSuccess)
+        {
+            return Result<ResolutionCaseView>.Failure(bridge.Error!);
+        }
+
+        ResolutionCaseRecord updated = resolution with
+        {
+            BridgeBankId = bridge.Value.Id,
+            Status = ResolutionCaseStatus.Restricted,
+            Version = resolution.Version + 1,
+        };
+
+        if (resolution.Status == ResolutionCaseStatus.Open)
+        {
+            ResolutionCaseStatusCatalog.EnsureTransition(
+                resolution.Status, ResolutionCaseStatus.Restricted);
+        }
+
+        unitOfWork.Governance.UpdateResolutionCase(updated);
+
+        return Result<ResolutionCaseView>.Success(ToView(updated));
+    }
+
+    private Result<ResolutionCaseView> Transfer(
+        IBankingUnitOfWork unitOfWork,
+        StartResolutionTransferCommand command)
+    {
+        Result<ResolutionCaseView> advanced = Advance(
+            unitOfWork,
+            command.Actor,
+            command.ResolutionCaseId,
+            ResolutionCaseStatus.TransferInProgress);
+
+        if (!advanced.IsSuccess)
+        {
+            return advanced;
+        }
+
+        ResolutionCaseRecord resolution =
+            unitOfWork.Governance.FindResolutionCase(command.ResolutionCaseId)!;
+
+        BankId successorId = resolution.SelectedSuccessorBankId ?? resolution.BridgeBankId!.Value;
+
+        if (unitOfWork.Banks.Find(resolution.BankId) is not { } failing ||
+            unitOfWork.Banks.Find(successorId) is not { } successor)
+        {
+            return Result<ResolutionCaseView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        if (resolution.SelectedSuccessorBankId is not null &&
+            Qualifies(unitOfWork, resolution, successor) is { } disqualified)
+        {
+            return Result<ResolutionCaseView>.Failure(disqualified);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            ResolutionTransferService.TransferOperationType,
+            failing.EconomyScopeId,
+            null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(
+                ResolutionTransferService.TransferOperationType, resolution.Id.Value.ToString()),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        Result<int> transferred = transfers.Transfer(
+            unitOfWork, operation, resolution, failing, successor, BusinessDateOf(now), now);
+
+        if (!transferred.IsSuccess)
+        {
+            return Result<ResolutionCaseView>.Failure(transferred.Error!);
+        }
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        return advanced;
+    }
+
+    private Result<ResolutionCaseView> Liquidate(
+        IBankingUnitOfWork unitOfWork,
+        StartResolutionLiquidationCommand command)
+    {
+        Result<ResolutionCaseRecord> resolved = Resolve(
+            unitOfWork, command.Actor, command.ResolutionCaseId);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<ResolutionCaseView>.Failure(resolved.Error!);
+        }
+
+        ResolutionCaseRecord resolution = resolved.Value;
+        UtcTimestamp now = clock.Now();
+
+        if (resolution.Status == ResolutionCaseStatus.Open)
+        {
+            ResolutionCaseStatusCatalog.EnsureTransition(
+                resolution.Status, ResolutionCaseStatus.Restricted);
+
+            resolution = resolution with
+            {
+                Status = ResolutionCaseStatus.Restricted,
+                Version = resolution.Version + 1,
+            };
+
+            unitOfWork.Governance.UpdateResolutionCase(resolution);
+        }
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            LiquidationOperationType,
+            unitOfWork.Banks.Find(resolution.BankId)!.EconomyScopeId,
+            null,
+            idGenerator.NextId(),
+            IdempotencyKey.Create(LiquidationOperationType, resolution.Id.Value.ToString()),
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        Result<IReadOnlyList<DepositInsuranceClaimId>> created = claims.Create(
+            unitOfWork, resolution, now);
+
+        if (!created.IsSuccess)
+        {
+            return Result<ResolutionCaseView>.Failure(created.Error!);
+        }
+
+        foreach (DepositInsuranceClaimId claimId in created.Value)
+        {
+            DepositInsuranceClaimRecord claim =
+                unitOfWork.DepositInsurance.ListCaseClaims(resolution.Id)
+                    .First(candidate => candidate.Id == claimId);
+
+            Result<bool> settled = claims.Settle(
+                unitOfWork, operation, claim, approved: true, BusinessDateOf(now), now);
+
+            if (!settled.IsSuccess)
+            {
+                return Result<ResolutionCaseView>.Failure(settled.Error!);
+            }
+        }
+
+        Result<ResolutionCaseView> advanced = Advance(
+            unitOfWork, command.Actor, command.ResolutionCaseId, ResolutionCaseStatus.Liquidated);
+
+        if (!advanced.IsSuccess)
+        {
+            return advanced;
+        }
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+            OutboxEventId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            LiquidatedEventType,
+            string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $$"""{"resolution_case_id":"{{resolution.Id.Value}}"}"""),
+            now));
+
+        return advanced;
+    }
+
+    internal const string LiquidationOperationType = "RESOLUTION_LIQUIDATION";
+
+    internal const string LiquidatedEventType = "RESOLUTION_LIQUIDATED";
+
+    private static BusinessDate BusinessDateOf(UtcTimestamp at) => BusinessDate.FromDayNumber(
+        DateOnly.FromDateTime(
+            DateTimeOffset.FromUnixTimeMilliseconds(at.UnixMilliseconds).UtcDateTime).DayNumber);
 
     private static Result<ResolutionCaseView> Designate(
         IBankingUnitOfWork unitOfWork,
@@ -174,10 +420,15 @@ public sealed class ResolutionAdministrationApplicationService
                 ErrorCategory.Validation, BankingErrorCodes.ResolutionSuccessorInvalid);
         }
 
-        if (unitOfWork.Banks.Find(bankId) is null)
+        if (unitOfWork.Banks.Find(bankId) is not { } candidate)
         {
             return Result<ResolutionCaseView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        if (!bridge && Qualifies(unitOfWork, resolution, candidate) is { } disqualified)
+        {
+            return Result<ResolutionCaseView>.Failure(disqualified);
         }
 
         ResolutionCaseRecord updated = bridge

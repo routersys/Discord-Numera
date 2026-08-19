@@ -91,4 +91,10 @@ public static partial class BankingErrorCodes
 
     public static string LoanOriginationUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 160);
+
+    public static string ControlAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 41);
+
+    public static string ResolutionEstateAccountUnavailable { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 42);
 }

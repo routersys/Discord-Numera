@@ -378,6 +378,29 @@ public sealed class SqliteDepositAccountRepository : IDepositAccountRepository
         }
     }
 
+    public IReadOnlyList<DepositAccount> ListByBank(BankId bankId, int limit)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM deposit_accounts
+            WHERE bank_id = $bank AND status NOT IN ('CLOSED')
+            ORDER BY deposit_account_id
+            LIMIT $limit;
+            """);
+
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+        command.Parameters.AddWithValue("$limit", limit);
+
+        List<DepositAccount> accounts = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            accounts.Add(Read(reader));
+        }
+
+        return accounts;
+    }
+
     public IReadOnlyList<DepositAccount> ListDormancyCandidates(UtcTimestamp inactiveSince, int limit)
     {
         using SqliteCommand command = unitOfWork.CreateCommand($"""

@@ -176,6 +176,16 @@ public interface IDepositInsuranceRepository
         CustomerAccountId customerAccountId,
         DepositInsuranceClaimId? after,
         int limit);
+
+    void AddClaim(DepositInsuranceClaimRecord claim);
+
+    void UpdateClaim(DepositInsuranceClaimRecord claim);
+
+    IReadOnlyList<DepositInsuranceClaimRecord> ListCaseClaims(ResolutionCaseId resolutionCaseId);
+
+    IReadOnlyList<DepositInsuranceEnrollmentRecord> ListActiveEnrollmentsAtCutoff(
+        BankId bankId,
+        UtcTimestamp cutoff);
 }
 
 public partial interface IBankingUnitOfWork

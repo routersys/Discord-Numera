@@ -161,3 +161,13 @@ public readonly record struct DebitCardRefundId(EntityIdValue Value) : IEntityId
 
     public override string ToString() => Value.ToString();
 }
+
+public readonly record struct ResolutionTransferId(EntityIdValue Value)
+    : IEntityId<ResolutionTransferId>
+{
+    public static string EntityName => "resolution_transfer";
+
+    public static ResolutionTransferId FromValue(EntityIdValue value) => new(value);
+
+    public override string ToString() => Value.ToString();
+}

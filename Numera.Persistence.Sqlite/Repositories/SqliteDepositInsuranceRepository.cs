@@ -475,6 +475,123 @@ internal sealed class SqliteDepositInsuranceRepository : IDepositInsuranceReposi
             : null;
     }
 
+    public void AddClaim(DepositInsuranceClaimRecord claim)
+    {
+        ArgumentNullException.ThrowIfNull(claim);
+
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            INSERT INTO deposit_insurance_claims({ClaimColumns})
+            VALUES($id, $case, $version, $enrollment, $party, $customer, $bank, $currency, $class,
+                $wallet, $eligible, $insured, $paid, $status, $created, $entityVersion);
+            """);
+
+        BindClaim(command, claim);
+        command.ExecuteNonQuery();
+    }
+
+    public void UpdateClaim(DepositInsuranceClaimRecord claim)
+    {
+        ArgumentNullException.ThrowIfNull(claim);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE deposit_insurance_claims
+            SET eligible_minor = $eligible, insured_minor = $insured, paid_minor = $paid,
+                status = $status, version = $entityVersion
+            WHERE deposit_insurance_claim_id = $id;
+            """);
+
+        BindClaim(command, claim);
+        command.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<DepositInsuranceClaimRecord> ListCaseClaims(ResolutionCaseId resolutionCaseId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {ClaimColumns} FROM deposit_insurance_claims
+            WHERE resolution_case_id = $case
+            ORDER BY deposit_insurance_claim_id;
+            """);
+
+        command.Parameters.AddWithValue("$case", SqliteValueMapper.ToBlob(resolutionCaseId.Value));
+
+        List<DepositInsuranceClaimRecord> claims = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            claims.Add(ReadClaim(reader));
+        }
+
+        return claims;
+    }
+
+    public IReadOnlyList<DepositInsuranceEnrollmentRecord> ListActiveEnrollmentsAtCutoff(
+        BankId bankId,
+        UtcTimestamp cutoff)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {EnrollmentColumns} FROM deposit_insurance_enrollments
+            WHERE bank_id = $bank AND status = 'ACTIVE' AND enrolled_at <= $cutoff
+            ORDER BY deposit_insurance_enrollment_id;
+            """);
+
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+        command.Parameters.AddWithValue("$cutoff", cutoff.UnixMilliseconds);
+
+        List<DepositInsuranceEnrollmentRecord> enrollments = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            enrollments.Add(ReadEnrollment(reader));
+        }
+
+        return enrollments;
+    }
+
+    private static void BindClaim(SqliteCommand command, DepositInsuranceClaimRecord claim)
+    {
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(claim.Id.Value));
+        command.Parameters.AddWithValue(
+            "$case", SqliteValueMapper.ToBlob(claim.ResolutionCaseId.Value));
+        command.Parameters.AddWithValue(
+            "$version", SqliteValueMapper.ToBlob(claim.SchemeVersionId.Value));
+        command.Parameters.AddWithValue(
+            "$enrollment", SqliteValueMapper.ToBlob(claim.EnrollmentId.Value));
+        command.Parameters.AddWithValue("$party", SqliteValueMapper.ToBlob(claim.PartyId.Value));
+        command.Parameters.AddWithValue(
+            "$customer", SqliteValueMapper.ToBlob(claim.CustomerAccountId.Value));
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(claim.BankId.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(claim.CurrencyId.Value));
+        command.Parameters.AddWithValue("$class", claim.ProtectionClassCode);
+        command.Parameters.AddWithValue(
+            "$wallet", SqliteValueMapper.ToBlob(claim.SettlementWalletId.Value));
+        command.Parameters.AddWithValue("$eligible", claim.Eligible.Value);
+        command.Parameters.AddWithValue("$insured", claim.Insured.Value);
+        command.Parameters.AddWithValue("$paid", claim.Paid.Value);
+        command.Parameters.AddWithValue("$status", claim.Status.ToToken());
+        command.Parameters.AddWithValue("$created", claim.CreatedAt.UnixMilliseconds);
+        command.Parameters.AddWithValue("$entityVersion", claim.Version);
+    }
+
+    private static DepositInsuranceClaimRecord ReadClaim(SqliteDataReader reader) => new(
+        DepositInsuranceClaimId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+        ResolutionCaseId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+        DepositInsuranceSchemeVersionId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+        DepositInsuranceEnrollmentId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+        PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+        CustomerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
+        BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+        CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
+        reader.GetString(8),
+        InsuranceSettlementWalletId.FromValue(SqliteValueMapper.ReadEntityId(reader, 9)),
+        MoneyMinor.FromMinor(reader.GetInt64(10)),
+        MoneyMinor.FromMinor(reader.GetInt64(11)),
+        MoneyMinor.FromMinor(reader.GetInt64(12)),
+        DepositInsuranceClaimStatusCatalog.ParseToken(reader.GetString(13)),
+        SqliteValueMapper.ReadTimestamp(reader, 14),
+        reader.GetInt64(15));
+
     public IReadOnlyList<DepositInsuranceClaimRecord> ListClaims(
         CustomerAccountId customerAccountId,
         DepositInsuranceClaimId? after,

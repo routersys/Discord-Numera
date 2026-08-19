@@ -65,6 +65,27 @@ public sealed class SqliteAccountingPeriodRepository : IAccountingPeriodReposito
             ? AccountingPeriodId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0))
             : null;
     }
+
+    public void Open(
+        AccountingPeriodId id,
+        AccountingBookId bookId,
+        string periodKey,
+        BusinessDate startsOn,
+        BusinessDate endsOn)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO accounting_periods(accounting_period_id, accounting_book_id, period_key,
+                starts_on, ends_on, status, closed_at, version)
+            VALUES($id, $book, $key, $starts, $ends, 'OPEN', NULL, 1);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+        command.Parameters.AddWithValue("$book", SqliteValueMapper.ToBlob(bookId.Value));
+        command.Parameters.AddWithValue("$key", periodKey);
+        command.Parameters.AddWithValue("$starts", startsOn.ToString());
+        command.Parameters.AddWithValue("$ends", endsOn.ToString());
+        command.ExecuteNonQuery();
+    }
 }
 
 public sealed class SqliteAccountingTransactionRepository : IAccountingTransactionRepository

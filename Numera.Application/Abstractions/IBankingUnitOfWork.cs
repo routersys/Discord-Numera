@@ -246,6 +246,8 @@ public interface IDepositAccountRepository
         Numera.Domain.Banking.AccountNumber accountNumber);
 
     long CountByBranch(BankId bankId, BranchId branchId);
+
+    IReadOnlyList<Numera.Domain.Banking.DepositAccount> ListByBank(BankId bankId, int limit);
 }
 
 public interface IBranchRepository
@@ -258,6 +260,13 @@ public interface IBranchRepository
 public interface IAccountingPeriodRepository
 {
     AccountingPeriodId? FindOpen(AccountingBookId bookId, BusinessDate businessDate);
+
+    void Open(
+        AccountingPeriodId id,
+        AccountingBookId bookId,
+        string periodKey,
+        BusinessDate startsOn,
+        BusinessDate endsOn);
 }
 
 public interface IAccountingTransactionRepository

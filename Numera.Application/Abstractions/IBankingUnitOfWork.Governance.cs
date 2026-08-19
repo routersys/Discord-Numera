@@ -118,6 +118,17 @@ public sealed record MerchantOperatorGrantRecord(
     MerchantOperatorGrantStatus Status,
     long Version);
 
+public sealed record ResolutionTransferRecord(
+    ResolutionTransferId Id,
+    ResolutionCaseId ResolutionCaseId,
+    DepositAccountId SourceDepositAccountId,
+    BankId SuccessorBankId,
+    DepositAccountId SuccessorDepositAccountId,
+    MoneyMinor TransferredClaim,
+    BusinessOperationId BusinessOperationId,
+    UtcTimestamp TransferredAt,
+    long Version);
+
 public interface IGovernanceRepository
 {
     void AddPresentationProfile(PresentationProfileRecord profile, UtcTimestamp createdAt);
@@ -161,6 +172,12 @@ public interface IGovernanceRepository
     ResolutionCaseRecord? FindResolutionCase(ResolutionCaseId id);
 
     void UpdateResolutionCase(ResolutionCaseRecord resolutionCase);
+
+    void AddResolutionTransfer(ResolutionTransferRecord transfer);
+
+    ResolutionTransferRecord? FindResolutionTransfer(
+        ResolutionCaseId resolutionCaseId,
+        DepositAccountId sourceDepositAccountId);
 
     IReadOnlyList<LoanProductRecord> ListLoanProducts(BankId bankId, int limit);
 

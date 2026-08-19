@@ -50,6 +50,8 @@ public sealed class DepositInsuranceTests
 
         public AccountingBookId Book { get; } = AccountingBookId.FromValue(EntityIdValue.FromBits(211));
 
+        public ResolutionAdministrationApplicationService Resolution { get; private set; } = null!;
+
         public static Harness Create()
         {
             string root = Path.Combine(Path.GetTempPath(), "numera-insurance", Guid.NewGuid().ToString("n"));
@@ -82,6 +84,8 @@ public sealed class DepositInsuranceTests
             harness.Administration =
                 new DepositInsuranceAdministrationApplicationService(gateway, harness.Clock, ids);
             harness.Insurance = new DepositInsuranceApplicationService(gateway, harness.Clock, ids);
+            harness.Resolution =
+                new ResolutionAdministrationApplicationService(gateway, harness.Clock, ids);
 
             return harness;
         }
@@ -145,6 +149,8 @@ public sealed class DepositInsuranceTests
                 ({Blob(43)}, {Blob(211)}, NULL, '4004', 'RESOLUTION_LOSS_EXPENSE', 'EXPENSE',
                     'DEBIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
                 ({Blob(44)}, {Blob(4)}, NULL, '4005', 'CENTRAL_BANK_RESERVE_ASSET', 'ASSET', 'DEBIT',
+                    {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                ({Blob(45)}, {Blob(4)}, NULL, '5900', 'RESOLUTION_LOSS_EXPENSE', 'EXPENSE', 'DEBIT',
                     {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
                 ({Blob(203)}, {Blob(201)}, NULL, '2100', 'CENTRAL_BANK_SETTLEMENT_LIABILITY',
                     'LIABILITY', 'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
@@ -217,6 +223,19 @@ public sealed class DepositInsuranceTests
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText = sql;
             return command.ExecuteScalar() as string ?? string.Empty;
+        }
+
+        public ResolutionCaseId OpenResolutionCase()
+        {
+            Execute($"""
+                INSERT INTO resolution_cases(resolution_case_id, bank_id, status, opened_at,
+                    insurance_cutoff_at, selected_successor_bank_id, bridge_bank_id, resolved_at,
+                    version)
+                VALUES({Blob(220)}, {Blob(5)}, 'OPEN', 4102444800000, 4102444800000, NULL, NULL, NULL,
+                    1);
+                """);
+
+            return ResolutionCaseId.FromValue(EntityIdValue.FromBits(220));
         }
 
         public void OpenPeriods() => Execute("""
@@ -383,6 +402,99 @@ public sealed class DepositInsuranceTests
 
         Assert.IsFalse(second.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.DepositInsuranceAlreadyEnrolled, second.Error!.Code);
+    }
+
+    [TestMethod]
+    public async Task LiquidationPaysTheInsuredAmountIntoTheSettlementWallet()
+    {
+        await using Harness harness = Harness.Create();
+        await PublishSchemeAsync(harness);
+        harness.OpenPeriods();
+        DepositAccountId account = await harness.OpenAccountAsync();
+        harness.Fund(account, 2_000_000);
+
+        Assert.IsTrue((await harness.Insurance.EnrollAsync(
+            new EnrollDepositInsuranceCommand(Customer(), account, "STANDARD", "enroll-liq"),
+            CancellationToken.None)).IsSuccess);
+
+        ResolutionCaseId resolution = harness.OpenResolutionCase();
+
+        Result<ResolutionCaseView> liquidated = await harness.Resolution.StartLiquidationAsync(
+            new StartResolutionLiquidationCommand(Owner(), resolution), CancellationToken.None);
+
+        Assert.IsTrue(liquidated.IsSuccess, liquidated.Error?.Code);
+        Assert.AreEqual(ResolutionCaseStatus.Liquidated, liquidated.Value.Status);
+        Assert.AreEqual(1L, harness.Count("deposit_insurance_claims"));
+        Assert.AreEqual("PAID", harness.ReadText("SELECT status FROM deposit_insurance_claims;"));
+        Assert.AreEqual(
+            "1000000",
+            harness.ReadText(
+                "SELECT CAST(insured_minor AS TEXT) FROM deposit_insurance_claims;"));
+        Assert.AreEqual(
+            "1000000",
+            harness.ReadText(
+                "SELECT CAST(paid_minor AS TEXT) FROM deposit_insurance_claims;"));
+        Assert.AreEqual("CLAIMED", harness.ReadText(
+            "SELECT status FROM deposit_insurance_enrollments;"));
+        Assert.AreEqual("SETTLED", harness.ReadText(
+            "SELECT status FROM deposit_insurance_reservations;"));
+        Assert.AreEqual(
+            "1000000",
+            harness.ReadText("""
+                SELECT CAST(consumed_minor AS TEXT) FROM deposit_insurance_reservations;
+                """));
+        Assert.AreEqual(1L, harness.Count("insurance_settlement_wallets"));
+        Assert.AreEqual(
+            "1000000",
+            harness.ReadText("""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN insurance_settlement_wallets AS w
+                    ON w.liability_ledger_account_id = p.ledger_account_id;
+                """));
+    }
+
+    [TestMethod]
+    public async Task ABridgeBankReceivesTheTransferredDepositClaims()
+    {
+        await using Harness harness = Harness.Create();
+        await PublishSchemeAsync(harness);
+        harness.OpenPeriods();
+        DepositAccountId account = await harness.OpenAccountAsync();
+        harness.Fund(account, 30_000);
+
+        ResolutionCaseId resolution = harness.OpenResolutionCase();
+
+        Result<ResolutionCaseView> bridged = await harness.Resolution.CreateBridgeBankAsync(
+            new CreateResolutionBridgeBankCommand(Owner(), resolution), CancellationToken.None);
+
+        Assert.IsTrue(bridged.IsSuccess, bridged.Error?.Code);
+        Assert.IsNotNull(bridged.Value.BridgeBankId);
+        Assert.AreEqual("BRIDGE", harness.ReadText(
+            "SELECT bank_kind FROM banks WHERE bank_kind = 'BRIDGE';"));
+
+        Result<ResolutionCaseView> transferred = await harness.Resolution.StartTransferAsync(
+            new StartResolutionTransferCommand(Owner(), resolution), CancellationToken.None);
+
+        Assert.IsTrue(transferred.IsSuccess, transferred.Error?.Code);
+        Assert.AreEqual(1L, harness.Count("resolution_transfers"));
+        Assert.AreEqual(
+            "30000",
+            harness.ReadText(
+                "SELECT CAST(transferred_claim_minor AS TEXT) FROM resolution_transfers;"));
+        Assert.AreEqual(
+            "0",
+            harness.ReadText($"""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                WHERE d.deposit_account_id = x'{Convert.ToHexString(account.Value.ToByteArray())}';
+                """));
+        Assert.AreEqual(
+            "30000",
+            harness.ReadText("""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                JOIN resolution_transfers AS t ON t.successor_deposit_account_id = d.deposit_account_id;
+                """));
     }
 
     [TestMethod]

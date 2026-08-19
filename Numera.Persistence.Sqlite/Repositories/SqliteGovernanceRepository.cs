@@ -394,6 +394,67 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
             : null;
     }
 
+    public void AddResolutionTransfer(ResolutionTransferRecord transfer)
+    {
+        ArgumentNullException.ThrowIfNull(transfer);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO resolution_transfers(resolution_transfer_id, resolution_case_id,
+                source_deposit_account_id, successor_bank_id, successor_deposit_account_id,
+                transferred_claim_minor, business_operation_id, transferred_at, version)
+            VALUES($id, $case, $source, $bank, $destination, $claim, $operation, $transferred,
+                $version);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(transfer.Id.Value));
+        command.Parameters.AddWithValue(
+            "$case", SqliteValueMapper.ToBlob(transfer.ResolutionCaseId.Value));
+        command.Parameters.AddWithValue(
+            "$source", SqliteValueMapper.ToBlob(transfer.SourceDepositAccountId.Value));
+        command.Parameters.AddWithValue(
+            "$bank", SqliteValueMapper.ToBlob(transfer.SuccessorBankId.Value));
+        command.Parameters.AddWithValue(
+            "$destination", SqliteValueMapper.ToBlob(transfer.SuccessorDepositAccountId.Value));
+        command.Parameters.AddWithValue("$claim", transfer.TransferredClaim.Value);
+        command.Parameters.AddWithValue(
+            "$operation", SqliteValueMapper.ToBlob(transfer.BusinessOperationId.Value));
+        command.Parameters.AddWithValue("$transferred", transfer.TransferredAt.UnixMilliseconds);
+        command.Parameters.AddWithValue("$version", transfer.Version);
+        command.ExecuteNonQuery();
+    }
+
+    public ResolutionTransferRecord? FindResolutionTransfer(
+        ResolutionCaseId resolutionCaseId,
+        DepositAccountId sourceDepositAccountId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT resolution_transfer_id, resolution_case_id, source_deposit_account_id,
+                   successor_bank_id, successor_deposit_account_id, transferred_claim_minor,
+                   business_operation_id, transferred_at, version
+            FROM resolution_transfers
+            WHERE resolution_case_id = $case AND source_deposit_account_id = $source;
+            """);
+
+        command.Parameters.AddWithValue("$case", SqliteValueMapper.ToBlob(resolutionCaseId.Value));
+        command.Parameters.AddWithValue(
+            "$source", SqliteValueMapper.ToBlob(sourceDepositAccountId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new ResolutionTransferRecord(
+                ResolutionTransferId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                ResolutionCaseId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                DepositAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 2)),
+                BankId.FromValue(SqliteValueMapper.ReadEntityId(reader, 3)),
+                DepositAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 4)),
+                MoneyMinor.FromMinor(reader.GetInt64(5)),
+                BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
+                SqliteValueMapper.ReadTimestamp(reader, 7),
+                reader.GetInt64(8))
+            : null;
+    }
+
     public void UpdateResolutionCase(ResolutionCaseRecord resolutionCase)
     {
         ArgumentNullException.ThrowIfNull(resolutionCase);
