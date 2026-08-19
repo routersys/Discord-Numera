@@ -41,6 +41,12 @@ internal static class SqlitePragmaGuard
             WalAutoCheckpointPages.ToString(CultureInfo.InvariantCulture));
     }
 
+    internal static bool IsWriteAheadLogging(SqliteConnection connection) =>
+        string.Equals(
+            SqliteConnectionFactory.ReadScalarText(connection, "PRAGMA journal_mode;"),
+            WriteAheadLoggingMode,
+            StringComparison.OrdinalIgnoreCase);
+
     internal static void EnsureWriteAheadLogging(SqliteConnection connection)
     {
         string mode = SqliteConnectionFactory.ReadScalarText(connection, "PRAGMA journal_mode;");

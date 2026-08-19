@@ -394,4 +394,89 @@ public sealed class SingleInstanceLockTests
 
         initializer.VerifyRuntimeReadiness();
     }
+
+    [TestMethod]
+    public void AnEmptyFileLeftByAFailedStartupIsStillFresh()
+    {
+        using SqliteDatabaseFixture fixture = SqliteDatabaseFixture.Create();
+        SqliteDatabaseInitializer initializer = fixture.CreateInitializer();
+
+        initializer.EnsureDirectory();
+        File.WriteAllBytes(fixture.Options.FullPath, []);
+
+        Assert.IsTrue(initializer.IsFreshDatabase);
+
+        initializer.VerifyRuntimeReadiness();
+
+        Assert.IsFalse(initializer.IsFreshDatabase);
+    }
+
+    [TestMethod]
+    public void ADatabaseLeftOutsideWriteAheadLoggingIsConverted()
+    {
+        using SqliteDatabaseFixture fixture = SqliteDatabaseFixture.Create();
+        SqliteDatabaseInitializer initializer = fixture.CreateInitializer();
+
+        initializer.EnsureDirectory();
+
+        using (SqliteConnection rollback = new(
+            "Data Source=" + fixture.Options.FullPath + ";Pooling=False"))
+        {
+            rollback.Open();
+
+            using SqliteCommand command = rollback.CreateCommand();
+            command.CommandText =
+                "PRAGMA journal_mode = DELETE; CREATE TABLE legacy(id INTEGER PRIMARY KEY) STRICT;";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.AreEqual("delete", JournalMode(fixture));
+        Assert.IsFalse(initializer.IsFreshDatabase);
+
+        initializer.VerifyRuntimeReadiness();
+
+        Assert.AreEqual("wal", JournalMode(fixture));
+    }
+
+    [TestMethod]
+    public void ConvertingToWriteAheadLoggingKeepsTheExistingRows()
+    {
+        using SqliteDatabaseFixture fixture = SqliteDatabaseFixture.Create();
+        SqliteDatabaseInitializer initializer = fixture.CreateInitializer();
+
+        initializer.EnsureDirectory();
+
+        using (SqliteConnection rollback = new(
+            "Data Source=" + fixture.Options.FullPath + ";Pooling=False"))
+        {
+            rollback.Open();
+
+            using SqliteCommand command = rollback.CreateCommand();
+            command.CommandText =
+                "PRAGMA journal_mode = DELETE;"
+                + "CREATE TABLE legacy(id INTEGER PRIMARY KEY) STRICT;"
+                + "INSERT INTO legacy(id) VALUES(7);";
+            command.ExecuteNonQuery();
+        }
+
+        initializer.VerifyRuntimeReadiness();
+
+        using SqliteConnection connection = fixture.ConnectionFactory.OpenRuntimeConnection();
+        using SqliteCommand read = connection.CreateCommand();
+        read.CommandText = "SELECT id FROM legacy;";
+
+        Assert.AreEqual(7L, (long)(read.ExecuteScalar() ?? 0L));
+    }
+
+    private static string JournalMode(SqliteDatabaseFixture fixture)
+    {
+        using SqliteConnection connection = new(
+            "Data Source=" + fixture.Options.FullPath + ";Pooling=False");
+        connection.Open();
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode;";
+
+        return command.ExecuteScalar() as string ?? string.Empty;
+    }
 }

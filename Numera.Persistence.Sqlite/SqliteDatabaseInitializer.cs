@@ -46,17 +46,26 @@ public sealed class SqliteDatabaseInitializer
         return outcome;
     }
 
-    public bool IsFreshDatabase => !File.Exists(options.FullPath);
+    public bool IsFreshDatabase =>
+        !File.Exists(options.FullPath) || new FileInfo(options.FullPath).Length == 0;
+
+    public void EnsureWriteAheadLogging()
+    {
+        EnsureDirectory();
+
+        using SqliteConnection bootstrap = connectionFactory.OpenBootstrapConnection();
+
+        if (SqlitePragmaGuard.IsWriteAheadLogging(bootstrap))
+        {
+            return;
+        }
+
+        SqlitePragmaGuard.ApplyDatabaseWide(bootstrap);
+    }
 
     public void VerifyRuntimeReadiness()
     {
-        if (IsFreshDatabase)
-        {
-            EnsureDirectory();
-
-            using SqliteConnection bootstrap = connectionFactory.OpenBootstrapConnection();
-            SqlitePragmaGuard.ApplyDatabaseWide(bootstrap);
-        }
+        EnsureWriteAheadLogging();
 
         using SqliteConnection connection = connectionFactory.OpenRuntimeConnection();
         SqlitePragmaGuard.EnsureIntegrity(connection);

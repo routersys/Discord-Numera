@@ -3,6 +3,16 @@ using Numera.Discord.Abstractions;
 
 namespace Numera.Host.Discord;
 
+internal sealed class DiscordCredentialMissingException : Exception
+{
+    internal DiscordCredentialMissingException()
+        : base(BankingErrorCodes.DiscordCredentialMissing)
+    {
+    }
+
+    internal string Code => BankingErrorCodes.DiscordCredentialMissing;
+}
+
 internal sealed class EnvironmentDiscordCredentialProvider : IDiscordCredentialProvider
 {
     internal const string EnvironmentVariable = "DISCORD_TOKEN";
@@ -29,14 +39,14 @@ internal sealed class EnvironmentDiscordCredentialProvider : IDiscordCredentialP
 
         if (System.Console.IsInputRedirected)
         {
-            throw new InvalidOperationException(BankingErrorCodes.DiscordCredentialMissing);
+            throw new DiscordCredentialMissingException();
         }
 
         string entered = HiddenConsoleInput.Read();
 
         if (entered.Length == 0)
         {
-            throw new InvalidOperationException(BankingErrorCodes.DiscordCredentialMissing);
+            throw new DiscordCredentialMissingException();
         }
 
         token = entered;

@@ -103,12 +103,22 @@ internal static class NumeraHost
 
             return NumeraHostExitCode.RecoveryRequired;
         }
+        catch (Exception exception) when (Credential(exception) is { } missing)
+        {
+            fatal.Write(
+                BootstrapFatalEvents.ConfigurationInvalidId,
+                BootstrapFatalEvents.ConfigurationInvalidName,
+                "The Discord bot token was not supplied. Set the DISCORD_TOKEN environment variable.",
+                missing.Code);
+
+            return NumeraHostExitCode.StartupFailed;
+        }
         catch (Exception exception)
         {
             fatal.Write(
                 BootstrapFatalEvents.UnexpectedId,
                 BootstrapFatalEvents.UnexpectedName,
-                "Startup failed before the composition root was built.",
+                "Startup failed.",
                 exception);
 
             return NumeraHostExitCode.StartupFailed;
@@ -117,6 +127,21 @@ internal static class NumeraHost
         {
             instanceLock?.Dispose();
         }
+    }
+
+    internal static DiscordCredentialMissingException? Credential(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is DiscordCredentialMissingException missing)
+            {
+                return missing;
+            }
+        }
+
+        return null;
     }
 
     internal static bool MayStartHost(StartupRecoveryReport recovery)

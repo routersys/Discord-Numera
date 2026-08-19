@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Numera.Host.Console;
+using Numera.Host.Discord;
 using Numera.Host.Startup;
 
 namespace Numera.Host.Tests;
@@ -121,5 +122,33 @@ public sealed class BootstrapShellResolutionTests
         {
             Cleanup(composer, root);
         }
+    }
+}
+
+[TestClass]
+public sealed class DiscordCredentialFailureTests
+{
+    [TestMethod]
+    public void AMissingTokenIsRecognisedDirectly()
+    {
+        DiscordCredentialMissingException missing = new();
+
+        Assert.AreSame(missing, NumeraHost.Credential(missing));
+        Assert.AreEqual(Numera.Application.Common.BankingErrorCodes.DiscordCredentialMissing, missing.Code);
+    }
+
+    [TestMethod]
+    public void AMissingTokenIsRecognisedThroughTheHostingWrapper()
+    {
+        Exception wrapped = new InvalidOperationException(
+            "Hosting failed to start", new DiscordCredentialMissingException());
+
+        Assert.IsNotNull(NumeraHost.Credential(wrapped));
+    }
+
+    [TestMethod]
+    public void AnUnrelatedFailureIsNotTreatedAsAMissingToken()
+    {
+        Assert.IsNull(NumeraHost.Credential(new InvalidOperationException("boom")));
     }
 }
