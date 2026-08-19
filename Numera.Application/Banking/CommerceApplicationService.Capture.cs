@@ -14,7 +14,10 @@ public sealed partial class CommerceApplicationService
     internal const string CapturedEventType = "COMMERCE_PAYMENT_CAPTURED";
     internal const string SameCurrencyRoute = "SAME_CURRENCY_PAYMENT";
     internal const string SameCurrencyPaymentRoute = "SAME_CURRENCY_DEBIT";
+    internal const string FxRoute = "FX_FOK";
+    internal const string FxPaymentRoute = "FX_FOK_DEBIT";
     internal const string SaleMovementKind = "SALE";
+    internal const string SucceededMarker = "\"captured\":true";
     internal const long AuthorizationLifetimeMilliseconds = 7 * 24 * 60 * 60 * 1000L;
 
     internal readonly record struct CaptureOutcome(CommercePaymentView? View, ApplicationError? Rejection);
@@ -27,6 +30,7 @@ public sealed partial class CommerceApplicationService
         IReadOnlyDictionary<MerchantProductId, MerchantProductRecord> Products,
         IReadOnlySet<CommerceOrderLineId> RoleFulfillmentLines,
         MerchantAftercarePolicyRecord Aftercare,
+        MerchantProfileRecord Profile,
         CustomerAccount Customer,
         DepositAccount Source,
         DepositAccount Destination,
@@ -61,27 +65,29 @@ public sealed partial class CommerceApplicationService
 
         UtcTimestamp now = clock.Now();
 
-        if (confirmation.ConsumedAt is not null || now >= confirmation.ExpiresAt)
+        if (now >= confirmation.ExpiresAt)
         {
             return Result<CaptureContext>.Failure(
                 ErrorCategory.OperationExpired, BankingErrorCodes.CommerceConfirmationExpired);
         }
 
+        bool replay = confirmation.ConsumedAt is not null;
+
         if (unitOfWork.Commerce.FindOrder(confirmation.CommerceOrderId) is not { } order ||
-            order.Status != CommerceOrderStatus.AwaitingConfirmation)
+            (!replay && order.Status != CommerceOrderStatus.AwaitingConfirmation))
         {
             return Result<CaptureContext>.Failure(
                 ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
         }
 
-        if (now >= order.CheckoutExpiresAt)
+        if (!replay && now >= order.CheckoutExpiresAt)
         {
             return Result<CaptureContext>.Failure(
                 ErrorCategory.OperationExpired, BankingErrorCodes.CommerceCheckoutExpired);
         }
 
         if (unitOfWork.Commerce.FindPaymentByOrder(order.Id) is not { } payment ||
-            payment.Status != CommercePaymentStatus.Pending)
+            (!replay && payment.Status != CommercePaymentStatus.Pending))
         {
             return Result<CaptureContext>.Failure(
                 ErrorCategory.Conflict, BankingErrorCodes.CommerceOrderStateInvalid);
@@ -124,13 +130,6 @@ public sealed partial class CommerceApplicationService
         {
             return Result<CaptureContext>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
-        }
-
-        if (source.CurrencyId != order.PresentmentCurrencyId)
-        {
-            return Result<CaptureContext>.Failure(
-                ErrorCategory.InfrastructureUnavailable,
-                BankingErrorCodes.CommerceCrossCurrencyUnavailable);
         }
 
         string actor = command.Actor.DiscordUserId.ToString(CultureInfo.InvariantCulture);
@@ -178,6 +177,19 @@ public sealed partial class CommerceApplicationService
                 continue;
             }
 
+            if (VerifySnapshots(unitOfWork, order, line, product, now) is { } snapshot)
+            {
+                rejection = snapshot;
+                continue;
+            }
+
+            if (roleLines.Contains(line.Id) &&
+                VerifyRoleExclusivity(unitOfWork, customer, line, product) is { } exclusivity)
+            {
+                rejection = exclusivity;
+                continue;
+            }
+
             if (product.InventoryMode != MerchantVocabulary.InventoryFinite)
             {
                 continue;
@@ -204,6 +216,7 @@ public sealed partial class CommerceApplicationService
             products,
             roleLines,
             aftercare,
+            profile,
             customer,
             source,
             destination,
@@ -212,6 +225,100 @@ public sealed partial class CommerceApplicationService
             actor,
             now,
             rejection));
+    }
+
+    private static ApplicationError? VerifySnapshots(
+        IBankingUnitOfWork unitOfWork,
+        CommerceOrderRecord order,
+        CommerceOrderLineRecord line,
+        MerchantProductRecord product,
+        UtcTimestamp now)
+    {
+        if (unitOfWork.Commerce.FindPrice(line.PriceVersionId) is not { } price ||
+            price.MerchantProductId != product.Id ||
+            price.CurrencyId != order.PresentmentCurrencyId ||
+            price.UnitPrice != line.UnitPrice)
+        {
+            return ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceSnapshotStale);
+        }
+
+        if (line.PurchasePolicyVersionId is not { } policyVersionId)
+        {
+            return product.CurrentPurchasePolicyVersionId is null
+                ? null
+                : ApplicationError.Create(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommerceSnapshotStale);
+        }
+
+        if (unitOfWork.Commerce.FindPurchasePolicy(policyVersionId) is not { } policy ||
+            policy.MerchantProductId != product.Id)
+        {
+            return ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceSnapshotStale);
+        }
+
+        if ((policy.AvailableFrom is { } from && now < from) ||
+            (policy.AvailableUntil is { } until && now >= until))
+        {
+            return ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.MerchantPurchasePolicyViolated);
+        }
+
+        return policy.PerOrderQuantityLimit is { } perOrder && line.Quantity > perOrder
+            ? ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.MerchantPurchasePolicyViolated)
+            : null;
+    }
+
+    private static ApplicationError? VerifyRoleExclusivity(
+        IBankingUnitOfWork unitOfWork,
+        CustomerAccount customer,
+        CommerceOrderLineRecord line,
+        MerchantProductRecord product)
+    {
+        if (line.Quantity != 1)
+        {
+            return ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.MerchantRoleQuantityInvalid);
+        }
+
+        int held = unitOfWork.Commerce.SumPaidQuantity(customer.Id, product.Id, since: null) -
+            unitOfWork.Commerce.SumCompletedReturnQuantity(customer.Id, product.Id);
+
+        return held > 0
+            ? ApplicationError.Create(
+                ErrorCategory.Conflict, BankingErrorCodes.MerchantRoleAlreadyHeld)
+            : null;
+    }
+
+    private Result<CaptureOutcome> Replay(IBankingUnitOfWork unitOfWork, CaptureContext context)
+    {
+        if (unitOfWork.BusinessOperations.Find(context.IdempotencyKey) is not { } operation ||
+            unitOfWork.OperationResults.Find(operation.Id) is not { } saved)
+        {
+            return Result<CaptureOutcome>.Failure(
+                ErrorCategory.OperationExpired, BankingErrorCodes.CommerceConfirmationExpired);
+        }
+
+        if (!saved.ResultJson.Contains(SucceededMarker, StringComparison.Ordinal))
+        {
+            return Result<CaptureOutcome>.Success(new CaptureOutcome(
+                View: null,
+                ApplicationError.Create(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommerceCaptureRejected)));
+        }
+
+        return Result<CaptureOutcome>.Success(new CaptureOutcome(
+            new CommercePaymentView(
+                context.Payment.Id,
+                context.Order.Id,
+                context.Order.PresentmentCurrencyId,
+                context.Payment.PresentmentPaid,
+                context.Payment.PresentmentRefunded,
+                context.Payment.PaymentRoute ?? SameCurrencyPaymentRoute,
+                context.Payment.Status),
+            Rejection: null));
     }
 
     private Result<CaptureOutcome> Capture(
@@ -227,9 +334,30 @@ public sealed partial class CommerceApplicationService
 
         CaptureContext context = prepared.Value;
 
+        if (context.Confirmation.ConsumedAt is not null)
+        {
+            return Replay(unitOfWork, context);
+        }
+
         if (context.Rejection is { } earlyRejection)
         {
             return Consume(unitOfWork, context, earlyRejection);
+        }
+
+        if (context.Source.CurrencyId != context.Order.PresentmentCurrencyId)
+        {
+            return CaptureCrossCurrency(unitOfWork, context);
+        }
+
+        if (context.Confirmation.FxMarketId is not null ||
+            context.Confirmation.FxMarketPolicyVersionId is not null ||
+            context.Confirmation.OrderBookVersion is not null)
+        {
+            return Consume(
+                unitOfWork,
+                context,
+                ApplicationError.Create(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommerceSnapshotStale));
         }
 
         Result<PaymentApplicationService.MerchantPurchaseReservation> reserved =
@@ -267,7 +395,13 @@ public sealed partial class CommerceApplicationService
             return Result<CaptureOutcome>.Failure(posted.Error!);
         }
 
-        DebitCardAuthorizationRecord authorization = Authorize(context, reservation, totalDebit);
+        DebitCardAuthorizationRecord authorization = Authorize(
+            context,
+            reservation.HoldId,
+            reservation.FeeScheduleVersionId,
+            reservation.PurchaseFee,
+            totalDebit,
+            SameCurrencyRoute);
 
         DebitCardAuthorizationStatusCatalog.EnsureCreatable(authorization.Status);
         DebitCardAuthorizationStatusCatalog.EnsureTransition(
@@ -297,6 +431,18 @@ public sealed partial class CommerceApplicationService
             reservation.BusinessOperationId,
             context.Now));
 
+        return Settle(unitOfWork, context, captured, reservation.BusinessOperationId, totalDebit);
+    }
+
+    private Result<CaptureOutcome> Settle(
+        IBankingUnitOfWork unitOfWork,
+        CaptureContext context,
+        DebitCardAuthorizationRecord captured,
+        BusinessOperationId businessOperationId,
+        MoneyMinor totalDebit)
+    {
+        bool crossCurrency = context.Source.CurrencyId != context.Order.PresentmentCurrencyId;
+
         RecordSales(unitOfWork, context);
         CreateFulfillments(unitOfWork, context);
 
@@ -309,8 +455,9 @@ public sealed partial class CommerceApplicationService
             SourceCurrencyId = context.Source.CurrencyId,
             SourcePrincipal = totalDebit,
             PresentmentPaid = context.Order.OrderTotalPresentment,
-            PaymentRoute = SameCurrencyPaymentRoute,
+            PaymentRoute = crossCurrency ? FxPaymentRoute : SameCurrencyPaymentRoute,
             Status = CommercePaymentStatus.Paid,
+            CaptureCommittedAt = context.Now,
             Version = context.Payment.Version + 1,
         });
 
@@ -343,24 +490,123 @@ public sealed partial class CommerceApplicationService
             context.Order.PresentmentCurrencyId,
             context.Order.OrderTotalPresentment,
             MoneyMinor.Zero,
-            SameCurrencyPaymentRoute,
+            crossCurrency ? FxPaymentRoute : SameCurrencyPaymentRoute,
             CommercePaymentStatus.Paid);
 
         unitOfWork.OperationResults.Add(new OperationResultRecord(
             OperationResultId.FromValue(idGenerator.NextId()),
-            reservation.BusinessOperationId,
+            businessOperationId,
             CaptureResultKind,
             CaptureReference(context.Payment.Id, succeeded: true),
             context.Now));
 
         unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
             OutboxEventId.FromValue(idGenerator.NextId()),
-            reservation.BusinessOperationId,
+            businessOperationId,
             CapturedEventType,
             CaptureReference(context.Payment.Id, succeeded: true),
             context.Now));
 
         return Result<CaptureOutcome>.Success(new CaptureOutcome(view, Rejection: null));
+    }
+
+    private Result<CaptureOutcome> CaptureCrossCurrency(
+        IBankingUnitOfWork unitOfWork,
+        CaptureContext context)
+    {
+        if (context.Profile.CrossCurrencyMode != MerchantVocabulary.CrossCurrencyFxFok)
+        {
+            return Consume(
+                unitOfWork,
+                context,
+                ApplicationError.Create(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommerceCrossCurrencyDisabled));
+        }
+
+        if (!IsTrusted(unitOfWork, context.Source.CurrencyId) ||
+            !IsTrusted(unitOfWork, context.Order.PresentmentCurrencyId))
+        {
+            return Consume(
+                unitOfWork,
+                context,
+                ApplicationError.Create(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommerceCurrencyTrustInsufficient));
+        }
+
+        if (context.Confirmation.FxMarketId is not { } marketId ||
+            context.Confirmation.FxMarketPolicyVersionId is not { } policyVersionId)
+        {
+            return Consume(
+                unitOfWork,
+                context,
+                ApplicationError.Create(
+                    ErrorCategory.Conflict, BankingErrorCodes.CommerceFxMarketUnavailable));
+        }
+
+        Result<PaymentApplicationService.MerchantFxReservation> reserved =
+            payments.ReserveMerchantFxPurchase(
+                unitOfWork,
+                markets,
+                context.EconomyScopeId,
+                context.Customer,
+                context.Source,
+                context.Destination,
+                marketId,
+                policyVersionId,
+                context.Order.MerchantProfileId,
+                context.Order.Id,
+                context.Order.OrderTotalPresentment,
+                context.Confirmation.ConfirmedMaxSourceDebit,
+                context.IdempotencyKey,
+                context.Now);
+
+        if (!reserved.IsSuccess)
+        {
+            return reserved.Error!.Category == ErrorCategory.InfrastructureUnavailable
+                ? Result<CaptureOutcome>.Failure(reserved.Error!)
+                : Consume(unitOfWork, context, reserved.Error!);
+        }
+
+        PaymentApplicationService.MerchantFxReservation reservation = reserved.Value;
+        MoneyMinor totalDebit = reservation.SourcePrincipal.Add(reservation.PurchaseFee);
+
+        DebitCardAuthorizationRecord authorization = Authorize(
+            context,
+            reservation.HoldId,
+            reservation.FeeScheduleVersionId,
+            reservation.PurchaseFee,
+            totalDebit,
+            FxRoute);
+
+        DebitCardAuthorizationStatusCatalog.EnsureCreatable(authorization.Status);
+        DebitCardAuthorizationStatusCatalog.EnsureTransition(
+            authorization.Status, DebitCardAuthorizationStatus.Captured);
+
+        DebitCardAuthorizationRecord captured = authorization with
+        {
+            Status = DebitCardAuthorizationStatus.Captured,
+            CapturedAmount = totalDebit,
+            PresentmentCaptured = context.Order.OrderTotalPresentment,
+            CompletedAt = context.Now,
+            Version = authorization.Version + 1,
+        };
+
+        unitOfWork.DebitCardAuthorizations.Add(captured);
+
+        unitOfWork.DebitCardAuthorizations.AddCapture(new DebitCardCaptureRecord(
+            DebitCardCaptureId.FromValue(idGenerator.NextId()),
+            captured.Id,
+            Reference(context.Order.Id),
+            totalDebit,
+            context.Order.OrderTotalPresentment,
+            reservation.PurchaseFee,
+            FxRoute,
+            PaymentOrderId: null,
+            reservation.BusinessOperationId,
+            reservation.BusinessOperationId,
+            context.Now));
+
+        return Settle(unitOfWork, context, captured, reservation.BusinessOperationId, totalDebit);
     }
 
     private Result<CaptureOutcome> Consume(
@@ -409,8 +655,11 @@ public sealed partial class CommerceApplicationService
 
     private DebitCardAuthorizationRecord Authorize(
         CaptureContext context,
-        PaymentApplicationService.MerchantPurchaseReservation reservation,
-        MoneyMinor totalDebit) => new(
+        HoldId holdId,
+        FeeScheduleVersionId feeScheduleVersionId,
+        MoneyMinor purchaseFee,
+        MoneyMinor totalDebit,
+        string route) => new(
             DebitCardAuthorizationId.FromValue(idGenerator.NextId()),
             context.Confirmation.DebitCardId,
             context.Source.Id,
@@ -419,7 +668,7 @@ public sealed partial class CommerceApplicationService
             context.Destination.Id,
             context.Source.CurrencyId,
             context.Order.PresentmentCurrencyId,
-            reservation.HoldId,
+            holdId,
             Reference(context.Order.Id),
             totalDebit,
             MoneyMinor.Zero,
@@ -427,9 +676,9 @@ public sealed partial class CommerceApplicationService
             context.Order.OrderTotalPresentment,
             MoneyMinor.Zero,
             MoneyMinor.Zero,
-            reservation.FeeScheduleVersionId,
-            reservation.PurchaseFee,
-            SameCurrencyRoute,
+            feeScheduleVersionId,
+            purchaseFee,
+            route,
             DebitCardAuthorizationStatus.Authorized,
             context.Now,
             context.Now.AddMilliseconds(AuthorizationLifetimeMilliseconds),

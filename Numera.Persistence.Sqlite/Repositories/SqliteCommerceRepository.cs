@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Numera.Application.Abstractions;
 using Numera.Domain.Banking;
@@ -51,7 +52,8 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
     private const string PaymentColumns =
         "commerce_payment_id, commerce_order_id, debit_card_authorization_id, source_currency_id, " +
         "source_principal_minor, presentment_currency_id, presentment_paid_minor, " +
-        "presentment_refunded_minor, payment_route, status, created_at, version";
+        "presentment_refunded_minor, payment_route, status, created_at, capture_committed_at, " +
+        "merchant_settlement_finalized_at, version";
 
     private const string CheckoutConfirmationColumns =
         "commerce_checkout_confirmation_id, commerce_order_id, customer_account_id, debit_card_id, " +
@@ -371,6 +373,68 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
 
         BindPrice(command, price);
         command.ExecuteNonQuery();
+    }
+
+    public MerchantPurchasePolicyRecord? FindPurchasePolicy(
+        MerchantProductPurchasePolicyVersionId id)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {PurchasePolicyColumns} FROM merchant_product_purchase_policy_versions
+            WHERE merchant_product_purchase_policy_version_id = $id;
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(id.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? ReadPurchasePolicy(reader) : null;
+    }
+
+    public int SumPaidQuantity(
+        CustomerAccountId customerAccountId,
+        MerchantProductId merchantProductId,
+        UtcTimestamp? since)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(l.quantity), 0) FROM commerce_order_lines AS l
+            JOIN commerce_orders AS o ON o.commerce_order_id = l.commerce_order_id
+            WHERE o.customer_account_id = $customer
+              AND l.merchant_product_id = $product
+              AND o.status = 'PAID'
+              AND ($since IS NULL OR o.confirmed_at >= $since);
+            """);
+
+        command.Parameters.AddWithValue(
+            "$customer", SqliteValueMapper.ToBlob(customerAccountId.Value));
+        command.Parameters.AddWithValue(
+            "$product", SqliteValueMapper.ToBlob(merchantProductId.Value));
+        command.Parameters.AddWithValue(
+            "$since", since is { } at ? at.UnixMilliseconds : DBNull.Value);
+
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    public int SumCompletedReturnQuantity(
+        CustomerAccountId customerAccountId,
+        MerchantProductId merchantProductId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT COALESCE(SUM(rl.quantity), 0) FROM commerce_return_lines AS rl
+            JOIN commerce_returns AS r ON r.commerce_return_id = rl.commerce_return_id
+            JOIN commerce_order_lines AS l
+                ON l.commerce_order_line_id = rl.commerce_order_line_id
+            JOIN commerce_orders AS o ON o.commerce_order_id = l.commerce_order_id
+            WHERE o.customer_account_id = $customer
+              AND l.merchant_product_id = $product
+              AND r.status = 'COMPLETED';
+            """);
+
+        command.Parameters.AddWithValue(
+            "$customer", SqliteValueMapper.ToBlob(customerAccountId.Value));
+        command.Parameters.AddWithValue(
+            "$product", SqliteValueMapper.ToBlob(merchantProductId.Value));
+
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     public MerchantProductPriceRecord? FindPrice(MerchantProductPriceVersionId id)
@@ -784,7 +848,7 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         using SqliteCommand command = unitOfWork.CreateCommand($"""
             INSERT INTO commerce_payments({PaymentColumns})
             VALUES($id, $order, $authorization, $sourceCurrency, $sourcePrincipal, $currency,
-                $paid, $refunded, $route, $status, $created, $version);
+                $paid, $refunded, $route, $status, $created, $captured, $finalized, $version);
             """);
 
         BindPayment(command, payment);
@@ -800,7 +864,8 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
             SET debit_card_authorization_id = $authorization, source_currency_id = $sourceCurrency,
                 source_principal_minor = $sourcePrincipal, presentment_paid_minor = $paid,
                 presentment_refunded_minor = $refunded, payment_route = $route, status = $status,
-                version = $version
+                capture_committed_at = $captured,
+                merchant_settlement_finalized_at = $finalized, version = $version
             WHERE commerce_payment_id = $id;
             """);
 
@@ -1440,6 +1505,16 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         command.Parameters.AddWithValue("$refunded", payment.PresentmentRefunded.Value);
         command.Parameters.AddWithValue("$route", payment.PaymentRoute ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$status", payment.Status.ToToken());
+        command.Parameters.AddWithValue(
+            "$captured",
+            payment.CaptureCommittedAt is { } capturedAt
+                ? capturedAt.UnixMilliseconds
+                : DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$finalized",
+            payment.MerchantSettlementFinalizedAt is { } finalizedAt
+                ? finalizedAt.UnixMilliseconds
+                : DBNull.Value);
         command.Parameters.AddWithValue("$created", payment.CreatedAt.UnixMilliseconds);
         command.Parameters.AddWithValue("$version", payment.Version);
     }
@@ -1458,7 +1533,9 @@ internal sealed class SqliteCommerceRepository : ICommerceRepository
         reader.IsDBNull(8) ? null : reader.GetString(8),
         CommercePaymentStatusCatalog.ParseToken(reader.GetString(9)),
         SqliteValueMapper.ReadTimestamp(reader, 10),
-        reader.GetInt64(11));
+        reader.IsDBNull(11) ? null : SqliteValueMapper.ReadTimestamp(reader, 11),
+        reader.IsDBNull(12) ? null : SqliteValueMapper.ReadTimestamp(reader, 12),
+        reader.GetInt64(13));
 
     private static void BindCheckoutConfirmation(
         SqliteCommand command,

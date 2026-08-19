@@ -138,22 +138,26 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
 
     private readonly IBankingWriteGateway writeGateway;
     private readonly PaymentApplicationService payments;
+    private readonly FxApplicationService markets;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public CommerceApplicationService(
         IBankingWriteGateway writeGateway,
         PaymentApplicationService payments,
+        FxApplicationService markets,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
         ArgumentNullException.ThrowIfNull(payments);
+        ArgumentNullException.ThrowIfNull(markets);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
         this.payments = payments;
+        this.markets = markets;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }
@@ -476,6 +480,8 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
             null,
             CommercePaymentStatus.Pending,
             now,
+            CaptureCommittedAt: null,
+            MerchantSettlementFinalizedAt: null,
             VersionedEntity.InitialVersion);
 
         CommercePaymentStatusCatalog.EnsureCreatable(payment.Status);

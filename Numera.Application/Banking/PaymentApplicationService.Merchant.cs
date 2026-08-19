@@ -181,6 +181,217 @@ public sealed partial class PaymentApplicationService
             routed.Value.Mode));
     }
 
+    internal readonly record struct MerchantFxReservation(
+        PaymentOrderId? OrderId,
+        HoldId HoldId,
+        MoneyMinor SourcePrincipal,
+        MoneyMinor PurchaseFee,
+        FeeScheduleVersionId FeeScheduleVersionId,
+        BusinessOperationId BusinessOperationId);
+
+    internal Result<MerchantFxReservation> ReserveMerchantFxPurchase(
+        IBankingUnitOfWork unitOfWork,
+        FxApplicationService markets,
+        EconomyScopeId economyScopeId,
+        CustomerAccount payer,
+        DepositAccount source,
+        DepositAccount destination,
+        FxMarketId marketId,
+        FxMarketPolicyVersionId policyVersionId,
+        MerchantProfileId merchantProfileId,
+        CommerceOrderId commerceOrderId,
+        MoneyMinor presentmentTotal,
+        MoneyMinor confirmedMaxSourceDebit,
+        IdempotencyKey idempotencyKey,
+        UtcTimestamp now)
+    {
+        ArgumentNullException.ThrowIfNull(payer);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(destination);
+
+        if (source.Permits(AccountOperation.OutgoingTransfer) != StatusPermission.Allowed)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.DepositAccountNotOperable);
+        }
+
+        if (destination.Permits(AccountOperation.ExternalCredit) != StatusPermission.Allowed)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.DestinationAccountNotOperable);
+        }
+
+        if (unitOfWork.Banks.Find(source.BankId) is not { Status: BankStatus.Operating } bank)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
+        }
+
+        if (bank.CurrentFeeScheduleVersionId is not { } feeScheduleVersionId)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.FeeScheduleUnavailable);
+        }
+
+        BusinessDate businessDate = BusinessDateOf(now);
+
+        if (unitOfWork.AccountingPeriods.FindOpen(bank.GeneralLedgerBookId, businessDate) is null)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            MerchantOperationType,
+            economyScopeId,
+            payer.PartyId,
+            idGenerator.NextId(),
+            idempotencyKey,
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        Result<FxApplicationService.FxCashDeliveryOutcome> delivered = markets.DeliverPurchase(
+            unitOfWork,
+            operation,
+            payer,
+            source,
+            destination,
+            bank,
+            marketId,
+            policyVersionId,
+            merchantProfileId,
+            commerceOrderId,
+            presentmentTotal,
+            businessDate,
+            now);
+
+        if (!delivered.IsSuccess)
+        {
+            return Result<MerchantFxReservation>.Failure(delivered.Error!);
+        }
+
+        MoneyMinor principal = delivered.Value.SourceDebit;
+
+        if (EconomyBusinessCalendar.Resolve(
+                unitOfWork.EconomyCalendars, bank.EconomyScopeId, now) is not { } point)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
+        Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
+            unitOfWork,
+            bank,
+            source,
+            FeeType.DebitPurchase,
+            FeeChannel.Merchant,
+            destination.BankId,
+            principal,
+            point);
+
+        if (!fee.IsSuccess)
+        {
+            return Result<MerchantFxReservation>.Failure(fee.Error!);
+        }
+
+        MoneyMinor totalDebit = principal.Add(fee.Value.Quote.Amount);
+
+        if (totalDebit > confirmedMaxSourceDebit)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceConfirmedDebitExceeded);
+        }
+
+        Hold hold = Hold.ReserveOnDeposit(
+            HoldId.FromValue(idGenerator.NextId()),
+            source.Id,
+            operation.Id,
+            totalDebit,
+            MerchantHoldReason,
+            now,
+            expiresAt: null);
+
+        unitOfWork.Holds.Add(hold);
+        hold.Capture(totalDebit, now);
+        unitOfWork.Holds.Update(hold);
+
+        if (!fee.Value.RequiresPosting)
+        {
+            return Result<MerchantFxReservation>.Success(new MerchantFxReservation(
+                OrderId: null,
+                hold.Id,
+                principal,
+                fee.Value.Quote.Amount,
+                feeScheduleVersionId,
+                operation.Id));
+        }
+
+        LedgerBalance balance = unitOfWork.LedgerAccounts.FindProjection(source.LedgerAccountId)
+            ?? LedgerBalance.Empty;
+
+        if (!balance.CanReserve(fee.Value.Quote.Amount))
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
+        }
+
+        if (unitOfWork.AccountingPeriods.FindOpen(bank.GeneralLedgerBookId, businessDate)
+            is not { } periodId)
+        {
+            return Result<MerchantFxReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.Deposit(
+            unitOfWork.LedgerAccounts.Find(source.LedgerAccountId)!,
+            EntrySide.Debit,
+            fee.Value.Quote.Amount));
+        posting.Add(PostingLine.Institutional(
+            fee.Value.RevenueAccount, EntrySide.Credit, fee.Value.Quote.Amount));
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                bank.GeneralLedgerBookId,
+                operation.Id,
+                source.CurrencyId,
+                businessDate,
+                now,
+                now,
+                MerchantPaymentMethod,
+                MerchantHoldReason,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            periodId);
+
+        posting.ApplyProjections(unitOfWork, ordered, now);
+
+        unitOfWork.FeeAssessments.Add(FeeAssessment.Assess(
+            FeeAssessmentId.FromValue(idGenerator.NextId()),
+            operation.Id,
+            fee.Value.Quote.ScheduleVersionId,
+            fee.Value.Quote.RuleId,
+            source.CurrencyId,
+            source.LedgerAccountId,
+            fee.Value.RevenueAccount.Id,
+            fee.Value.Quote.Type,
+            fee.Value.Quote.Amount,
+            now));
+
+        return Result<MerchantFxReservation>.Success(new MerchantFxReservation(
+            OrderId: null,
+            hold.Id,
+            principal,
+            fee.Value.Quote.Amount,
+            feeScheduleVersionId,
+            operation.Id));
+    }
+
     internal Result<PaymentOrderView> PostMerchantPurchase(
         IBankingUnitOfWork unitOfWork,
         MerchantPurchaseReservation reservation,

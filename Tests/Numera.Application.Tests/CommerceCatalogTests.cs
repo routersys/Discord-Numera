@@ -97,10 +97,13 @@ public sealed class CommerceCatalogTests
                 harness.Clock,
                 ids);
             harness.Merchants = new MerchantAdministrationApplicationService(gateway, harness.Clock, ids);
+            harness.Markets = new FxApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
             harness.Commerce = new CommerceApplicationService(
                 gateway,
                 new PaymentApplicationService(
                     gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
+                harness.Markets,
                 harness.Clock,
                 ids);
             harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock);
@@ -108,8 +111,6 @@ public sealed class CommerceCatalogTests
                 gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
             harness.Expiries = new ExpiryMaintenanceService(gateway, harness.Clock);
             harness.Dormancy = new DormancyMaintenanceService(gateway, harness.Clock, ids);
-            harness.Markets = new FxApplicationService(
-                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
 
             return harness;
         }
@@ -215,6 +216,18 @@ public sealed class CommerceCatalogTests
             command.CommandText = $"SELECT COUNT(*) FROM {table};";
             return (long)(command.ExecuteScalar() ?? 0L);
         }
+
+        public DepositAccountId SourceOf(CommerceOrderId orderId) =>
+            DepositAccountId.FromValue(EntityIdValue.FromBytes(
+                Convert.FromHexString(ReadText($"""
+                    SELECT hex(d.deposit_account_id) FROM deposit_accounts AS d
+                    JOIN commerce_orders AS o
+                        ON o.customer_account_id = d.customer_account_id
+                    WHERE o.commerce_order_id = x'{Convert.ToHexString(orderId.Value.ToByteArray())}'
+                      AND d.status = 'ACTIVE'
+                    ORDER BY d.opened_at
+                    LIMIT 1;
+                    """))));
 
         public DebitCardId DebitCardOf(DepositAccountId accountId)
         {
@@ -821,6 +834,72 @@ public sealed class CommerceCatalogTests
     }
 
     [TestMethod]
+    public async Task ACrossCurrencyCaptureDeliversThePresentmentTotalToTheMerchant()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedCrossCurrency();
+        await ProvideLiquidityAsync(harness, 10_000, 150);
+
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, 100_000);
+
+        Assert.IsTrue((await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                harness.CustomerOf(buyer),
+                buyer,
+                BankCardForm.IntegratedCashDebit,
+                IdempotencyKey.Create("commerce", "card-xc-capture")),
+            CancellationToken.None)).IsSuccess);
+
+        CommerceOrderId orderId = await ForeignOrderAsync(harness, 1_500);
+
+        Result<CommerceCheckoutConfirmationView> confirmation = await harness.Commerce
+            .ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(Buyer(), orderId, harness.DebitCardOf(buyer), 50),
+                CancellationToken.None);
+
+        Assert.IsTrue(confirmation.IsSuccess, confirmation.Error?.Code);
+
+        Result<CommercePaymentView> captured = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation.Value.Id),
+            CancellationToken.None);
+
+        Assert.IsTrue(captured.IsSuccess, captured.Error?.Code);
+        Assert.AreEqual("FX_FOK_DEBIT", captured.Value.PaymentRoute);
+        Assert.AreEqual(1_500L, captured.Value.PresentmentPaid.Value);
+        Assert.AreEqual(
+            "99000",
+            harness.ReadText($"""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                WHERE d.deposit_account_id = x'{Convert.ToHexString(buyer.Value.ToByteArray())}';
+                """));
+        Assert.AreEqual(1L, harness.Count("fx_trades"));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM fx_settlement_endpoints
+                WHERE endpoint_kind = 'MERCHANT_PURCHASE_DELIVERY';
+                """));
+        Assert.AreEqual(
+            "1",
+            harness.ReadText("""
+                SELECT CAST(COUNT(*) AS TEXT) FROM debit_card_captures
+                WHERE settlement_route = 'FX_FOK' AND payment_order_id IS NULL
+                  AND fx_business_operation_id IS NOT NULL;
+                """));
+        Assert.AreEqual(0L, harness.Count("payment_orders"));
+        Assert.AreEqual(
+            "1500",
+            harness.ReadText("""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                JOIN merchant_profiles AS m
+                    ON m.settlement_deposit_account_id = d.deposit_account_id;
+                """));
+    }
+
+    [TestMethod]
     public async Task ACrossCurrencyCheckoutWithoutLiquidityIsRejected()
     {
         await using Harness harness = Harness.Create();
@@ -1139,6 +1218,58 @@ public sealed class CommerceCatalogTests
         Assert.AreEqual("AWAITING_CONFIRMATION", harness.ReadText("SELECT status FROM commerce_orders;"));
     }
 
+    private static async Task<DepositAccountId> PrepareBuyerAsync(
+        Harness harness,
+        string token,
+        long funding = 100_000L)
+    {
+        DepositAccountId buyer = await harness.OpenAccountAsync(BuyerUser, "buyer");
+        harness.Fund(buyer, funding);
+
+        Result<CustomerAccountStatusView> customer =
+            await harness.Registration.GetCustomerAccountStatusAsync(
+                new GetCustomerAccountStatusQuery(BuyerUser), CancellationToken.None);
+
+        Assert.IsTrue(customer.IsSuccess, customer.Error?.Code);
+
+        Result<BankCardView> card = await harness.Cards.IssueBankCardAsync(
+            new IssueBankCardCommand(
+                customer.Value.Id,
+                buyer,
+                BankCardForm.DebitOnly,
+                IdempotencyKey.Create("BANK_CARD_ISSUE", token)),
+            CancellationToken.None);
+
+        Assert.IsTrue(card.IsSuccess, card.Error?.Code);
+        return buyer;
+    }
+
+    private static async Task<Result<CommercePaymentView>> CaptureAsync(
+        Harness harness,
+        MerchantProductId productId,
+        string token,
+        int quantity = 1)
+    {
+        Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), productId, quantity, token),
+            CancellationToken.None);
+
+        Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
+
+        DepositAccountId buyer = harness.SourceOf(checkout.Value.CommerceOrderId);
+
+        Result<CommerceCheckoutConfirmationView> review =
+            await harness.Commerce.ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(
+                    Buyer(), checkout.Value.CommerceOrderId, harness.DebitCardOf(buyer), 0),
+                CancellationToken.None);
+
+        Assert.IsTrue(review.IsSuccess, review.Error?.Code + " " + review.Error?.Field);
+
+        return await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), review.Value.Id), CancellationToken.None);
+    }
+
     private static async Task<(CommerceCheckoutConfirmationId Confirmation, DepositAccountId Buyer)>
         ConfirmableAsync(
             Harness harness,
@@ -1250,6 +1381,104 @@ public sealed class CommerceCatalogTests
     }
 
     [TestMethod]
+    public async Task ARoleProductCannotBePurchasedTwiceWithoutAReturn()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness, catalogScope: "LOCAL_GUILD");
+        MerchantProductView product = await CreateActiveProductAsync(
+            harness, profile.Id, saleScopeOverride: "LOCAL_GUILD");
+
+        Assert.IsTrue((await harness.Merchants.PublishFulfillmentPolicyAsync(
+            new PublishMerchantFulfillmentPolicyCommand(
+                Merchant(), product.Id, "DISCORD_ROLE", "ON_CAPTURE", "555000111"),
+            CancellationToken.None)).IsSuccess);
+
+        DepositAccountId buyer = await PrepareBuyerAsync(harness, "role-1");
+
+        Assert.IsTrue((await CaptureAsync(harness, product.Id, "role-1")).IsSuccess);
+
+        Result<CommercePaymentView> second = await CaptureAsync(harness, product.Id, "role-2");
+
+        Assert.IsFalse(second.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.MerchantRoleAlreadyHeld, second.Error!.Code);
+        Assert.AreEqual(1L, harness.Count("debit_card_captures"));
+        Assert.AreEqual(buyer, buyer);
+    }
+
+    [TestMethod]
+    public async Task APurchasePolicyPublishedAfterCheckoutInvalidatesTheOrder()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProductView product = await CreateActiveProductAsync(harness, profile.Id);
+
+        DepositAccountId buyer = await PrepareBuyerAsync(harness, "policy-1");
+
+        Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "policy-1"),
+            CancellationToken.None);
+
+        Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
+
+        Assert.IsTrue((await harness.Merchants.PublishPurchasePolicyAsync(
+            new PublishMerchantProductPurchasePolicyCommand(
+                Merchant(), product.Id, 1, null, null, null, null),
+            CancellationToken.None)).IsSuccess);
+
+        Result<CommerceCheckoutConfirmationView> review =
+            await harness.Commerce.ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(
+                    Buyer(), checkout.Value.CommerceOrderId, harness.DebitCardOf(buyer), 0),
+                CancellationToken.None);
+
+        Assert.IsTrue(review.IsSuccess, review.Error?.Code);
+
+        Result<CommercePaymentView> captured = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), review.Value.Id), CancellationToken.None);
+
+        Assert.IsFalse(captured.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CommerceSnapshotStale, captured.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("debit_card_captures"));
+    }
+
+    [TestMethod]
+    public async Task ARepricedProductRejectsAStaleOrderSnapshot()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        MerchantProductView product = await CreateActiveProductAsync(harness, profile.Id);
+
+        DepositAccountId buyer = await PrepareBuyerAsync(harness, "stale-1");
+
+        Result<CommerceCheckoutView> checkout = await harness.Commerce.CreateCommerceCheckoutAsync(
+            new CreateCommerceCheckoutCommand(Buyer(), product.Id, 1, "stale-1"),
+            CancellationToken.None);
+
+        Assert.IsTrue(checkout.IsSuccess, checkout.Error?.Code);
+
+        harness.Execute("""
+            UPDATE merchant_product_price_versions SET unit_price_minor = 9_999,
+                version = version + 1
+            WHERE status = 'PUBLISHED';
+            """);
+
+        Result<CommerceCheckoutConfirmationView> review =
+            await harness.Commerce.ReviewCommerceCheckoutAsync(
+                new ReviewCommerceCheckoutCommand(
+                    Buyer(), checkout.Value.CommerceOrderId, harness.DebitCardOf(buyer), 0),
+                CancellationToken.None);
+
+        Assert.IsTrue(review.IsSuccess, review.Error?.Code);
+
+        Result<CommercePaymentView> captured = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), review.Value.Id), CancellationToken.None);
+
+        Assert.IsFalse(captured.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CommerceSnapshotStale, captured.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("debit_card_captures"));
+    }
+
+    [TestMethod]
     public async Task AnInterbankCaptureClearsInsteadOfCreditingTheMerchant()
     {
         await using Harness harness = Harness.Create();
@@ -1280,21 +1509,45 @@ public sealed class CommerceCatalogTests
     }
 
     [TestMethod]
-    public async Task AConsumedConfirmationCannotBeReplayed()
+    public async Task AConsumedConfirmationReturnsTheSavedResult()
     {
         await using Harness harness = Harness.Create();
         (CommerceCheckoutConfirmationId confirmation, _) = await ConfirmableAsync(harness, "capture-3");
 
-        Assert.IsTrue((await harness.Commerce.ConfirmCommerceCheckoutAsync(
-            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation),
-            CancellationToken.None)).IsSuccess);
+        Result<CommercePaymentView> first = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsTrue(first.IsSuccess, first.Error?.Code);
+
+        Result<CommercePaymentView> replay = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsTrue(replay.IsSuccess, replay.Error?.Code);
+        Assert.AreEqual(first.Value.Id, replay.Value.Id);
+        Assert.AreEqual(first.Value.PresentmentPaid, replay.Value.PresentmentPaid);
+        Assert.AreEqual(CommercePaymentStatus.Paid, replay.Value.Status);
+        Assert.AreEqual(1L, harness.Count("debit_card_captures"));
+        Assert.AreEqual(1L, harness.Count("payment_orders"));
+    }
+
+    [TestMethod]
+    public async Task ARejectedConfirmationReplaysTheSavedRejection()
+    {
+        await using Harness harness = Harness.Create();
+        (CommerceCheckoutConfirmationId confirmation, _) =
+            await ConfirmableAsync(harness, "capture-4", funding: 0);
+
+        Result<CommercePaymentView> first = await harness.Commerce.ConfirmCommerceCheckoutAsync(
+            new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
+
+        Assert.IsFalse(first.IsSuccess);
 
         Result<CommercePaymentView> replay = await harness.Commerce.ConfirmCommerceCheckoutAsync(
             new ConfirmCommerceCheckoutCommand(Buyer(), confirmation), CancellationToken.None);
 
         Assert.IsFalse(replay.IsSuccess);
-        Assert.AreEqual(BankingErrorCodes.CommerceConfirmationExpired, replay.Error!.Code);
-        Assert.AreEqual(1L, harness.Count("debit_card_captures"));
+        Assert.AreEqual(BankingErrorCodes.CommerceCaptureRejected, replay.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("debit_card_captures"));
     }
 
     [TestMethod]

@@ -57,6 +57,8 @@ public sealed record FxSettlementEndpointRecord(
     PartyId? DestinationPartyId,
     AtmTerminalId? AtmTerminalId,
     CashHolderId? CustomerCashHolderId,
+    MerchantProfileId? MerchantProfileId,
+    CommerceOrderId? CommerceOrderId,
     UtcTimestamp CreatedAt);
 
 public sealed record FxTradeRecord(

@@ -154,4 +154,19 @@ public static partial class BankingErrorCodes
 
     public static string CommerceConfirmedDebitExceeded { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Conflict, 195);
+
+    public static string CommerceSnapshotStale { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 196);
+
+    public static string MerchantPurchasePolicyViolated { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 197);
+
+    public static string MerchantRoleQuantityInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 198);
+
+    public static string MerchantRoleAlreadyHeld { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 199);
+
+    public static string CommerceCaptureRejected { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 186);
 }

@@ -129,6 +129,8 @@ public sealed record CommercePaymentRecord(
     string? PaymentRoute,
     CommercePaymentStatus Status,
     UtcTimestamp CreatedAt,
+    UtcTimestamp? CaptureCommittedAt,
+    UtcTimestamp? MerchantSettlementFinalizedAt,
     long Version);
 
 public sealed record CommerceCheckoutConfirmationRecord(
@@ -269,7 +271,18 @@ public interface ICommerceRepository
 
     void UpdatePurchasePolicy(MerchantPurchasePolicyRecord policy);
 
+    MerchantPurchasePolicyRecord? FindPurchasePolicy(MerchantProductPurchasePolicyVersionId id);
+
     MerchantPurchasePolicyRecord? FindPublishedPurchasePolicy(MerchantProductId merchantProductId);
+
+    int SumPaidQuantity(
+        CustomerAccountId customerAccountId,
+        MerchantProductId merchantProductId,
+        UtcTimestamp? since);
+
+    int SumCompletedReturnQuantity(
+        CustomerAccountId customerAccountId,
+        MerchantProductId merchantProductId);
 
     long NextPurchasePolicyVersion(MerchantProductId merchantProductId);
 

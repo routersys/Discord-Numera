@@ -19,6 +19,8 @@ public sealed partial class FxApplicationService
 
     public const string CashDeliveryEndpointKind = "ATM_CASH_DELIVERY";
 
+    public const string MerchantDeliveryEndpointKind = "MERCHANT_PURCHASE_DELIVERY";
+
     public const string BaseTransactionType = "FX_BASE_SETTLEMENT";
 
     public const string QuoteTransactionType = "FX_QUOTE_SETTLEMENT";
@@ -36,6 +38,10 @@ public sealed partial class FxApplicationService
     private static readonly int[] BucketIntervals = [60, 300, 3600];
 
     private readonly record struct PlannedFill(FxOrder Maker, long BaseMinor, long QuoteMinor);
+
+    internal readonly record struct FxMerchantDelivery(
+        MerchantProfileId MerchantProfileId,
+        CommerceOrderId CommerceOrderId);
 
     internal readonly record struct FxCashDelivery(
         AtmTerminalId AtmTerminalId,
@@ -65,6 +71,8 @@ public sealed partial class FxApplicationService
         int? MaximumSlippageBps,
         IdempotencyKey IdempotencyKey,
         FxCashDelivery? CashDelivery,
+        string EndpointKind,
+        FxMerchantDelivery? MerchantDelivery,
         UtcTimestamp Now);
 
     internal readonly record struct FxAcquisitionEstimate(
@@ -260,17 +268,21 @@ public sealed partial class FxApplicationService
                 DestinationPartyId: null,
                 delivery.AtmTerminalId,
                 delivery.CustomerCashHolderId,
+                MerchantProfileId: null,
+                CommerceOrderId: null,
                 context.Now)
             : new FxSettlementEndpointRecord(
                 FxSettlementEndpointId.FromValue(idGenerator.NextId()),
                 context.ReceiveCurrencyId,
-                CustomerEndpointKind,
+                context.EndpointKind,
                 context.Destination!.Id,
-                BusinessOperationId: null,
+                context.MerchantDelivery is null ? null : operation.Id,
                 DestinationLedgerAccountId: null,
                 DestinationPartyId: null,
                 AtmTerminalId: null,
                 CustomerCashHolderId: null,
+                context.MerchantDelivery?.MerchantProfileId,
+                context.MerchantDelivery?.CommerceOrderId,
                 context.Now);
 
         unitOfWork.Fx.AddFundingEndpoint(funding);
@@ -457,6 +469,95 @@ public sealed partial class FxApplicationService
             MaximumSlippageBps: policy.MaximumMarketSlippageBps,
             IdempotencyKey: default,
             delivery,
+            CashDeliveryEndpointKind,
+            MerchantDelivery: null,
+            now);
+
+        Result<FxOrderView> executed = Execute(unitOfWork, context, operation);
+
+        return executed.IsSuccess
+            ? Result<FxCashDeliveryOutcome>.Success(
+                new FxCashDeliveryOutcome(debit, executed.Value.Id))
+            : Result<FxCashDeliveryOutcome>.Failure(executed.Error!);
+    }
+
+    internal Result<FxCashDeliveryOutcome> DeliverPurchase(
+        IBankingUnitOfWork unitOfWork,
+        BusinessOperation operation,
+        CustomerAccount customer,
+        DepositAccount source,
+        DepositAccount destination,
+        Bank sourceBank,
+        FxMarketId expectedMarketId,
+        FxMarketPolicyVersionId expectedPolicyVersionId,
+        MerchantProfileId merchantProfileId,
+        CommerceOrderId commerceOrderId,
+        MoneyMinor presentmentTotal,
+        BusinessDate businessDate,
+        UtcTimestamp now)
+    {
+        (CurrencyId first, CurrencyId second) = FxAdministrationApplicationService.Orient(
+            source.CurrencyId, destination.CurrencyId);
+
+        if (unitOfWork.Fx.FindMarketByPair(first, second) is not { } market ||
+            !market.IsTradable ||
+            market.Id != expectedMarketId ||
+            market.CurrentPolicyVersionId is not { } policyVersionId ||
+            policyVersionId != expectedPolicyVersionId ||
+            unitOfWork.Fx.FindPolicyVersion(policyVersionId) is not { } policy)
+        {
+            return Result<FxCashDeliveryOutcome>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxMarketNotTradable);
+        }
+
+        if (ExactGross(presentmentTotal.Value, policy.TakerFeeBps) is not { } gross)
+        {
+            return Result<FxCashDeliveryOutcome>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxAmountNotRepresentable);
+        }
+
+        bool acquireBase = destination.CurrencyId == market.BaseCurrencyId;
+
+        Result<IReadOnlyList<PlannedFill>> planned = PlanExact(unitOfWork, market, acquireBase, gross);
+
+        if (!planned.IsSuccess)
+        {
+            return Result<FxCashDeliveryOutcome>.Failure(planned.Error!);
+        }
+
+        long baseTotal = 0;
+        long quoteTotal = 0;
+
+        foreach (PlannedFill fill in planned.Value)
+        {
+            baseTotal = checked(baseTotal + fill.BaseMinor);
+            quoteTotal = checked(quoteTotal + fill.QuoteMinor);
+        }
+
+        MoneyMinor debit = MoneyMinor.FromMinor(acquireBase ? quoteTotal : baseTotal);
+
+        PlacementContext context = new(
+            market,
+            policy,
+            customer,
+            source,
+            destination,
+            sourceBank,
+            businessDate,
+            source.CurrencyId,
+            destination.CurrencyId,
+            debit,
+            planned.Value,
+            PlanComplete: true,
+            acquireBase ? FxOrderSide.BuyBase : FxOrderSide.SellBase,
+            FxOrderType.MarketFok,
+            baseTotal,
+            PriceUnits: null,
+            MaximumSlippageBps: policy.MaximumMarketSlippageBps,
+            IdempotencyKey: default,
+            CashDelivery: null,
+            MerchantDeliveryEndpointKind,
+            new FxMerchantDelivery(merchantProfileId, commerceOrderId),
             now);
 
         Result<FxOrderView> executed = Execute(unitOfWork, context, operation);
@@ -727,6 +828,8 @@ public sealed partial class FxApplicationService
             command.MaximumSlippageBps,
             command.IdempotencyKey,
             CashDelivery: null,
+            CustomerEndpointKind,
+            MerchantDelivery: null,
             now));
     }
 
