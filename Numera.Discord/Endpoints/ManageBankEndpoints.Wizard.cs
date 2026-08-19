@@ -191,6 +191,7 @@ public sealed partial class ManageBankEndpoints
             {
                 ["institutionCode"] = result.Value.InstitutionCode,
                 ["bankName"] = result.Value.Name,
+                ["status"] = catalog.Resolve(ViewKeys.StatusOf(result.Value.Status.ToToken())),
             });
     }
 

@@ -203,3 +203,55 @@ public sealed class CommandSyncReplacementTests
         }
     }
 }
+
+[TestClass]
+public sealed class BankCreateViewTests
+{
+    private static readonly ITextCatalog Catalog = CanonicalTextCatalog.Create();
+
+    [TestMethod]
+    public void TheCreatedViewBindsEveryPlaceholderTheHandlerSupplies()
+    {
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = "NUM0001",
+            ["bankName"] = "ヌメラ銀行",
+            ["status"] = Catalog.Resolve(ViewKeys.StatusOf("OPERATING")),
+        };
+
+        string rendered = Catalog.Format(ViewKeys.ManageBankCreated + ".description", data);
+
+        StringAssert.Contains(rendered, "NUM0001");
+        StringAssert.Contains(rendered, "ヌメラ銀行");
+        Assert.DoesNotContain("{", rendered);
+    }
+
+    [TestMethod]
+    public void TheReviewViewBindsEveryPlaceholderTheHandlerSupplies()
+    {
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = "NUM0001",
+            ["bankName"] = "ヌメラ銀行",
+            ["branchCode"] = "001",
+            ["branchName"] = "本店",
+            ["productCode"] = "DEMAND01",
+            ["productName"] = "普通預金",
+        };
+
+        foreach (string field in new[]
+        {
+            ViewKeys.FieldInstitution, ViewKeys.FieldBankName, ViewKeys.FieldBranch,
+            ViewKeys.FieldProduct, ViewKeys.FieldOpeningPolicy,
+        })
+        {
+            string label = Catalog.Format(
+                ViewKeys.FieldLabel(ViewKeys.ManageBankCreateReview, field), data);
+            string value = Catalog.Format(
+                ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, field), data);
+
+            Assert.IsNotEmpty(label);
+            Assert.DoesNotContain("{", value);
+        }
+    }
+}
