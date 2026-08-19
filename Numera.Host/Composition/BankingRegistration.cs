@@ -44,7 +44,9 @@ internal static class BankingRegistration
         services.AddSingleton<IBankOperatorGrantApplicationService, BankOperatorGrantApplicationService>();
         services.AddSingleton<IBankCardApplicationService, BankCardApplicationService>();
         services.AddSingleton<IFxAdministrationApplicationService, FxAdministrationApplicationService>();
-        services.AddSingleton<IFxApplicationService, FxApplicationService>();
+        services.AddSingleton<FxApplicationService>();
+        services.AddSingleton<IFxApplicationService>(
+            provider => provider.GetRequiredService<FxApplicationService>());
         services.AddSingleton<IPresentationProfileAdministrationApplicationService, PresentationProfileAdministrationApplicationService>();
         services.AddSingleton<ICurrencyTrustAdministrationApplicationService, CurrencyTrustAdministrationApplicationService>();
         services.AddSingleton<ILoanApplicationService, LoanApplicationService>();

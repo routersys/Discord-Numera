@@ -45,14 +45,20 @@ public sealed partial class AtmApplicationService
         Bank AcquirerBank,
         CashHolderRecord CustomerHolder,
         IReadOnlyList<CashPlanEntry> Plan,
-        MoneyMinor IssuerFee,
-        MoneyMinor AcquirerFee,
-        FeeScheduleVersionId IssuerScheduleVersionId,
-        FeeRuleId IssuerRuleId,
-        FeeType IssuerFeeType,
+        FeeAssessmentPlan? IssuerPlan,
+        FeeAssessmentPlan? AcquirerPlan,
+        MoneyMinor PlacementFee,
         string ActorDiscordUserId,
+        CurrencyId? CashCurrencyId,
         BusinessDate BusinessDate,
-        UtcTimestamp Now);
+        UtcTimestamp Now)
+    {
+        public MoneyMinor IssuerFee => IssuerPlan?.Amount ?? MoneyMinor.Zero;
+
+        public MoneyMinor AcquirerFee => AcquirerPlan?.Amount ?? MoneyMinor.Zero;
+
+        public CurrencyId CashCurrency => CashCurrencyId ?? Account.CurrencyId;
+    }
 
     private Result<AtmTransactionView> Withdraw(
         IBankingUnitOfWork unitOfWork,
@@ -74,6 +80,12 @@ public sealed partial class AtmApplicationService
 
         CashContext context = prepared.Value;
         MoneyMinor cash = MoneyMinor.FromMinor(command.AmountMinor);
+
+        if (context.CashCurrencyId is { } cashCurrencyId)
+        {
+            return DeliverCrossCurrency(unitOfWork, context, command, cash, cashCurrencyId);
+        }
+
         MoneyMinor debit = cash.Add(context.IssuerFee).Add(context.AcquirerFee);
 
         LedgerBalance balance =
@@ -152,6 +164,195 @@ public sealed partial class AtmApplicationService
             DepositEventType);
     }
 
+    private Result<AtmTransactionView> DeliverCrossCurrency(
+        IBankingUnitOfWork unitOfWork,
+        CashContext context,
+        AtmWithdrawCommand command,
+        MoneyMinor cash,
+        CurrencyId cashCurrencyId)
+    {
+        BusinessOperation operation = Start(
+            unitOfWork, context, WithdrawalOperationType, command.IdempotencyToken);
+
+        Reserve(unitOfWork, context);
+
+        Result<FxApplicationService.FxCashDeliveryOutcome> delivered = markets.DeliverCash(
+            unitOfWork,
+            operation,
+            unitOfWork.CustomerAccounts.Find(context.Account.CustomerAccountId)!,
+            context.Account,
+            context.IssuerBank,
+            cashCurrencyId,
+            new FxApplicationService.FxCashDelivery(
+                context.Terminal.Id,
+                context.CustomerHolder.Id,
+                context.AcquirerBank,
+                cash,
+                context.AcquirerFee,
+                context.PlacementFee),
+            context.BusinessDate,
+            context.Now);
+
+        if (!delivered.IsSuccess)
+        {
+            return Result<AtmTransactionView>.Failure(delivered.Error!);
+        }
+
+        MoneyMinor source = delivered.Value.SourceDebit;
+
+        Result<CashContext> charged = ChargeIssuerFee(unitOfWork, context, operation, source);
+
+        if (!charged.IsSuccess)
+        {
+            return Result<AtmTransactionView>.Failure(charged.Error!);
+        }
+
+        context = charged.Value;
+
+        Result released = ReleaseDelivery(unitOfWork, context, operation, cashCurrencyId, cash);
+
+        if (!released.IsSuccess)
+        {
+            return Result<AtmTransactionView>.Failure(released.Error!);
+        }
+
+        MoveCash(unitOfWork, context, operation, dispensing: true, releasingReservation: true);
+
+        return Complete(
+            unitOfWork,
+            context,
+            operation,
+            WithdrawalKind,
+            source.Add(context.IssuerFee),
+            cash,
+            WithdrawalEventType);
+    }
+
+    private Result<CashContext> ChargeIssuerFee(
+        IBankingUnitOfWork unitOfWork,
+        CashContext context,
+        BusinessOperation operation,
+        MoneyMinor source)
+    {
+        bool sameBank = context.IssuerBank.Id == context.AcquirerBank.Id;
+
+        Result<FeeAssessmentPlan> resolved = ResolveFee(
+            unitOfWork,
+            context.IssuerBank,
+            context.Account,
+            sameBank ? FeeType.AtmOwnWithdrawal : FeeType.AtmPartnerWithdrawal,
+            context.AcquirerBank.Id,
+            source,
+            context.Now);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<CashContext>.Failure(resolved.Error!);
+        }
+
+        CashContext charged = context with { IssuerPlan = resolved.Value };
+
+        if (EconomyBusinessCalendar.Resolve(
+                unitOfWork.EconomyCalendars, context.IssuerBank.EconomyScopeId, context.Now)
+            is not { } point)
+        {
+            return Result<CashContext>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
+        Result limit = TransferLimitPolicy.EvaluateAtmWithdrawal(
+            unitOfWork, context.IssuerBank, context.Account, source, point);
+
+        if (!limit.IsSuccess)
+        {
+            return Result<CashContext>.Failure(limit.Error!);
+        }
+
+        if (!resolved.Value.RequiresPosting)
+        {
+            return Result<CashContext>.Success(charged);
+        }
+
+        LedgerBalance balance =
+            unitOfWork.LedgerAccounts.FindProjection(context.Account.LedgerAccountId)
+                ?? LedgerBalance.Empty;
+
+        if (!balance.CanReserve(resolved.Value.Amount))
+        {
+            return Result<CashContext>.Failure(
+                ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
+        }
+
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.Deposit(
+            unitOfWork.LedgerAccounts.Find(context.Account.LedgerAccountId)!,
+            EntrySide.Debit,
+            resolved.Value.Amount));
+        posting.Add(PostingLine.Institutional(
+            resolved.Value.RevenueAccount, EntrySide.Credit, resolved.Value.Amount));
+
+        Result posted = Post(
+            unitOfWork, charged, operation, context.IssuerBank, posting, WithdrawalTransactionType);
+
+        return posted.IsSuccess
+            ? Result<CashContext>.Success(charged)
+            : Result<CashContext>.Failure(posted.Error!);
+    }
+
+    private Result ReleaseDelivery(
+        IBankingUnitOfWork unitOfWork,
+        CashContext context,
+        BusinessOperation operation,
+        CurrencyId cashCurrencyId,
+        MoneyMinor cash)
+    {
+        LedgerAccount? payable = unitOfWork.LedgerAccounts.FindPostingByKind(
+            context.AcquirerBank.GeneralLedgerBookId,
+            LedgerAccountKind.AtmCashDeliveryPayable,
+            cashCurrencyId);
+
+        LedgerAccount? asset = unitOfWork.LedgerAccounts.FindPostingByKind(
+            context.AcquirerBank.GeneralLedgerBookId, LedgerAccountKind.CashAsset, cashCurrencyId);
+
+        if (payable is null || asset is null)
+        {
+            return Result.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AtmSettlementAccountUnavailable);
+        }
+
+        if (unitOfWork.AccountingPeriods.FindOpen(
+                context.AcquirerBank.GeneralLedgerBookId, context.BusinessDate) is not { } periodId)
+        {
+            return Result.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AccountingPeriodUnavailable);
+        }
+
+        LedgerPostingBuilder posting = new();
+        posting.Add(PostingLine.Institutional(payable, EntrySide.Debit, cash));
+        posting.Add(PostingLine.Institutional(asset, EntrySide.Credit, cash));
+
+        LedgerAccount[] ordered = posting.OrderedAccounts();
+
+        unitOfWork.AccountingTransactions.Add(
+            AccountingTransaction.Post(
+                AccountingTransactionId.FromValue(idGenerator.NextId()),
+                context.AcquirerBank.GeneralLedgerBookId,
+                operation.Id,
+                cashCurrencyId,
+                context.BusinessDate,
+                context.Now,
+                context.Now,
+                WithdrawalTransactionType,
+                DescriptionCode,
+                posting.BuildDrafts(ordered, idGenerator),
+                LedgerAccountSet.From(ordered)),
+            periodId);
+
+        posting.ApplyProjections(unitOfWork, ordered, context.Now);
+
+        return Result.Success();
+    }
+
     private Result<CashContext> Prepare(
         IBankingUnitOfWork unitOfWork,
         AuthorizationContext actor,
@@ -191,11 +392,11 @@ public sealed partial class AtmApplicationService
                 ErrorCategory.Conflict, BankingErrorCodes.AtmServiceDisabled);
         }
 
-        if (cashCurrencyId != account.CurrencyId)
+        if (cashCurrencyId != account.CurrencyId &&
+            (!withdrawal || !service.CrossCurrencyWithdrawalEnabled))
         {
             return Result<CashContext>.Failure(
-                ErrorCategory.InfrastructureUnavailable,
-                BankingErrorCodes.AtmCrossCurrencyUnavailable);
+                ErrorCategory.Conflict, BankingErrorCodes.AtmServiceDisabled);
         }
 
         if (account.Permits(
@@ -255,43 +456,81 @@ public sealed partial class AtmApplicationService
             return Result<CashContext>.Failure(plan.Error!);
         }
 
+        bool crossCurrency = cashCurrencyId != account.CurrencyId;
         bool sameBank = issuer.Id == acquirer.Id;
 
-        Result<FeeAssessmentPlan> issuerFee = ResolveFee(
-            unitOfWork,
-            issuer,
-            account,
-            withdrawal
-                ? sameBank ? FeeType.AtmOwnWithdrawal : FeeType.AtmPartnerWithdrawal
-                : sameBank ? FeeType.AtmOwnDeposit : FeeType.AtmPartnerDeposit,
-            acquirer.Id,
-            MoneyMinor.FromMinor(amountMinor),
-            now);
+        Result<AtmPlacementAgreementRecord?> placement = ResolvePlacement(unitOfWork, terminal, acquirer);
 
-        if (!issuerFee.IsSuccess)
+        if (!placement.IsSuccess)
         {
-            return Result<CashContext>.Failure(issuerFee.Error!);
+            return Result<CashContext>.Failure(placement.Error!);
         }
 
-        MoneyMinor acquirerFee = MoneyMinor.Zero;
+        FeeAssessmentPlan? issuerPlan = null;
 
-        if (!sameBank)
+        if (!crossCurrency)
+        {
+            Result<FeeAssessmentPlan> issuerFee = ResolveFee(
+                unitOfWork,
+                issuer,
+                account,
+                withdrawal
+                    ? sameBank ? FeeType.AtmOwnWithdrawal : FeeType.AtmPartnerWithdrawal
+                    : sameBank ? FeeType.AtmOwnDeposit : FeeType.AtmPartnerDeposit,
+                acquirer.Id,
+                MoneyMinor.FromMinor(amountMinor),
+                now);
+
+            if (!issuerFee.IsSuccess)
+            {
+                return Result<CashContext>.Failure(issuerFee.Error!);
+            }
+
+            issuerPlan = issuerFee.Value;
+        }
+
+        FeeAssessmentPlan? acquirerPlan = null;
+
+        if (!sameBank || crossCurrency)
         {
             Result<FeeAssessmentPlan> resolved = ResolveFee(
                 unitOfWork,
                 acquirer,
                 account,
-                withdrawal ? FeeType.AtmPartnerWithdrawal : FeeType.AtmPartnerDeposit,
+                withdrawal
+                    ? sameBank ? FeeType.AtmOwnWithdrawal : FeeType.AtmPartnerWithdrawal
+                    : FeeType.AtmPartnerDeposit,
                 issuer.Id,
                 MoneyMinor.FromMinor(amountMinor),
-                now);
+                now,
+                crossCurrency ? cashCurrencyId : null);
 
             if (!resolved.IsSuccess)
             {
                 return Result<CashContext>.Failure(resolved.Error!);
             }
 
-            acquirerFee = resolved.Value.Quote.Amount;
+            acquirerPlan = resolved.Value;
+        }
+
+        MoneyMinor placementFee = MoneyMinor.Zero;
+
+        if (crossCurrency && placement.Value is { PlacementFeeScheduleVersionId: { } placementSchedule })
+        {
+            Result<MoneyMinor> resolvedPlacement = ResolvePlacementFee(
+                unitOfWork,
+                acquirer,
+                account,
+                placementSchedule,
+                MoneyMinor.FromMinor(amountMinor),
+                now);
+
+            if (!resolvedPlacement.IsSuccess)
+            {
+                return Result<CashContext>.Failure(resolvedPlacement.Error!);
+            }
+
+            placementFee = resolvedPlacement.Value;
         }
 
         return Result<CashContext>.Success(new CashContext(
@@ -302,14 +541,63 @@ public sealed partial class AtmApplicationService
             acquirer,
             holder.Value,
             plan.Value,
-            issuerFee.Value.Quote.Amount,
-            acquirerFee,
-            issuerFee.Value.Quote.ScheduleVersionId,
-            issuerFee.Value.Quote.RuleId,
-            issuerFee.Value.Quote.Type,
+            issuerPlan,
+            acquirerPlan,
+            placementFee,
             actor.DiscordUserId.ToString(CultureInfo.InvariantCulture),
+            crossCurrency ? cashCurrencyId : null,
             BusinessDateOf(now),
             now));
+    }
+
+    private static Result<AtmPlacementAgreementRecord?> ResolvePlacement(
+        IBankingUnitOfWork unitOfWork,
+        AtmTerminalRecord terminal,
+        Bank acquirer)
+    {
+        if (unitOfWork.GuildEconomies.FindGuildId(acquirer.EconomyScopeId) ==
+            terminal.PlacementGuildId)
+        {
+            return Result<AtmPlacementAgreementRecord?>.Success(null);
+        }
+
+        return unitOfWork.Cash.FindPlacementAgreement(terminal.Id) is
+            { Status: AtmPlacementAgreementStatus.Active } agreement
+            ? Result<AtmPlacementAgreementRecord?>.Success(agreement)
+            : Result<AtmPlacementAgreementRecord?>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.AtmPlacementAgreementStateInvalid);
+    }
+
+    private static Result<MoneyMinor> ResolvePlacementFee(
+        IBankingUnitOfWork unitOfWork,
+        Bank acquirer,
+        DepositAccount account,
+        FeeScheduleVersionId scheduleVersionId,
+        MoneyMinor amount,
+        UtcTimestamp now)
+    {
+        if (EconomyBusinessCalendar.Resolve(
+                unitOfWork.EconomyCalendars, acquirer.EconomyScopeId, now) is not { } point)
+        {
+            return Result<MoneyMinor>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
+        FeeRule? rule = FeeRuleSelection.Select(
+            unitOfWork.FeeSchedules.ListRules(scheduleVersionId, FeeType.AtmPlacement),
+            new FeeMatchContext(
+                FeeChannel.Atm,
+                account.ProductId,
+                AtmNetworkId: null,
+                acquirer.Id,
+                amount,
+                point.DayClass,
+                point.LocalMinuteOfDay));
+
+        return rule is null
+            ? Result<MoneyMinor>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.FeeRuleUnavailable)
+            : Result<MoneyMinor>.Success(rule.Calculate(amount));
     }
 
     private static bool Participates(
@@ -446,11 +734,20 @@ public sealed partial class AtmApplicationService
         FeeType feeType,
         BankId counterpartyBankId,
         MoneyMinor amount,
-        UtcTimestamp now) =>
+        UtcTimestamp now,
+        CurrencyId? revenueCurrencyId = null) =>
         EconomyBusinessCalendar.Resolve(unitOfWork.EconomyCalendars, bank.EconomyScopeId, now) is
             { } point
             ? FeeResolver.Resolve(
-                unitOfWork, bank, account, feeType, FeeChannel.Atm, counterpartyBankId, amount, point)
+                unitOfWork,
+                bank,
+                account,
+                feeType,
+                FeeChannel.Atm,
+                counterpartyBankId,
+                amount,
+                point,
+                revenueCurrencyId)
             : Result<FeeAssessmentPlan>.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
 
@@ -474,11 +771,20 @@ public sealed partial class AtmApplicationService
         return operation;
     }
 
+    private static void Reserve(IBankingUnitOfWork unitOfWork, CashContext context)
+    {
+        foreach (CashPlanEntry entry in context.Plan)
+        {
+            Shift(unitOfWork, entry.CashHolderId, entry.DenominationId, 0, entry.Count);
+        }
+    }
+
     private void MoveCash(
         IBankingUnitOfWork unitOfWork,
         CashContext context,
         BusinessOperation operation,
-        bool dispensing)
+        bool dispensing,
+        bool releasingReservation = false)
     {
         foreach (CashPlanEntry entry in context.Plan)
         {
@@ -496,8 +802,13 @@ public sealed partial class AtmApplicationService
                 CashMovementKind,
                 context.Now));
 
-            Shift(unitOfWork, from, entry.DenominationId, -entry.Count);
-            Shift(unitOfWork, to, entry.DenominationId, entry.Count);
+            Shift(
+                unitOfWork,
+                from,
+                entry.DenominationId,
+                -entry.Count,
+                releasingReservation ? -entry.Count : 0);
+            Shift(unitOfWork, to, entry.DenominationId, entry.Count, 0);
         }
     }
 
@@ -505,7 +816,8 @@ public sealed partial class AtmApplicationService
         IBankingUnitOfWork unitOfWork,
         CashHolderId holderId,
         CurrencyDenominationId denominationId,
-        long delta)
+        long delta,
+        long reservedDelta)
     {
         CashPositionRecord position = unitOfWork.Cash.FindCashPosition(holderId, denominationId)
             ?? new CashPositionRecord(holderId, denominationId, 0, 0, 0);
@@ -513,6 +825,7 @@ public sealed partial class AtmApplicationService
         unitOfWork.Cash.UpsertCashPosition(position with
         {
             OnHandCount = checked(position.OnHandCount + delta),
+            ReservedCount = checked(position.ReservedCount + reservedDelta),
             Version = position.Version + 1,
         });
     }
@@ -770,7 +1083,8 @@ public sealed partial class AtmApplicationService
         MoneyMinor cashAmount,
         string eventType)
     {
-        bool sameBank = context.IssuerBank.Id == context.AcquirerBank.Id;
+        bool sameBank = context.IssuerBank.Id == context.AcquirerBank.Id ||
+            context.CashCurrencyId is not null;
         ClearingInstructionId? instructionId = null;
 
         if (!sameBank)
@@ -808,14 +1122,14 @@ public sealed partial class AtmApplicationService
             transactionType,
             context.Account.CurrencyId,
             sourceAmount,
-            context.Account.CurrencyId,
+            context.CashCurrencyId ?? context.Account.CurrencyId,
             cashAmount,
             context.Account.CurrencyId,
             context.IssuerFee,
-            context.Account.CurrencyId,
+            context.CashCurrencyId ?? context.Account.CurrencyId,
             context.AcquirerFee,
-            null,
-            MoneyMinor.Zero,
+            context.PlacementFee.IsPositive ? context.CashCurrency : null,
+            context.PlacementFee,
             sameBank ? AtmTransactionStatus.Settled : AtmTransactionStatus.InterbankPending,
             instructionId,
             context.Now,
@@ -829,8 +1143,11 @@ public sealed partial class AtmApplicationService
 
         unitOfWork.Cash.AddTransaction(transaction);
 
-        context.Account.RecordCustomerActivity(context.Now);
-        unitOfWork.DepositAccounts.Update(context.Account);
+        if (context.CashCurrencyId is null)
+        {
+            context.Account.RecordCustomerActivity(context.Now);
+            unitOfWork.DepositAccounts.Update(context.Account);
+        }
 
         unitOfWork.BankAdministration.AddAuditRecord(
             AuditRecordId.FromValue(idGenerator.NextId()),
@@ -869,35 +1186,32 @@ public sealed partial class AtmApplicationService
         CashContext context,
         BusinessOperation operation)
     {
-        Assess(unitOfWork, context, operation, context.IssuerBank, context.IssuerFee);
-        Assess(unitOfWork, context, operation, context.AcquirerBank, context.AcquirerFee);
+        Assess(unitOfWork, context, operation, context.IssuerPlan, context.Account.CurrencyId);
+        Assess(unitOfWork, context, operation, context.AcquirerPlan, context.CashCurrency);
     }
 
     private void Assess(
         IBankingUnitOfWork unitOfWork,
         CashContext context,
         BusinessOperation operation,
-        Bank bank,
-        MoneyMinor amount)
+        FeeAssessmentPlan? plan,
+        CurrencyId currencyId)
     {
-        if (!amount.IsPositive)
+        if (plan is not { } assessed || !assessed.RequiresRecord)
         {
             return;
         }
 
-        LedgerAccount revenue = unitOfWork.LedgerAccounts.FindPostingByKind(
-            bank.GeneralLedgerBookId, LedgerAccountKind.FeeRevenue, context.Account.CurrencyId)!;
-
         unitOfWork.FeeAssessments.Add(FeeAssessment.Assess(
             FeeAssessmentId.FromValue(idGenerator.NextId()),
             operation.Id,
-            context.IssuerScheduleVersionId,
-            context.IssuerRuleId,
-            context.Account.CurrencyId,
+            assessed.Quote.ScheduleVersionId,
+            assessed.Quote.RuleId,
+            currencyId,
             context.Account.LedgerAccountId,
-            revenue.Id,
-            context.IssuerFeeType,
-            amount,
+            assessed.RevenueAccount.Id,
+            assessed.Quote.Type,
+            assessed.Amount,
             context.Now));
     }
 

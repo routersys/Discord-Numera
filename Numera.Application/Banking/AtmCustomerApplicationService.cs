@@ -97,19 +97,23 @@ public interface IAtmApplicationService
 public sealed partial class AtmApplicationService : IAtmApplicationService
 {
     private readonly IBankingWriteGateway writeGateway;
+    private readonly FxApplicationService markets;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
 
     public AtmApplicationService(
         IBankingWriteGateway writeGateway,
+        FxApplicationService markets,
         IClock clock,
         IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(markets);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.markets = markets;
         this.clock = clock;
         this.idGenerator = idGenerator;
     }

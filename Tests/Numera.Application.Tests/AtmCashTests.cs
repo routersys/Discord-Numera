@@ -19,6 +19,9 @@ public sealed class AtmCashTests
     private const string HomeInstitution = "NUM0090";
     private const string PartnerInstitution = "NUM0091";
     private const ulong CustomerUser = 790_000_000_000_000_001UL;
+    private const ulong MakerUser = 790_000_000_000_000_002UL;
+    private const ulong ForeignGuildId = 991UL;
+    private const string ForeignInstitution = "NUM0092";
 
     private sealed class StubAtmCardImageRenderer : IBankCardImageRenderer
     {
@@ -50,6 +53,8 @@ public sealed class AtmCashTests
         public BankCardApplicationService Cards { get; private set; } = null!;
 
         public AtmApplicationService Atm { get; private set; } = null!;
+
+        public FxApplicationService Markets { get; private set; } = null!;
 
         public CashAdministrationApplicationService Cash { get; private set; } = null!;
 
@@ -88,7 +93,10 @@ public sealed class AtmCashTests
                 ids);
             harness.Cards = new BankCardApplicationService(
                 gateway, harness.Clock, ids, new StubAtmCardImageRenderer());
-            harness.Atm = new AtmApplicationService(gateway, harness.Clock, ids);
+            harness.Markets = new FxApplicationService(
+                gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids);
+            harness.Atm = new AtmApplicationService(
+                gateway, harness.Markets, harness.Clock, ids);
             harness.Cash = new CashAdministrationApplicationService(gateway, harness.Clock, ids);
 
             return harness;
@@ -161,7 +169,13 @@ public sealed class AtmCashTests
                 """);
         }
 
-        private void SeedBank(int partySeed, string institutionCode, long ownFee, long partnerFee)
+        private void SeedBank(
+            int partySeed,
+            string institutionCode,
+            long ownFee,
+            long partnerFee,
+            int scopeSeed = 1,
+            int currencySeed = 2)
         {
             int book = partySeed + 1;
             int bank = partySeed + 2;
@@ -188,8 +202,8 @@ public sealed class AtmCashTests
                 INSERT INTO banks(bank_id, economy_scope_id, party_id, institution_code, name, bank_kind,
                     resolution_case_id, status, general_ledger_book_id, current_policy_version_id,
                     current_fee_schedule_version_id, created_at, version)
-                VALUES({Blob(bank)}, {Blob(1)}, {Blob(partySeed)}, '{institutionCode}', 'ヌメラ銀行',
-                    'NORMAL', NULL, 'OPERATING', {Blob(book)}, NULL, NULL, 1, 1);
+                VALUES({Blob(bank)}, {Blob(scopeSeed)}, {Blob(partySeed)}, '{institutionCode}',
+                    'ヌメラ銀行', 'NORMAL', NULL, 'OPERATING', {Blob(book)}, NULL, NULL, 1, 1);
 
                 INSERT INTO branches(branch_id, bank_id, branch_code, name, status, created_at,
                     closed_at, version)
@@ -201,15 +215,15 @@ public sealed class AtmCashTests
                     version)
                 VALUES
                     ({Blob(control)}, {Blob(book)}, NULL, '2000', 'DEMAND_DEPOSIT_CONTROL', 'LIABILITY',
-                        'CREDIT', {Blob(2)}, 0, NULL, NULL, 'ACTIVE', 1, 1),
+                        'CREDIT', {Blob(currencySeed)}, 0, NULL, NULL, 'ACTIVE', 1, 1),
                     ({Blob(partySeed + 10)}, {Blob(book)}, NULL, '4300', 'FEE_REVENUE', 'REVENUE',
-                        'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                        'CREDIT', {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
                     ({Blob(partySeed + 11)}, {Blob(book)}, NULL, '1000', 'CASH_ASSET', 'ASSET',
-                        'DEBIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                        'DEBIT', {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
                     ({Blob(partySeed + 12)}, {Blob(book)}, NULL, '2600', 'ATM_NETWORK_PAYABLE',
-                        'LIABILITY', 'CREDIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                        'LIABILITY', 'CREDIT', {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
                     ({Blob(partySeed + 13)}, {Blob(book)}, NULL, '1600', 'ATM_NETWORK_RECEIVABLE',
-                        'ASSET', 'DEBIT', {Blob(2)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+                        'ASSET', 'DEBIT', {Blob(currencySeed)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
 
                 INSERT INTO bank_policy_versions(bank_policy_version_id, bank_id, opening_enabled,
                     minimum_customer_account_age_days, minimum_initial_funding_minor,
@@ -340,6 +354,187 @@ public sealed class AtmCashTests
                 version, updated_at)
             VALUES({Blob(95)}, 100000, 0, 1, 1), ({Blob(93)}, 100000, 0, 1, 1);
             """);
+
+        public void SeedForeignCurrency()
+        {
+            Execute($"""
+                INSERT INTO guild_economies(economy_scope_id, guild_id, canonical_timezone, status,
+                    version)
+                VALUES({Blob(110)}, '{ForeignGuildId}', 'Asia/Tokyo', 'ACTIVE', 1);
+
+                INSERT INTO currencies(currency_id, economy_scope_id, status, minor_unit_digits,
+                    base_money_supply_cap_minor, created_at, retired_at, version)
+                VALUES({Blob(111)}, {Blob(110)}, 'ACTIVE', 0, NULL, 1, NULL, 1);
+
+                INSERT INTO currency_denominations(currency_denomination_id, currency_id, value_minor,
+                    kind, atm_dispense_enabled, atm_deposit_enabled, status, version)
+                VALUES({Blob(112)}, {Blob(111)}, 500, 'NOTE', 1, 1, 'ACTIVE', 1);
+                """);
+
+            SeedBank(120, ForeignInstitution, 0, 0, scopeSeed: 110, currencySeed: 111);
+
+            Execute($"""
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                    account_code, account_kind, accounting_type, normal_side, currency_id,
+                    posting_allowed, owner_reference_type, owner_reference_id, status, created_at,
+                    version)
+                VALUES
+                    ({Blob(113)}, {Blob(21)}, NULL, '1000F', 'CASH_ASSET', 'ASSET', 'DEBIT',
+                        {Blob(111)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(114)}, {Blob(21)}, NULL, '2700F', 'ATM_CASH_DELIVERY_PAYABLE', 'LIABILITY',
+                        'CREDIT', {Blob(111)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(115)}, {Blob(21)}, NULL, '4300F', 'FEE_REVENUE', 'REVENUE', 'CREDIT',
+                        {Blob(111)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(150)}, {Blob(21)}, NULL, '1700F', 'FX_CASH_DELIVERY_RECEIVABLE', 'ASSET',
+                        'DEBIT', {Blob(111)}, 1, NULL, NULL, 'ACTIVE', 1, 1),
+                    ({Blob(151)}, {Blob(121)}, NULL, '2500F', 'FX_CLEARING_PAYABLE', 'LIABILITY',
+                        'CREDIT', {Blob(111)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO parties(party_id, party_type, display_name, status, created_at, version)
+                VALUES({Blob(152)}, 'SYSTEM', '決済網主体', 'ACTIVE', 1, 1);
+
+                INSERT INTO accounting_books(accounting_book_id, owner_party_id, book_kind, status,
+                    created_at, version)
+                VALUES({Blob(153)}, {Blob(152)}, 'SYSTEM', 'OPEN', 1, 1);
+
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                    account_code, account_kind, accounting_type, normal_side, currency_id,
+                    posting_allowed, owner_reference_type, owner_reference_id, status, created_at,
+                    version)
+                VALUES({Blob(154)}, {Blob(153)}, NULL, '1000N', 'CASH_ASSET', 'ASSET', 'DEBIT',
+                    {Blob(111)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO payment_networks(payment_network_id, economy_scope_id, network_code,
+                    operator_party_id, accounting_book_id, liquid_asset_ledger_account_id, status,
+                    current_policy_version_id, version)
+                VALUES({Blob(155)}, {Blob(110)}, 'FXNET', {Blob(152)}, {Blob(153)}, {Blob(154)},
+                    'DRAFT', NULL, 1);
+
+                INSERT INTO payment_network_policy_versions(payment_network_policy_version_id,
+                    payment_network_id, settlement_mode, beneficiary_posting_policy,
+                    rtgs_threshold_minor, clearing_cycle_interval_seconds, precredit_enabled,
+                    precredit_prefund_ratio_bps, per_bank_precredit_exposure_limit_minor, created_at,
+                    version)
+                VALUES({Blob(156)}, {Blob(155)}, 'CLEARING', 'AFTER_FINAL_SETTLEMENT', NULL, 3600, 0,
+                    10000, 0, 1, 1);
+
+                UPDATE payment_networks
+                SET status = 'ACTIVE', current_policy_version_id = {Blob(156)}, version = version + 1
+                WHERE payment_network_id = {Blob(155)};
+
+                INSERT INTO atm_terminal_currency_services(atm_terminal_id, currency_id,
+                    withdrawal_enabled, deposit_enabled, cross_currency_withdrawal_enabled, status,
+                    version)
+                VALUES({Blob(60)}, {Blob(111)}, 1, 1, 1, 'ACTIVE', 1);
+
+                INSERT INTO cash_holders(cash_holder_id, currency_id, holder_type, owner_reference_id,
+                    created_at)
+                VALUES({Blob(116)}, {Blob(111)}, 'ATM_CASSETTE', {Blob(117)}, 1);
+
+                INSERT INTO atm_cash_cassettes(atm_cash_cassette_id, atm_terminal_id, cash_holder_id,
+                    currency_denomination_id, cassette_role, cassette_priority, capacity_count, status,
+                    version)
+                VALUES({Blob(117)}, {Blob(60)}, {Blob(116)}, {Blob(112)}, 'RECYCLE', 2, 500, 'ACTIVE',
+                    1);
+
+                INSERT INTO cash_positions(cash_holder_id, currency_denomination_id, on_hand_count,
+                    reserved_count, version)
+                VALUES({Blob(116)}, {Blob(112)}, 100, 0, 1);
+
+                INSERT INTO fx_markets(market_id, base_currency_id, quote_currency_id,
+                    operator_party_id, current_policy_version_id, price_scale, tick_size_price_units,
+                    lot_size_base_minor, next_order_sequence_no, next_trade_sequence_no, status,
+                    version)
+                VALUES({Blob(140)}, {Blob(2)}, {Blob(111)}, {Blob(20)}, {Blob(141)}, 100, 1, 100, 1, 1,
+                    'ACTIVE', 1);
+
+                INSERT INTO fx_market_policy_versions(fx_market_policy_version_id, market_id,
+                    maker_fee_bps, taker_fee_bps, maximum_market_slippage_bps, effective_from,
+                    created_at, version)
+                VALUES({Blob(141)}, {Blob(140)}, 0, 0, 1000, 1, 1, 1);
+
+                INSERT INTO fx_market_summaries(market_id, last_trade_price_units,
+                    last_trade_sequence_no, summary_version, order_book_version, updated_at)
+                VALUES({Blob(140)}, NULL, NULL, 1, 1, 1);
+                """);
+        }
+
+        public void SeedCrossGuildTerminal() =>
+            Execute($"""
+                UPDATE atm_terminals SET placement_guild_id = '{ForeignGuildId}'
+                WHERE atm_terminal_id = {Blob(60)};
+                """);
+
+        public void SeedPlacementAgreement()
+        {
+            SeedCrossGuildTerminal();
+
+            Execute($"""
+                INSERT INTO ledger_accounts(ledger_account_id, accounting_book_id, parent_account_id,
+                    account_code, account_kind, accounting_type, normal_side, currency_id,
+                    posting_allowed, owner_reference_type, owner_reference_id, status, created_at,
+                    version)
+                VALUES({Blob(160)}, {Blob(21)}, NULL, '2800F', 'PLACEMENT_FEE_PAYABLE', 'LIABILITY',
+                    'CREDIT', {Blob(111)}, 1, NULL, NULL, 'ACTIVE', 1, 1);
+
+                INSERT INTO fee_schedule_versions(fee_schedule_version_id, bank_id, effective_from,
+                    effective_to, version)
+                VALUES({Blob(161)}, {Blob(22)}, 1, NULL, 1);
+
+                INSERT INTO fee_rules(fee_rule_id, fee_schedule_version_id, fee_type, priority, channel,
+                    account_product_id, atm_network_id, counterparty_bank_id, amount_min_minor,
+                    amount_max_minor, day_class, local_start_minute, local_end_minute, fixed_minor,
+                    basis_points, minimum_minor, maximum_minor, waiver_counter_key,
+                    free_occurrences_per_business_month)
+                VALUES({Blob(162)}, {Blob(161)}, 'ATM_PLACEMENT', 0, 'ANY', NULL, NULL, NULL, 0, NULL,
+                    'ANY', NULL, NULL, 100, 0, 0, NULL, NULL, 0);
+
+                INSERT INTO atm_placement_agreements(atm_placement_agreement_id, atm_terminal_id,
+                    placement_guild_id, operator_bank_id, host_approval_decision_id,
+                    operator_approval_decision_id, override_decision_id, effective_from, effective_to,
+                    placement_fee_schedule_version_id, revenue_share_bps, status, version)
+                VALUES({Blob(163)}, {Blob(60)}, '{ForeignGuildId}', {Blob(22)}, NULL, NULL, NULL, 1,
+                    NULL, {Blob(161)}, 5000, 'ACTIVE', 1);
+                """);
+        }
+
+        public async Task ProvideFxLiquidityAsync(long baseMinor)
+        {
+            Result<CustomerAccountView> maker = await Registration.RegisterCustomerAccountAsync(
+                new RegisterCustomerAccountCommand(GuildId, MakerUser, "maker", "利用者"),
+                CancellationToken.None);
+
+            Result<AccountOpeningView> home = await Accounts.OpenDepositAccountAsync(
+                new OpenDepositAccountCommand(GuildId, maker.Value.Id, HomeInstitution),
+                CancellationToken.None);
+
+            Result<AccountOpeningView> foreign = await Accounts.OpenDepositAccountAsync(
+                new OpenDepositAccountCommand(ForeignGuildId, maker.Value.Id, ForeignInstitution),
+                CancellationToken.None);
+
+            Assert.IsTrue(home.IsSuccess, home.Error?.Code);
+            Assert.IsTrue(foreign.IsSuccess, foreign.Error?.Code);
+
+            Fund(home.Value.Id, 1_000_000);
+            Fund(foreign.Value.Id, 1_000_000);
+
+            Result<FxOrderView> resting = await Markets.PlaceFxOrderAsync(
+                new PlaceFxOrderCommand(
+                    new AuthorizationContext(AuthorizationLevel.Customer, MakerUser, GuildId),
+                    FxMarketId.FromValue(EntityIdValue.FromBits(140)),
+                    maker.Value.Id,
+                    FxOrderSide.BuyBase,
+                    FxOrderType.Limit,
+                    baseMinor,
+                    100,
+                    null,
+                    foreign.Value.Id,
+                    home.Value.Id,
+                    IdempotencyKey.Create("atm-fx", "liquidity-1")),
+                CancellationToken.None);
+
+            Assert.IsTrue(resting.IsSuccess, resting.Error?.Code);
+        }
 
         public void Execute(string sql)
         {
@@ -777,6 +972,168 @@ public sealed class AtmCashTests
         Assert.IsFalse(result.IsSuccess);
         Assert.AreEqual(BankingErrorCodes.BankCashInsufficient, result.Error!.Code);
         Assert.AreEqual(0L, harness.Count("cash_movements"));
+    }
+
+    [TestMethod]
+    public async Task ACrossCurrencyWithdrawalDeliversForeignCashThroughTheFxMarket()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedForeignCurrency();
+        await harness.ProvideFxLiquidityAsync(10_000);
+
+        (_, DepositAccountId account) = await harness.OpenAsync();
+        harness.Fund(account, 50_000);
+
+        Result<AtmTransactionView> result = await harness.Atm.AtmWithdrawAsync(
+            new AtmWithdrawCommand(
+                Actor(),
+                harness.TerminalId,
+                account,
+                CurrencyId.FromValue(EntityIdValue.FromBits(111)),
+                2_000,
+                "atm-xc"),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess, result.Error?.Code);
+        Assert.AreEqual(AtmTransactionStatus.Settled, result.Value.Status);
+        Assert.AreEqual(2_000L, result.Value.SourceAmount.Value);
+        Assert.AreEqual(2_000L, result.Value.CashAmount.Value);
+        Assert.AreEqual(48_000L, harness.Balance(account));
+        Assert.AreEqual(1L, harness.Count("fx_trades"));
+        Assert.AreEqual(2L, harness.Count("fx_settlement_legs"));
+        Assert.AreEqual(1L, harness.Count("clearing_instructions"));
+        Assert.AreEqual(
+            1L,
+            harness.Scalar("""
+                SELECT COUNT(*) FROM fx_settlement_endpoints
+                WHERE endpoint_kind = 'ATM_CASH_DELIVERY' AND atm_terminal_id IS NOT NULL
+                  AND customer_cash_holder_id IS NOT NULL AND business_operation_id IS NOT NULL;
+                """));
+        Assert.AreEqual(
+            0L,
+            harness.Scalar("""
+                SELECT COALESCE(SUM(p.posted_balance_minor), 0) FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'ATM_CASH_DELIVERY_PAYABLE';
+                """));
+        Assert.AreEqual(
+            0L,
+            harness.Scalar("""
+                SELECT COALESCE(SUM(p.posted_balance_minor), 0) FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind IN ('ATM_NETWORK_PAYABLE','ATM_NETWORK_RECEIVABLE');
+                """));
+        Assert.AreEqual(
+            2_000L,
+            harness.Scalar("""
+                SELECT SUM(p.on_hand_count * d.value_minor) FROM cash_positions AS p
+                JOIN cash_holders AS h ON h.cash_holder_id = p.cash_holder_id
+                JOIN currency_denominations AS d
+                    ON d.currency_denomination_id = p.currency_denomination_id
+                WHERE h.holder_type = 'CUSTOMER_WALLET';
+                """));
+        Assert.AreEqual(
+            0L,
+            harness.Scalar("SELECT COALESCE(SUM(reserved_count), 0) FROM cash_positions;"));
+    }
+
+    [TestMethod]
+    public void TheExactGrossIsTheSmallestAmountWhoseNetMatchesTheRequirement()
+    {
+        Assert.AreEqual(2_000L, FxApplicationService.ExactGross(2_000, 0));
+        Assert.AreEqual(1_999L, FxApplicationService.ExactGross(1_980, 100));
+        Assert.AreEqual(2_020L, FxApplicationService.ExactGross(2_000, 100));
+        Assert.IsNull(FxApplicationService.ExactGross(1_000, 10_000));
+        Assert.IsNull(FxApplicationService.ExactGross(0, 100));
+    }
+
+    [TestMethod]
+    public async Task ACrossGuildTerminalWithoutAnActiveAgreementIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedForeignCurrency();
+        harness.SeedCrossGuildTerminal();
+
+        (_, DepositAccountId account) = await harness.OpenAsync();
+        harness.Fund(account, 50_000);
+
+        Result<AtmTransactionView> result = await harness.Atm.AtmWithdrawAsync(
+            new AtmWithdrawCommand(
+                Actor(), harness.TerminalId, account, harness.CurrencyId, 2_000, "atm-placement"),
+            CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.AtmPlacementAgreementStateInvalid, result.Error?.Code);
+        Assert.AreEqual(0L, harness.Count("atm_transactions"));
+    }
+
+    [TestMethod]
+    public async Task ACrossCurrencyWithdrawalChargesThePlacementFeeToTheHostGuild()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedForeignCurrency();
+        harness.SeedPlacementAgreement();
+        await harness.ProvideFxLiquidityAsync(10_000);
+
+        (_, DepositAccountId account) = await harness.OpenAsync();
+        harness.Fund(account, 50_000);
+
+        Result<AtmTransactionView> result = await harness.Atm.AtmWithdrawAsync(
+            new AtmWithdrawCommand(
+                Actor(),
+                harness.TerminalId,
+                account,
+                CurrencyId.FromValue(EntityIdValue.FromBits(111)),
+                2_000,
+                "atm-xc-placement"),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.IsSuccess, result.Error?.Code);
+        Assert.AreEqual(2_100L, result.Value.SourceAmount.Value);
+        Assert.AreEqual(2_000L, result.Value.CashAmount.Value);
+        Assert.AreEqual(100L, harness.Scalar("SELECT placement_fee_minor FROM atm_transactions;"));
+        Assert.AreEqual(
+            100L,
+            harness.Scalar("""
+                SELECT COALESCE(SUM(p.posted_balance_minor), 0) FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'PLACEMENT_FEE_PAYABLE';
+                """));
+        Assert.AreEqual(
+            0L,
+            harness.Scalar("""
+                SELECT COALESCE(SUM(p.posted_balance_minor), 0) FROM ledger_balance_projections AS p
+                JOIN ledger_accounts AS a ON a.ledger_account_id = p.ledger_account_id
+                WHERE a.account_kind = 'ATM_CASH_DELIVERY_PAYABLE';
+                """));
+    }
+
+    [TestMethod]
+    public async Task ACrossCurrencyWithdrawalWithoutFullFillIsRejected()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedForeignCurrency();
+        await harness.ProvideFxLiquidityAsync(1_000);
+
+        (_, DepositAccountId account) = await harness.OpenAsync();
+        harness.Fund(account, 50_000);
+
+        Result<AtmTransactionView> result = await harness.Atm.AtmWithdrawAsync(
+            new AtmWithdrawCommand(
+                Actor(),
+                harness.TerminalId,
+                account,
+                CurrencyId.FromValue(EntityIdValue.FromBits(111)),
+                2_000,
+                "atm-xc"),
+            CancellationToken.None);
+
+        Assert.IsFalse(result.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.FxMarketNoLiquidity, result.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("fx_trades"));
+        Assert.AreEqual(0L, harness.Count("atm_transactions"));
+        Assert.AreEqual(0L, harness.Count("cash_movements"));
+        Assert.AreEqual(50_000L, harness.Balance(account));
     }
 
     [TestMethod]

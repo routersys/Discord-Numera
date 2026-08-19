@@ -11,6 +11,8 @@ internal readonly record struct FeeAssessmentPlan(
     LedgerAccount RevenueAccount,
     int BusinessMonth)
 {
+    public MoneyMinor Amount => Quote.Amount;
+
     public bool RequiresPosting => Quote.Amount.IsPositive;
 
     public bool RequiresRecord => Quote.Amount.IsPositive || Quote.WaiverApplied;
@@ -26,7 +28,8 @@ internal static class FeeResolver
         FeeChannel channel,
         BankId? counterpartyBankId,
         MoneyMinor amount,
-        BusinessTimePoint point)
+        BusinessTimePoint point,
+        CurrencyId? revenueCurrencyId = null)
     {
         if (bank.CurrentFeeScheduleVersionId is not { } scheduleVersionId)
         {
@@ -51,7 +54,9 @@ internal static class FeeResolver
         }
 
         LedgerAccount? revenue = unitOfWork.LedgerAccounts.FindPostingByKind(
-            bank.GeneralLedgerBookId, LedgerAccountKind.FeeRevenue, payer.CurrencyId);
+            bank.GeneralLedgerBookId,
+            LedgerAccountKind.FeeRevenue,
+            revenueCurrencyId ?? payer.CurrencyId);
 
         if (revenue is null)
         {

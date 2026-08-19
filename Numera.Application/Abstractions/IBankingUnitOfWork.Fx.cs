@@ -55,6 +55,8 @@ public sealed record FxSettlementEndpointRecord(
     BusinessOperationId? BusinessOperationId,
     LedgerAccountId? DestinationLedgerAccountId,
     PartyId? DestinationPartyId,
+    AtmTerminalId? AtmTerminalId,
+    CashHolderId? CustomerCashHolderId,
     UtcTimestamp CreatedAt);
 
 public sealed record FxTradeRecord(

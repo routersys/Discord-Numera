@@ -648,8 +648,8 @@ internal sealed class SqliteFxRepository : IFxRepository
                 deposit_account_id, atm_terminal_id, customer_cash_holder_id, business_operation_id,
                 destination_ledger_account_id, destination_party_id, merchant_profile_id,
                 commerce_order_id, created_at)
-            VALUES($id, $currency, $kind, $deposit, NULL, NULL, $operation, $ledger, $party, NULL,
-                NULL, $created);
+            VALUES($id, $currency, $kind, $deposit, $terminal, $holder, $operation, $ledger, $party,
+                NULL, NULL, $created);
             """);
 
         command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(endpoint.Id.Value));
@@ -659,6 +659,8 @@ internal sealed class SqliteFxRepository : IFxRepository
         command.Parameters.AddWithValue("$operation", Blob(endpoint.BusinessOperationId?.Value));
         command.Parameters.AddWithValue("$ledger", Blob(endpoint.DestinationLedgerAccountId?.Value));
         command.Parameters.AddWithValue("$party", Blob(endpoint.DestinationPartyId?.Value));
+        command.Parameters.AddWithValue("$terminal", Blob(endpoint.AtmTerminalId?.Value));
+        command.Parameters.AddWithValue("$holder", Blob(endpoint.CustomerCashHolderId?.Value));
         command.Parameters.AddWithValue("$created", endpoint.CreatedAt.UnixMilliseconds);
 
         command.ExecuteNonQuery();
@@ -668,7 +670,8 @@ internal sealed class SqliteFxRepository : IFxRepository
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""
             SELECT fx_settlement_endpoint_id, currency_id, endpoint_kind, deposit_account_id,
-                   business_operation_id, destination_ledger_account_id, destination_party_id, created_at
+                   business_operation_id, destination_ledger_account_id, destination_party_id,
+                   atm_terminal_id, customer_cash_holder_id, created_at
             FROM fx_settlement_endpoints WHERE fx_settlement_endpoint_id = $id;
             """);
 
@@ -691,7 +694,13 @@ internal sealed class SqliteFxRepository : IFxRepository
                     ? null
                     : LedgerAccountId.FromValue(SqliteValueMapper.ReadEntityId(reader, 5)),
                 reader.IsDBNull(6) ? null : PartyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 6)),
-                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(7)))
+                reader.IsDBNull(7)
+                    ? null
+                    : AtmTerminalId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
+                reader.IsDBNull(8)
+                    ? null
+                    : CashHolderId.FromValue(SqliteValueMapper.ReadEntityId(reader, 8)),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(9)))
             : null;
     }
 

@@ -17,6 +17,8 @@ public sealed partial class FxApplicationService
 
     public const string CustomerEndpointKind = "CUSTOMER_DEPOSIT";
 
+    public const string CashDeliveryEndpointKind = "ATM_CASH_DELIVERY";
+
     public const string BaseTransactionType = "FX_BASE_SETTLEMENT";
 
     public const string QuoteTransactionType = "FX_QUOTE_SETTLEMENT";
@@ -35,12 +37,20 @@ public sealed partial class FxApplicationService
 
     private readonly record struct PlannedFill(FxOrder Maker, long BaseMinor, long QuoteMinor);
 
+    internal readonly record struct FxCashDelivery(
+        AtmTerminalId AtmTerminalId,
+        CashHolderId CustomerCashHolderId,
+        Bank AcquirerBank,
+        MoneyMinor CashAmount,
+        MoneyMinor AcquirerFee,
+        MoneyMinor PlacementFee);
+
     private sealed record PlacementContext(
         FxMarket Market,
         FxMarketPolicyVersion Policy,
         CustomerAccount Customer,
         DepositAccount Source,
-        DepositAccount Destination,
+        DepositAccount? Destination,
         Bank Bank,
         BusinessDate BusinessDate,
         CurrencyId PayCurrencyId,
@@ -48,6 +58,13 @@ public sealed partial class FxApplicationService
         MoneyMinor HoldAmount,
         IReadOnlyList<PlannedFill> Fills,
         bool PlanComplete,
+        FxOrderSide Side,
+        FxOrderType OrderType,
+        long BaseMinor,
+        long? PriceUnits,
+        int? MaximumSlippageBps,
+        IdempotencyKey IdempotencyKey,
+        FxCashDelivery? CashDelivery,
         UtcTimestamp Now);
 
     internal readonly record struct FxAcquisitionEstimate(
@@ -200,18 +217,27 @@ public sealed partial class FxApplicationService
             return Result<FxOrderView>.Failure(prepared.Error!);
         }
 
-        PlacementContext context = prepared.Value;
+        return Execute(unitOfWork, prepared.Value);
+    }
 
-        BusinessOperation operation = BusinessOperation.Start(
+    private Result<FxOrderView> Execute(
+        IBankingUnitOfWork unitOfWork,
+        PlacementContext context,
+        BusinessOperation? shared = null)
+    {
+        BusinessOperation operation = shared ?? BusinessOperation.Start(
             BusinessOperationId.FromValue(idGenerator.NextId()),
             OperationType,
             context.Bank.EconomyScopeId,
             context.Customer.PartyId,
             idGenerator.NextId(),
-            command.IdempotencyKey,
+            context.IdempotencyKey,
             context.Now);
 
-        unitOfWork.BusinessOperations.Add(operation);
+        if (shared is null)
+        {
+            unitOfWork.BusinessOperations.Add(operation);
+        }
 
         FxFundingEndpointRecord funding = new(
             FxFundingEndpointId.FromValue(idGenerator.NextId()),
@@ -223,15 +249,29 @@ public sealed partial class FxApplicationService
             context.Source.BankId,
             context.Now);
 
-        FxSettlementEndpointRecord settlement = new(
-            FxSettlementEndpointId.FromValue(idGenerator.NextId()),
-            context.ReceiveCurrencyId,
-            CustomerEndpointKind,
-            context.Destination.Id,
-            BusinessOperationId: null,
-            DestinationLedgerAccountId: null,
-            DestinationPartyId: null,
-            context.Now);
+        FxSettlementEndpointRecord settlement = context.CashDelivery is { } delivery
+            ? new FxSettlementEndpointRecord(
+                FxSettlementEndpointId.FromValue(idGenerator.NextId()),
+                context.ReceiveCurrencyId,
+                CashDeliveryEndpointKind,
+                DepositAccountId: null,
+                operation.Id,
+                DestinationLedgerAccountId: null,
+                DestinationPartyId: null,
+                delivery.AtmTerminalId,
+                delivery.CustomerCashHolderId,
+                context.Now)
+            : new FxSettlementEndpointRecord(
+                FxSettlementEndpointId.FromValue(idGenerator.NextId()),
+                context.ReceiveCurrencyId,
+                CustomerEndpointKind,
+                context.Destination!.Id,
+                BusinessOperationId: null,
+                DestinationLedgerAccountId: null,
+                DestinationPartyId: null,
+                AtmTerminalId: null,
+                CustomerCashHolderId: null,
+                context.Now);
 
         unitOfWork.Fx.AddFundingEndpoint(funding);
         unitOfWork.Fx.AddSettlementEndpoint(settlement);
@@ -264,12 +304,12 @@ public sealed partial class FxApplicationService
                 FxParticipantKind.Customer,
                 context.Customer.PartyId,
                 context.Customer.Id,
-                command.Side,
-                command.OrderType,
-                TimeInForceOf(command.OrderType),
-                command.PriceUnits,
-                command.MaximumSlippageBps,
-                command.BaseMinor,
+                context.Side,
+                context.OrderType,
+                TimeInForceOf(context.OrderType),
+                context.PriceUnits,
+                context.MaximumSlippageBps,
+                context.BaseMinor,
                 context.Market.TakeOrderSequence(),
                 funding.Id,
                 settlement.Id,
@@ -285,7 +325,7 @@ public sealed partial class FxApplicationService
 
         unitOfWork.Fx.AddOrder(order);
 
-        bool rejected = command.OrderType == FxOrderType.MarketFok && !context.PlanComplete;
+        bool rejected = context.OrderType == FxOrderType.MarketFok && !context.PlanComplete;
 
         if (!rejected)
         {
@@ -318,17 +358,207 @@ public sealed partial class FxApplicationService
             BumpOrderBook(unitOfWork, context.Market.Id, context.Now);
         }
 
-        operation.Commit(context.Now);
-        unitOfWork.BusinessOperations.Update(operation);
+        if (shared is null)
+        {
+            operation.Commit(context.Now);
+            unitOfWork.BusinessOperations.Update(operation);
 
-        unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
-            OutboxEventId.FromValue(idGenerator.NextId()),
-            operation.Id,
-            PlacedEventType,
-            OrderPayload(order),
-            context.Now));
+            unitOfWork.Outbox.Add(OutboxEvent.Enqueue(
+                OutboxEventId.FromValue(idGenerator.NextId()),
+                operation.Id,
+                PlacedEventType,
+                OrderPayload(order),
+                context.Now));
+        }
 
         return Result<FxOrderView>.Success(ToView(order));
+    }
+
+    internal readonly record struct FxCashDeliveryOutcome(MoneyMinor SourceDebit, FxOrderId OrderId);
+
+    internal Result<FxCashDeliveryOutcome> DeliverCash(
+        IBankingUnitOfWork unitOfWork,
+        BusinessOperation operation,
+        CustomerAccount customer,
+        DepositAccount source,
+        Bank sourceBank,
+        CurrencyId deliveryCurrencyId,
+        FxCashDelivery delivery,
+        BusinessDate businessDate,
+        UtcTimestamp now)
+    {
+        (CurrencyId first, CurrencyId second) = FxAdministrationApplicationService.Orient(
+            source.CurrencyId, deliveryCurrencyId);
+
+        if (unitOfWork.Fx.FindMarketByPair(first, second) is not { } market ||
+            !market.IsTradable ||
+            market.CurrentPolicyVersionId is not { } policyVersionId ||
+            unitOfWork.Fx.FindPolicyVersion(policyVersionId) is not { } policy)
+        {
+            return Result<FxCashDeliveryOutcome>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxMarketNotTradable);
+        }
+
+        MoneyMinor netDelivery = delivery.CashAmount.Add(delivery.AcquirerFee).Add(delivery.PlacementFee);
+
+        if (ExactGross(netDelivery.Value, policy.TakerFeeBps) is not { } gross)
+        {
+            return Result<FxCashDeliveryOutcome>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxAmountNotRepresentable);
+        }
+
+        bool acquireBase = deliveryCurrencyId == market.BaseCurrencyId;
+
+        Result<IReadOnlyList<PlannedFill>> planned = PlanExact(
+            unitOfWork, market, acquireBase, gross);
+
+        if (!planned.IsSuccess)
+        {
+            return Result<FxCashDeliveryOutcome>.Failure(planned.Error!);
+        }
+
+        long baseTotal = 0;
+        long quoteTotal = 0;
+
+        foreach (PlannedFill fill in planned.Value)
+        {
+            baseTotal = checked(baseTotal + fill.BaseMinor);
+            quoteTotal = checked(quoteTotal + fill.QuoteMinor);
+        }
+
+        MoneyMinor debit = MoneyMinor.FromMinor(acquireBase ? quoteTotal : baseTotal);
+
+        LedgerBalance balance = unitOfWork.LedgerAccounts.FindProjection(source.LedgerAccountId)
+            ?? LedgerBalance.Empty;
+
+        if (!balance.CanReserve(debit))
+        {
+            return Result<FxCashDeliveryOutcome>.Failure(
+                ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
+        }
+
+        PlacementContext context = new(
+            market,
+            policy,
+            customer,
+            source,
+            Destination: null,
+            sourceBank,
+            businessDate,
+            source.CurrencyId,
+            deliveryCurrencyId,
+            debit,
+            planned.Value,
+            PlanComplete: true,
+            acquireBase ? FxOrderSide.BuyBase : FxOrderSide.SellBase,
+            FxOrderType.MarketFok,
+            baseTotal,
+            PriceUnits: null,
+            MaximumSlippageBps: policy.MaximumMarketSlippageBps,
+            IdempotencyKey: default,
+            delivery,
+            now);
+
+        Result<FxOrderView> executed = Execute(unitOfWork, context, operation);
+
+        return executed.IsSuccess
+            ? Result<FxCashDeliveryOutcome>.Success(
+                new FxCashDeliveryOutcome(debit, executed.Value.Id))
+            : Result<FxCashDeliveryOutcome>.Failure(executed.Error!);
+    }
+
+    internal static long? ExactGross(long netMinor, int feeBps)
+    {
+        if (netMinor <= 0 || feeBps >= FxPricing.BasisPointScale)
+        {
+            return null;
+        }
+
+        if (GrossUp(netMinor, feeBps) is not { } upper)
+        {
+            return null;
+        }
+
+        long lower = netMinor;
+
+        while (lower < upper)
+        {
+            long middle = lower + ((upper - lower) / 2);
+
+            if (NetOf(middle, feeBps) >= netMinor)
+            {
+                upper = middle;
+            }
+            else
+            {
+                lower = middle + 1;
+            }
+        }
+
+        return NetOf(lower, feeBps) == netMinor ? lower : null;
+    }
+
+    private static long NetOf(long grossMinor, int feeBps) =>
+        checked(grossMinor - (long)(checked((Int128)grossMinor * feeBps) / FxPricing.BasisPointScale));
+
+    private static Result<IReadOnlyList<PlannedFill>> PlanExact(
+        IBankingUnitOfWork unitOfWork,
+        FxMarket market,
+        bool acquireBase,
+        long grossNeeded)
+    {
+        IReadOnlyList<FxOrder> resting = unitOfWork.Fx.ListRestingOrders(
+            market.Id,
+            acquireBase ? FxOrderSide.SellBase : FxOrderSide.BuyBase,
+            FxPricing.MaximumFokMakerOrders + 1);
+
+        List<PlannedFill> fills = [];
+        long acquired = 0;
+
+        foreach (FxOrder maker in resting)
+        {
+            if (acquired >= grossNeeded || fills.Count == FxPricing.MaximumFokMakerOrders)
+            {
+                break;
+            }
+
+            if (maker.PriceUnits is not { } price)
+            {
+                break;
+            }
+
+            long remaining = checked(grossNeeded - acquired);
+            long takeBase = acquireBase
+                ? Math.Min(maker.RemainingBaseMinor, remaining)
+                : Math.Min(
+                    maker.RemainingBaseMinor,
+                    ExactBaseForQuote(remaining, price, market.PriceScale));
+
+            if (takeBase <= 0 ||
+                !FxPricing.IsLotMultiple(takeBase, market.LotSizeBaseMinor) ||
+                !FxPricing.TryQuoteMinor(takeBase, price, market.PriceScale, out long quote))
+            {
+                return Result<IReadOnlyList<PlannedFill>>.Failure(
+                    ErrorCategory.Conflict, BankingErrorCodes.FxMarketNoLiquidity);
+            }
+
+            fills.Add(new PlannedFill(maker, takeBase, quote));
+            acquired = checked(acquired + (acquireBase ? takeBase : quote));
+        }
+
+        return acquired == grossNeeded
+            ? Result<IReadOnlyList<PlannedFill>>.Success(fills)
+            : Result<IReadOnlyList<PlannedFill>>.Failure(
+                ErrorCategory.Conflict, BankingErrorCodes.FxMarketNoLiquidity);
+    }
+
+    private static long ExactBaseForQuote(long quoteMinor, long priceUnits, long priceScale)
+    {
+        Int128 numerator = checked((Int128)quoteMinor * priceScale);
+
+        return numerator % priceUnits == 0 && numerator / priceUnits <= long.MaxValue
+            ? (long)(numerator / priceUnits)
+            : 0;
     }
 
     private Result<PlacementContext> Prepare(
@@ -490,6 +720,13 @@ public sealed partial class FxApplicationService
             holdAmount.Value,
             fills,
             complete,
+            command.Side,
+            command.OrderType,
+            command.BaseMinor,
+            command.PriceUnits,
+            command.MaximumSlippageBps,
+            command.IdempotencyKey,
+            CashDelivery: null,
             now));
     }
 
@@ -749,12 +986,17 @@ public sealed partial class FxApplicationService
         FxSettlementEndpointRecord settlement =
             unitOfWork.Fx.FindSettlementEndpoint(recipient.DestinationSettlementEndpointId)!;
 
+        bool cashDelivery = settlement.EndpointKind == CashDeliveryEndpointKind;
+
         DepositAccount payerAccount = unitOfWork.DepositAccounts.Find(funding.DepositAccountId!.Value)!;
-        DepositAccount recipientAccount =
-            unitOfWork.DepositAccounts.Find(settlement.DepositAccountId!.Value)!;
+        DepositAccount? recipientAccount = cashDelivery
+            ? null
+            : unitOfWork.DepositAccounts.Find(settlement.DepositAccountId!.Value)!;
 
         Bank sourceBank = unitOfWork.Banks.Find(payerAccount.BankId)!;
-        Bank recipientBank = unitOfWork.Banks.Find(recipientAccount.BankId)!;
+        Bank recipientBank = cashDelivery
+            ? context.CashDelivery!.Value.AcquirerBank
+            : unitOfWork.Banks.Find(recipientAccount!.BankId)!;
 
         MoneyMinor gross = MoneyMinor.FromMinor(grossMinor);
         MoneyMinor fee = MoneyMinor.FromMinor(feeMinor);
@@ -795,7 +1037,11 @@ public sealed partial class FxApplicationService
 
             recipientReceivable = recipientExternal
                 ? unitOfWork.LedgerAccounts.FindPostingByKind(
-                    recipientBank.GeneralLedgerBookId, LedgerAccountKind.FxClearingReceivable, currencyId)
+                    recipientBank.GeneralLedgerBookId,
+                    cashDelivery
+                        ? LedgerAccountKind.FxCashDeliveryReceivable
+                        : LedgerAccountKind.FxClearingReceivable,
+                    currencyId)
                 : null;
 
             operatorReceivable = feeExternal
@@ -835,6 +1081,7 @@ public sealed partial class FxApplicationService
             external,
             recipientExternal,
             feeExternal,
+            cashDelivery,
             payable,
             feeLedger,
             transactionType,
@@ -850,6 +1097,16 @@ public sealed partial class FxApplicationService
 
         if (recipientExternal)
         {
+            LedgerPostingBuilder claimCredit = new();
+            Result resolvedCredit = CreditRecipient(
+                unitOfWork, context, recipientBank, recipientAccount, cashDelivery, currencyId, net,
+                claimCredit);
+
+            if (!resolvedCredit.IsSuccess)
+            {
+                return resolvedCredit;
+            }
+
             Result claim = PostClaimBook(
                 unitOfWork,
                 context,
@@ -857,8 +1114,7 @@ public sealed partial class FxApplicationService
                 recipientBank,
                 currencyId,
                 recipientReceivable!,
-                PostingLine.Deposit(
-                    unitOfWork.LedgerAccounts.Find(recipientAccount.LedgerAccountId)!, EntrySide.Credit, net),
+                claimCredit.Lines,
                 net,
                 transactionType,
                 descriptionCode);
@@ -881,7 +1137,7 @@ public sealed partial class FxApplicationService
                 operatorBank!,
                 currencyId,
                 operatorReceivable!,
-                PostingLine.Institutional(feeLedger!, EntrySide.Credit, fee),
+                [PostingLine.Institutional(feeLedger!, EntrySide.Credit, fee)],
                 fee,
                 transactionType,
                 descriptionCode);
@@ -916,7 +1172,7 @@ public sealed partial class FxApplicationService
             leg.Id,
             FxSettlementComponentKind.RecipientNet,
             payer.ParticipantPartyId,
-            recipient.ParticipantPartyId,
+            cashDelivery ? recipientBank.PartyId : recipient.ParticipantPartyId,
             sourceBank.Id,
             recipientBank.Id,
             recipientExternal ? FxSettlementPath.BankClearing : FxSettlementPath.InternalBook,
@@ -947,13 +1203,68 @@ public sealed partial class FxApplicationService
         return Result.Success();
     }
 
+    private static Result CreditRecipient(
+        IBankingUnitOfWork unitOfWork,
+        PlacementContext context,
+        Bank bank,
+        DepositAccount? recipientAccount,
+        bool cashDelivery,
+        CurrencyId currencyId,
+        MoneyMinor net,
+        LedgerPostingBuilder posting)
+    {
+        if (!cashDelivery || context.CashDelivery is not { } delivery)
+        {
+            posting.Add(PostingLine.Deposit(
+                unitOfWork.LedgerAccounts.Find(recipientAccount!.LedgerAccountId)!,
+                EntrySide.Credit,
+                net));
+
+            return Result.Success();
+        }
+
+        LedgerAccount? payable = unitOfWork.LedgerAccounts.FindPostingByKind(
+            bank.GeneralLedgerBookId, LedgerAccountKind.AtmCashDeliveryPayable, currencyId);
+        LedgerAccount? revenue = delivery.AcquirerFee.IsPositive
+            ? unitOfWork.LedgerAccounts.FindPostingByKind(
+                bank.GeneralLedgerBookId, LedgerAccountKind.FeeRevenue, currencyId)
+            : null;
+        LedgerAccount? placement = delivery.PlacementFee.IsPositive
+            ? unitOfWork.LedgerAccounts.FindPostingByKind(
+                bank.GeneralLedgerBookId, LedgerAccountKind.PlacementFeePayable, currencyId)
+            : null;
+
+        if (payable is null ||
+            (delivery.AcquirerFee.IsPositive && revenue is null) ||
+            (delivery.PlacementFee.IsPositive && placement is null) ||
+            delivery.CashAmount.Add(delivery.AcquirerFee).Add(delivery.PlacementFee) != net)
+        {
+            return Result.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.AtmSettlementAccountUnavailable);
+        }
+
+        posting.Add(PostingLine.Institutional(payable, EntrySide.Credit, delivery.CashAmount));
+
+        if (revenue is not null)
+        {
+            posting.Add(PostingLine.Institutional(revenue, EntrySide.Credit, delivery.AcquirerFee));
+        }
+
+        if (placement is not null)
+        {
+            posting.Add(PostingLine.Institutional(placement, EntrySide.Credit, delivery.PlacementFee));
+        }
+
+        return Result.Success();
+    }
+
     private Result PostSourceBook(
         IBankingUnitOfWork unitOfWork,
         PlacementContext context,
         BusinessOperation operation,
         Bank sourceBank,
         DepositAccount payerAccount,
-        DepositAccount recipientAccount,
+        DepositAccount? recipientAccount,
         Hold payerHold,
         CurrencyId currencyId,
         MoneyMinor gross,
@@ -962,6 +1273,7 @@ public sealed partial class FxApplicationService
         MoneyMinor external,
         bool recipientExternal,
         bool feeExternal,
+        bool cashDelivery,
         LedgerAccount? payable,
         LedgerAccount? feeLedger,
         string transactionType,
@@ -980,8 +1292,14 @@ public sealed partial class FxApplicationService
 
         if (!recipientExternal)
         {
-            posting.Add(PostingLine.Deposit(
-                unitOfWork.LedgerAccounts.Find(recipientAccount.LedgerAccountId)!, EntrySide.Credit, net));
+            Result direct = CreditRecipient(
+                unitOfWork, context, sourceBank, recipientAccount, cashDelivery, currencyId, net,
+                posting);
+
+            if (!direct.IsSuccess)
+            {
+                return direct;
+            }
         }
 
         if (feeLedger is not null && !feeExternal)
@@ -1024,7 +1342,7 @@ public sealed partial class FxApplicationService
         Bank claimBank,
         CurrencyId currencyId,
         LedgerAccount receivable,
-        PostingLine credit,
+        IReadOnlyList<PostingLine> credits,
         MoneyMinor amount,
         string transactionType,
         string descriptionCode)
@@ -1038,7 +1356,11 @@ public sealed partial class FxApplicationService
 
         LedgerPostingBuilder posting = new();
         posting.Add(PostingLine.Institutional(receivable, EntrySide.Debit, amount));
-        posting.Add(credit);
+
+        foreach (PostingLine credit in credits)
+        {
+            posting.Add(credit);
+        }
 
         LedgerAccount[] ordered = posting.OrderedAccounts();
 
