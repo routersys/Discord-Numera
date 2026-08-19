@@ -183,6 +183,116 @@ public sealed partial class PaymentApplicationService
             routed.Value.Mode));
     }
 
+    internal readonly record struct MerchantAuthorizationReservation(
+        HoldId HoldId,
+        MoneyMinor PurchaseFee,
+        FeeScheduleVersionId FeeScheduleVersionId,
+        BusinessOperationId BusinessOperationId);
+
+    internal Result<MerchantAuthorizationReservation> ReserveMerchantAuthorization(
+        IBankingUnitOfWork unitOfWork,
+        EconomyScopeId economyScopeId,
+        CustomerAccount payer,
+        DepositAccount source,
+        DepositAccount destination,
+        MoneyMinor amount,
+        IdempotencyKey idempotencyKey,
+        UtcTimestamp now)
+    {
+        ArgumentNullException.ThrowIfNull(payer);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(destination);
+
+        if (source.Permits(AccountOperation.OutgoingTransfer) != StatusPermission.Allowed)
+        {
+            return Result<MerchantAuthorizationReservation>.Failure(
+                ErrorCategory.AccountRestricted, BankingErrorCodes.DepositAccountNotOperable);
+        }
+
+        if (unitOfWork.Banks.Find(source.BankId) is not { Status: BankStatus.Operating } bank)
+        {
+            return Result<MerchantAuthorizationReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
+        }
+
+        if (bank.CurrentFeeScheduleVersionId is not { } feeScheduleVersionId)
+        {
+            return Result<MerchantAuthorizationReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.FeeScheduleUnavailable);
+        }
+
+        if (EconomyBusinessCalendar.Resolve(
+                unitOfWork.EconomyCalendars, bank.EconomyScopeId, now) is not { } point)
+        {
+            return Result<MerchantAuthorizationReservation>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.EconomyCalendarUnavailable);
+        }
+
+        Result<FeeAssessmentPlan> fee = FeeResolver.Resolve(
+            unitOfWork,
+            bank,
+            source,
+            FeeType.DebitPurchase,
+            FeeChannel.Merchant,
+            destination.BankId,
+            amount,
+            point);
+
+        if (!fee.IsSuccess)
+        {
+            return Result<MerchantAuthorizationReservation>.Failure(fee.Error!);
+        }
+
+        MoneyMinor totalDebit = amount.Add(fee.Value.Quote.Amount);
+
+        LedgerBalance balance = unitOfWork.LedgerAccounts.FindProjection(source.LedgerAccountId)
+            ?? LedgerBalance.Empty;
+
+        Result holdLimit = TransferLimitPolicy.EvaluateActiveHolds(
+            unitOfWork, bank, balance.HeldAmount, totalDebit);
+
+        if (!holdLimit.IsSuccess)
+        {
+            return Result<MerchantAuthorizationReservation>.Failure(holdLimit.Error!);
+        }
+
+        if (!balance.CanReserve(totalDebit))
+        {
+            return Result<MerchantAuthorizationReservation>.Failure(
+                ErrorCategory.InsufficientFunds, BankingErrorCodes.AvailableBalanceInsufficient);
+        }
+
+        BusinessOperation operation = BusinessOperation.Start(
+            BusinessOperationId.FromValue(idGenerator.NextId()),
+            MerchantOperationType,
+            economyScopeId,
+            payer.PartyId,
+            idGenerator.NextId(),
+            idempotencyKey,
+            now);
+
+        unitOfWork.BusinessOperations.Add(operation);
+
+        Hold hold = Hold.ReserveOnDeposit(
+            HoldId.FromValue(idGenerator.NextId()),
+            source.Id,
+            operation.Id,
+            totalDebit,
+            MerchantHoldReason,
+            now,
+            expiresAt: null);
+
+        unitOfWork.Holds.Add(hold);
+        unitOfWork.LedgerAccounts.UpsertProjection(
+            source.LedgerAccountId, balance.IncreaseHold(totalDebit), now);
+
+        operation.Commit(now);
+        unitOfWork.BusinessOperations.Update(operation);
+
+        return Result<MerchantAuthorizationReservation>.Success(new MerchantAuthorizationReservation(
+            hold.Id, fee.Value.Quote.Amount, feeScheduleVersionId, operation.Id));
+    }
+
     internal readonly record struct MerchantRefundPosting(
         PaymentOrderId OrderId,
         BusinessOperationId BusinessOperationId,

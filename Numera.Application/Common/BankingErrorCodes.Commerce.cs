@@ -175,4 +175,19 @@ public static partial class BankingErrorCodes
 
     public static string CommerceRefundWindowClosed { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.OperationExpired, 180);
+
+    public static string MerchantProfileStateInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 200);
+
+    public static string CommerceReferenceDuplicated { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 201);
+
+    public static string DebitCardAuthorizationNotFound { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.NotFound, 200);
+
+    public static string DebitCardAuthorizationStateInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 202);
+
+    public static string DebitCardCaptureExceedsAuthorization { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 203);
 }

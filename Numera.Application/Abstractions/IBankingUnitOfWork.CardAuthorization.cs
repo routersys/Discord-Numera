@@ -69,6 +69,14 @@ public interface IDebitCardAuthorizationRepository
 
     void AddCapture(DebitCardCaptureRecord capture);
 
+    DebitCardAuthorizationRecord? FindByReference(
+        MerchantProfileId merchantProfileId,
+        string merchantReference);
+
+    DebitCardCaptureRecord? FindCaptureByReference(
+        DebitCardAuthorizationId authorizationId,
+        string merchantCaptureReference);
+
     void AddRefund(DebitCardRefundRecord refund);
 
     DebitCardCaptureRecord? FindCapture(DebitCardAuthorizationId authorizationId);

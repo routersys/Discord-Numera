@@ -61,6 +61,19 @@ public sealed class CommerceCatalogTests
 
         public RecordingRoleGateway Roles { get; private set; } = null!;
 
+        public SqliteBankingWriteGateway Gateway { get; private set; } = null!;
+
+        public StandaloneMerchantRailService Rail { get; private set; } = null!;
+
+        public Task<Result<DebitCardAuthorizationRecord>> AuthoriseAsync(
+            StandaloneAuthorizationRequest request) =>
+            Gateway.ExecuteAsync(
+                unitOfWork => Rail.Authorize(unitOfWork, request), CancellationToken.None);
+
+        public Task<Result<DebitCardCaptureRecord>> CaptureAsync(StandaloneCaptureRequest request) =>
+            Gateway.ExecuteAsync(
+                unitOfWork => Rail.Capture(unitOfWork, request), CancellationToken.None);
+
         public CommerceFulfillmentService Fulfillments { get; private set; } = null!;
 
         public BankCardApplicationService Cards { get; private set; } = null!;
@@ -118,6 +131,12 @@ public sealed class CommerceCatalogTests
                 ids);
             harness.Maintenance = new CommerceMaintenanceService(gateway, harness.Clock, ids);
             harness.Roles = new RecordingRoleGateway();
+            harness.Gateway = gateway;
+            harness.Rail = new StandaloneMerchantRailService(
+                new PaymentApplicationService(
+                    gateway, new SqliteBankingReadGateway(harness.ConnectionFactory), harness.Clock, ids),
+                harness.Clock,
+                ids);
             harness.Fulfillments = new CommerceFulfillmentService(gateway, harness.Roles, harness.Clock);
             harness.Cards = new BankCardApplicationService(
                 gateway, harness.Clock, ids, new StubCommerceCardImageRenderer());
@@ -251,6 +270,15 @@ public sealed class CommerceCatalogTests
                         = x'{Convert.ToHexString(customerAccountId.Value.ToByteArray())}'
                       AND bank_id = {bank};
                     """))));
+
+        public long HeldOf(DepositAccountId accountId) => long.Parse(
+            ReadText($"""
+                SELECT CAST(COALESCE(p.held_minor, 0) AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                WHERE d.deposit_account_id
+                    = x'{Convert.ToHexString(accountId.Value.ToByteArray())}';
+                """),
+            System.Globalization.CultureInfo.InvariantCulture);
 
         public DepositAccountId SourceOf(CommerceOrderId orderId) =>
             DepositAccountId.FromValue(EntityIdValue.FromBytes(
@@ -1838,6 +1866,84 @@ public sealed class CommerceCatalogTests
             new[] { "GRANT:555000111", "REVOKE:555000111" }, harness.Roles.Calls);
         Assert.AreEqual(
             "SUCCEEDED", harness.ReadText("SELECT status FROM commerce_fulfillment_reversals;"));
+    }
+
+    [TestMethod]
+    public async Task TheStandaloneRailCapturesAnAuthorizationInTwoParts()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        DepositAccountId buyer = await PrepareBuyerAsync(harness, "rail-1");
+
+        Result<DebitCardAuthorizationRecord> authorized = await harness.AuthoriseAsync(
+            new StandaloneAuthorizationRequest(
+                profile.Id, harness.DebitCardOf(buyer), "RAIL-1", MoneyMinor.FromMinor(1_000)));
+
+        Assert.IsTrue(authorized.IsSuccess, authorized.Error?.Code);
+        Assert.IsNull(authorized.Value.CommerceOrderId);
+        Assert.AreEqual(DebitCardAuthorizationStatus.Authorized, authorized.Value.Status);
+        Assert.AreEqual(1_000L, authorized.Value.PresentmentAuthorized.Value);
+        Assert.AreEqual(1_000L, harness.HeldOf(buyer));
+        Assert.AreEqual(0L, harness.Count("payment_orders"));
+
+        Result<DebitCardCaptureRecord> first = await harness.CaptureAsync(
+            new StandaloneCaptureRequest(
+                authorized.Value.Id, "CAP-1", MoneyMinor.FromMinor(400), Final: false));
+
+        Assert.IsTrue(first.IsSuccess, first.Error?.Code);
+        Assert.AreEqual(400L, first.Value.PresentmentAmount.Value);
+        Assert.AreEqual("PARTIALLY_CAPTURED", harness.ReadText(
+            "SELECT status FROM debit_card_authorizations;"));
+        Assert.AreEqual(600L, harness.HeldOf(buyer));
+
+        Result<DebitCardCaptureRecord> second = await harness.CaptureAsync(
+            new StandaloneCaptureRequest(
+                authorized.Value.Id, "CAP-2", MoneyMinor.FromMinor(600), Final: true));
+
+        Assert.IsTrue(second.IsSuccess, second.Error?.Code);
+        Assert.AreEqual("CAPTURED", harness.ReadText(
+            "SELECT status FROM debit_card_authorizations;"));
+        Assert.AreEqual(0L, harness.HeldOf(buyer));
+        Assert.AreEqual(2L, harness.Count("debit_card_captures"));
+        Assert.AreEqual(2L, harness.Count("payment_orders"));
+        Assert.AreEqual(
+            "99000",
+            harness.ReadText($"""
+                SELECT CAST(p.posted_balance_minor AS TEXT) FROM ledger_balance_projections AS p
+                JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+                WHERE d.deposit_account_id = x'{Convert.ToHexString(buyer.Value.ToByteArray())}';
+                """));
+    }
+
+    [TestMethod]
+    public async Task TheStandaloneRailRejectsACaptureBeyondTheAuthorizedAmount()
+    {
+        await using Harness harness = Harness.Create();
+        MerchantProfileView profile = await CreateProfileAsync(harness);
+        DepositAccountId buyer = await PrepareBuyerAsync(harness, "rail-2");
+
+        Result<DebitCardAuthorizationRecord> authorized = await harness.AuthoriseAsync(
+            new StandaloneAuthorizationRequest(
+                profile.Id, harness.DebitCardOf(buyer), "RAIL-2", MoneyMinor.FromMinor(1_000)));
+
+        Assert.IsTrue(authorized.IsSuccess, authorized.Error?.Code);
+
+        Result<DebitCardCaptureRecord> excessive = await harness.CaptureAsync(
+            new StandaloneCaptureRequest(
+                authorized.Value.Id, "CAP-X", MoneyMinor.FromMinor(1_001), Final: true));
+
+        Assert.IsFalse(excessive.IsSuccess);
+        Assert.AreEqual(
+            BankingErrorCodes.DebitCardCaptureExceedsAuthorization, excessive.Error!.Code);
+        Assert.AreEqual(0L, harness.Count("debit_card_captures"));
+
+        Result<DebitCardAuthorizationRecord> duplicate = await harness.AuthoriseAsync(
+            new StandaloneAuthorizationRequest(
+                profile.Id, harness.DebitCardOf(buyer), "RAIL-2", MoneyMinor.FromMinor(500)));
+
+        Assert.IsFalse(duplicate.IsSuccess);
+        Assert.AreEqual(BankingErrorCodes.CommerceReferenceDuplicated, duplicate.Error!.Code);
+        Assert.AreEqual(1L, harness.Count("debit_card_authorizations"));
     }
 
     [TestMethod]

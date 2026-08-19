@@ -153,6 +153,64 @@ internal sealed class SqliteDebitCardAuthorizationRepository : IDebitCardAuthori
         command.ExecuteNonQuery();
     }
 
+    public DebitCardAuthorizationRecord? FindByReference(
+        MerchantProfileId merchantProfileId,
+        string merchantReference)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {Columns} FROM debit_card_authorizations
+            WHERE merchant_profile_id = $merchant AND merchant_reference = $reference;
+            """);
+
+        command.Parameters.AddWithValue(
+            "$merchant", SqliteValueMapper.ToBlob(merchantProfileId.Value));
+        command.Parameters.AddWithValue("$reference", merchantReference);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read() ? Read(reader) : null;
+    }
+
+    public DebitCardCaptureRecord? FindCaptureByReference(
+        DebitCardAuthorizationId authorizationId,
+        string merchantCaptureReference)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT debit_card_capture_id, debit_card_authorization_id, merchant_capture_reference,
+                   source_principal_minor, presentment_amount_minor, purchase_fee_minor,
+                   settlement_route, payment_order_id, fx_business_operation_id,
+                   business_operation_id, captured_at
+            FROM debit_card_captures
+            WHERE debit_card_authorization_id = $authorization
+              AND merchant_capture_reference = $reference;
+            """);
+
+        command.Parameters.AddWithValue(
+            "$authorization", SqliteValueMapper.ToBlob(authorizationId.Value));
+        command.Parameters.AddWithValue("$reference", merchantCaptureReference);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new DebitCardCaptureRecord(
+                DebitCardCaptureId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0)),
+                DebitCardAuthorizationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 1)),
+                reader.GetString(2),
+                MoneyMinor.FromMinor(reader.GetInt64(3)),
+                MoneyMinor.FromMinor(reader.GetInt64(4)),
+                MoneyMinor.FromMinor(reader.GetInt64(5)),
+                reader.GetString(6),
+                reader.IsDBNull(7)
+                    ? null
+                    : PaymentOrderId.FromValue(SqliteValueMapper.ReadEntityId(reader, 7)),
+                reader.IsDBNull(8)
+                    ? null
+                    : BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 8)),
+                BusinessOperationId.FromValue(SqliteValueMapper.ReadEntityId(reader, 9)),
+                SqliteValueMapper.ReadTimestamp(reader, 10))
+            : null;
+    }
+
     public DebitCardCaptureRecord? FindCapture(DebitCardAuthorizationId authorizationId)
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""
