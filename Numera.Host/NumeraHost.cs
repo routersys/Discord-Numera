@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Numera.Discord.Abstractions;
 using Numera.Discord.Gateway;
 using Numera.Host.Composition;
+using Numera.Host.Console;
 using Numera.Host.Configuration;
 using Numera.Host.Discord;
 using Numera.Host.Logging;
@@ -67,6 +68,30 @@ internal static class NumeraHost
                 return NumeraHostExitCode.StartupFailed;
             }
 
+            if (ConsoleRequest(args) is { } request)
+            {
+                ConsoleCommandResult? outcome = composer.RunConsoleCommand(request);
+
+                if (outcome is null)
+                {
+                    fatal.Write(
+                        BootstrapFatalEvents.ConfigurationInvalidId,
+                        BootstrapFatalEvents.ConfigurationInvalidName,
+                        "The console was not available for the requested maintenance command.");
+
+                    return NumeraHostExitCode.StartupFailed;
+                }
+
+                foreach (string line in outcome.Lines)
+                {
+                    System.Console.Out.WriteLine(line);
+                }
+
+                return outcome.IsSuccess
+                    ? NumeraHostExitCode.Success
+                    : NumeraHostExitCode.StartupFailed;
+            }
+
             StartupRecoveryReport recovery = StartupRecoveryMachine.Run(
                 composer.BindRecovery(static () => StartupCheckResult.Passed));
 
@@ -127,6 +152,20 @@ internal static class NumeraHost
         {
             instanceLock?.Dispose();
         }
+    }
+
+    internal static ConsoleCommand? ConsoleRequest(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (args.Length == 0)
+        {
+            return null;
+        }
+
+        ConsoleCommand parsed = ConsoleCommandLine.Parse(string.Join(' ', args));
+
+        return parsed.Kind == ConsoleCommandKind.Unknown ? null : parsed;
     }
 
     internal static DiscordCredentialMissingException? Credential(Exception exception)

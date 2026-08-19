@@ -63,6 +63,13 @@ internal sealed class StartupComposer
 
     internal RuntimeStateMarker? Marker => marker;
 
+    internal ConsoleCommandResult? RunConsoleCommand(ConsoleCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        return recoveryConsole?.Execute(command);
+    }
+
     internal ShellSession RunRecoveryShell(
         TextReader input,
         TextWriter output,
@@ -123,7 +130,7 @@ internal sealed class StartupComposer
         new StartupStepBinding(StartupStep.SqliteConnectionAndPragma, VerifyConnection),
         new StartupStepBinding(StartupStep.PreMigrationRecoveryPoint, CreatePreMigrationRecoveryPoint),
         new StartupStepBinding(StartupStep.DatabaseMigration, ApplyMigrations),
-        new StartupStepBinding(StartupStep.HostSettingsLoad, bootstrapSettings.Load),
+        new StartupStepBinding(StartupStep.HostSettingsLoad, LoadHostSettings),
         new StartupStepBinding(StartupStep.BootstrapShellResolution, ResolveBootstrapShell),
         new StartupStepBinding(
             StartupStep.EffectiveRuntimeOptionsValidation,
@@ -328,6 +335,61 @@ internal sealed class StartupComposer
         SqliteConnectionFactory factory) =>
         new(factory, static () => Guid.CreateVersion7().ToByteArray(bigEndian: true));
 
+    private StartupCheckResult LoadHostSettings()
+    {
+        StartupCheckResult loaded = bootstrapSettings.Load();
+
+        if (loaded.Status == StartupCheckStatus.Failed)
+        {
+            return loaded;
+        }
+
+        if (connectionFactory is null)
+        {
+            return StartupCheckResult.Failed(BankingErrorCodes.SystemBusy);
+        }
+
+        try
+        {
+            CreateBootstrapService(connectionFactory).SynchronizeSystemOwners(
+                ReadOwnerText(configuration),
+                timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+
+            return StartupCheckResult.Passed;
+        }
+        catch (PersistenceFailureException exception)
+        {
+            return StartupCheckResult.Failed(exception.Code);
+        }
+        catch (SqliteException exception)
+        {
+            return StartupCheckResult.Failed(
+                exception.SqliteErrorCode.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    internal static IReadOnlyList<string> ReadOwnerText(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        List<string> owners = [];
+
+        foreach (IConfigurationSection section in
+            configuration.GetSection($"{ConfigurationSectionSecurity}:SystemOwnerDiscordUserIds").GetChildren())
+        {
+            if (section.Value is { Length: > 0 } value)
+            {
+                owners.Add(value);
+            }
+        }
+
+        return owners;
+    }
+
+    private static SqliteDatabaseBootstrapService CreateBootstrapService(
+        SqliteConnectionFactory factory) =>
+        new(factory, static () => Guid.CreateVersion7().ToByteArray(bigEndian: true));
+
     private StartupCheckResult ResolveBootstrapShell()
     {
         if (databaseOptions is null || connectionFactory is null)
@@ -341,6 +403,7 @@ internal sealed class StartupComposer
         recoveryConsole = new ConsoleCommandExecutor(
             new SqliteDatabaseIntegrityProbe(connectionFactory),
             CreateReconciliationRunner(connectionFactory),
+            CreateBootstrapService(connectionFactory),
             backups,
             new SqliteDatabaseRestoreService(
                 databaseOptions, backups, new MigrationRunner([.. EmbeddedMigrationCatalog.Load()])),

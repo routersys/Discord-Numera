@@ -1,4 +1,5 @@
 using System.Globalization;
+using NodaTime;
 using Numera.Host.Startup;
 using Numera.Persistence.Sqlite;
 
@@ -26,6 +27,10 @@ public static class ConsoleText
     public const string UnknownCommand = "Unknown command. Type help for the command list.";
     public const string NotImplemented = "This command is not available in this build.";
     public const string BackupCreated = "Backup created:";
+    public const string EconomyCreated = "Economy created.";
+    public const string EconomyScopeLabel = "Economy Scope Id:";
+    public const string IssuanceBookLabel = "Issuance Accounting Book Id:";
+    public const string NextStepLabel = "Next:";
     public const string Restored = "Database restored. Recovery copy:";
     public const string NoVerifiedBackup = "NO_VERIFIED_BACKUP";
     public const string MaintenanceRequired = "MAINTENANCE_REQUIRED";
@@ -37,6 +42,7 @@ internal sealed class ConsoleCommandExecutor
 {
     private readonly IDatabaseIntegrityProbe probe;
     private readonly IDatabaseReconciliationRunner reconciliation;
+    private readonly IDatabaseBootstrapService bootstrap;
     private readonly IDatabaseBackupService backups;
     private readonly IDatabaseRestoreService restores;
     private readonly IMaintenanceGate maintenance;
@@ -46,6 +52,7 @@ internal sealed class ConsoleCommandExecutor
     internal ConsoleCommandExecutor(
         IDatabaseIntegrityProbe probe,
         IDatabaseReconciliationRunner reconciliation,
+        IDatabaseBootstrapService bootstrap,
         IDatabaseBackupService backups,
         IDatabaseRestoreService restores,
         IMaintenanceGate maintenance,
@@ -54,6 +61,7 @@ internal sealed class ConsoleCommandExecutor
     {
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(reconciliation);
+        ArgumentNullException.ThrowIfNull(bootstrap);
         ArgumentNullException.ThrowIfNull(backups);
         ArgumentNullException.ThrowIfNull(restores);
         ArgumentNullException.ThrowIfNull(maintenance);
@@ -62,6 +70,7 @@ internal sealed class ConsoleCommandExecutor
 
         this.probe = probe;
         this.reconciliation = reconciliation;
+        this.bootstrap = bootstrap;
         this.backups = backups;
         this.restores = restores;
         this.maintenance = maintenance;
@@ -81,6 +90,7 @@ internal sealed class ConsoleCommandExecutor
             ConsoleCommandKind.DatabaseBackupVerify => VerifyBackup(command.Argument),
             ConsoleCommandKind.DatabaseRestore => Restore(command.Argument),
             ConsoleCommandKind.DatabaseRestoreLatest => RestoreLatest(),
+            ConsoleCommandKind.EconomyInit => InitializeEconomy(command.Argument),
             ConsoleCommandKind.DatabaseRecoveryStatus or ConsoleCommandKind.Health => ReportHealth(),
             ConsoleCommandKind.Help => Help(),
             ConsoleCommandKind.Unknown => ConsoleCommandResult.Failed(ConsoleText.UnknownCommand),
@@ -171,6 +181,33 @@ internal sealed class ConsoleCommandExecutor
         return result.IsSuccess
             ? ConsoleCommandResult.Ok(ConsoleText.Restored + " " + result.RecoveryCopyPath)
             : ConsoleCommandResult.Failed(result.Detail);
+    }
+
+    private ConsoleCommandResult InitializeEconomy(string argument)
+    {
+        string[] parts = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length != 2)
+        {
+            return ConsoleCommandResult.Failed(SqliteDatabaseBootstrapService.GuildIdInvalid);
+        }
+
+        if (DateTimeZoneProviders.Tzdb.GetZoneOrNull(parts[1]) is null)
+        {
+            return ConsoleCommandResult.Failed(SqliteDatabaseBootstrapService.TimezoneInvalid);
+        }
+
+        EconomyBootstrapOutcome outcome = bootstrap.InitializeEconomy(
+            parts[0], parts[1], timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+
+        return outcome.IsSuccess
+            ? ConsoleCommandResult.Ok(
+                ConsoleText.EconomyCreated,
+                ConsoleText.EconomyScopeLabel + " " + outcome.EconomyScopeId,
+                ConsoleText.IssuanceBookLabel + " " + outcome.IssuanceAccountingBookId,
+                ConsoleText.NextStepLabel + " /manage currency-create book:"
+                    + outcome.IssuanceAccountingBookId)
+            : ConsoleCommandResult.Failed(outcome.Detail);
     }
 
     private ConsoleCommandResult ReportHealth()

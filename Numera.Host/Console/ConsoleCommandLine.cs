@@ -24,6 +24,7 @@ public enum ConsoleCommandKind
     Health = 19,
     Help = 20,
     Shutdown = 21,
+    EconomyInit = 22,
 }
 
 public sealed record ConsoleCommand(ConsoleCommandKind Kind, string Argument)
@@ -64,6 +65,8 @@ public static class ConsoleCommandLine
             ["database", "restore", "latest"] => Simple(ConsoleCommandKind.DatabaseRestoreLatest),
             ["database", "restore", string path] => WithArgument(ConsoleCommandKind.DatabaseRestore, path),
             ["database", "recovery", "status"] => Simple(ConsoleCommandKind.DatabaseRecoveryStatus),
+            ["economy", "init", string guild, string timezone] =>
+                WithArgument(ConsoleCommandKind.EconomyInit, guild + " " + timezone),
             ["health"] => Simple(ConsoleCommandKind.Health),
             ["help"] => Simple(ConsoleCommandKind.Help),
             ["shutdown"] => Simple(ConsoleCommandKind.Shutdown),

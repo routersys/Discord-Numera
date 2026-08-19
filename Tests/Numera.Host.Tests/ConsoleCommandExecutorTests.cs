@@ -18,6 +18,32 @@ internal sealed class StubReconciliation : IDatabaseReconciliationRunner
     public string? LastRunStatus(string scopeType) => Status;
 }
 
+internal sealed class StubBootstrap : IDatabaseBootstrapService
+{
+    internal string? Scope { get; set; }
+
+    internal EconomyBootstrapOutcome Outcome { get; set; } =
+        new(true, string.Empty, "AA", "BB");
+
+    internal List<string> Owners { get; } = [];
+
+    public SystemOwnerSyncOutcome SynchronizeSystemOwners(
+        IReadOnlyList<string> discordUserIds,
+        long nowMilliseconds)
+    {
+        Owners.AddRange(discordUserIds);
+
+        return new SystemOwnerSyncOutcome(discordUserIds.Count, 0, 0);
+    }
+
+    public EconomyBootstrapOutcome InitializeEconomy(
+        string guildId,
+        string canonicalTimezone,
+        long nowMilliseconds) => Outcome;
+
+    public string? FindEconomyScope(string guildId) => Scope;
+}
+
 [TestClass]
 public sealed class ConsoleCommandExecutorTests
 {
@@ -96,15 +122,67 @@ public sealed class ConsoleCommandExecutorTests
         StubRestores? restores = null,
         bool quiesced = true,
         PreviousStartupClassification previous = PreviousStartupClassification.Clean,
-        StubReconciliation? reconciliation = null) =>
+        StubReconciliation? reconciliation = null,
+        StubBootstrap? bootstrap = null) =>
         new ConsoleCommandExecutor(
             probe ?? new StubProbe(),
             reconciliation ?? new StubReconciliation(),
+            bootstrap ?? new StubBootstrap(),
             backups ?? new StubBackups(),
             restores ?? new StubRestores(),
             new StubGate(quiesced),
             TimeProvider.System,
             () => previous).Execute(ConsoleCommandLine.Parse(line));
+
+    [TestMethod]
+    public void TheInitCommandParsesTheGuildAndTimezone()
+    {
+        ConsoleCommand command = ConsoleCommandLine.Parse("economy init 1284327110349164587 Asia/Tokyo");
+
+        Assert.AreEqual(ConsoleCommandKind.EconomyInit, command.Kind);
+        Assert.AreEqual("1284327110349164587 Asia/Tokyo", command.Argument);
+    }
+
+    [TestMethod]
+    public void AnUnknownTimezoneIsRejectedBeforeAnyWrite()
+    {
+        StubBootstrap bootstrap = new();
+
+        ConsoleCommandResult result = Run("economy init 123 Nowhere/Nothing", bootstrap: bootstrap);
+
+        Assert.IsFalse(result.IsSuccess);
+        CollectionAssert.Contains(
+            result.Lines.ToArray(), SqliteDatabaseBootstrapService.TimezoneInvalid);
+        Assert.IsEmpty(bootstrap.Owners);
+    }
+
+    [TestMethod]
+    public void ASuccessfulInitReportsTheIssuanceBook()
+    {
+        ConsoleCommandResult result = Run("economy init 1284327110349164587 Asia/Tokyo");
+
+        Assert.IsTrue(result.IsSuccess);
+        CollectionAssert.Contains(result.Lines.ToArray(), ConsoleText.EconomyCreated);
+        StringAssert.Contains(
+            string.Join("\n", result.Lines), "/manage currency-create book:BB");
+    }
+
+    [TestMethod]
+    public void AnExistingEconomyIsRefused()
+    {
+        StubBootstrap bootstrap = new()
+        {
+            Outcome = EconomyBootstrapOutcome.Failed(
+                SqliteDatabaseBootstrapService.EconomyAlreadyExists),
+        };
+
+        ConsoleCommandResult result = Run(
+            "economy init 1284327110349164587 Asia/Tokyo", bootstrap: bootstrap);
+
+        Assert.IsFalse(result.IsSuccess);
+        CollectionAssert.Contains(
+            result.Lines.ToArray(), SqliteDatabaseBootstrapService.EconomyAlreadyExists);
+    }
 
     [TestMethod]
     public void HealthReportsTheLastFinancialReconciliation()
