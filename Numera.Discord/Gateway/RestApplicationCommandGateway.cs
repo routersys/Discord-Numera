@@ -131,6 +131,8 @@ internal sealed class RestApplicationCommandGateway : IApplicationCommandGateway
         return registered;
     }
 
+    public const int ModifyOptionLimit = 10;
+
     public async Task CreateAsync(
         CommandSyncTarget target,
         CommandManifestEntry entry,
@@ -151,14 +153,26 @@ internal sealed class RestApplicationCommandGateway : IApplicationCommandGateway
             .ConfigureAwait(false);
     }
 
-    public Task EditAsync(CommandSyncTarget target, CommandSyncEdit edit, CancellationToken cancellationToken)
+    public async Task EditAsync(
+        CommandSyncTarget target,
+        CommandSyncEdit edit,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(edit);
 
         RestApplicationCommand command = Resolve(edit.CommandId);
         CommandManifestEntry desired = edit.Desired;
 
-        return desired.Type switch
+        if (RequiresReplacement(desired))
+        {
+            await command.DeleteAsync(Options(cancellationToken)).ConfigureAwait(false);
+            await CreateAsync(target, desired, cancellationToken).ConfigureAwait(false);
+
+            return;
+        }
+
+        await (desired.Type switch
         {
             CommandManifestType.User => command.ModifyAsync<UserCommandProperties>(
                 properties => properties.Name = desired.Name,
@@ -171,7 +185,15 @@ internal sealed class RestApplicationCommandGateway : IApplicationCommandGateway
             _ => command.ModifyAsync<SlashCommandProperties>(
                 properties => ApplySlash(properties, desired),
                 Options(cancellationToken)),
-        };
+        }).ConfigureAwait(false);
+    }
+
+    internal static bool RequiresReplacement(CommandManifestEntry desired)
+    {
+        ArgumentNullException.ThrowIfNull(desired);
+
+        return desired.Type == CommandManifestType.Slash
+            && desired.Options.Count > ModifyOptionLimit;
     }
 
     public Task DeleteAsync(

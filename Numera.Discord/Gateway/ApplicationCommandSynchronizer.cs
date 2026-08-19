@@ -83,6 +83,23 @@ internal sealed class ApplicationCommandSynchronizer : IApplicationCommandSynchr
         int edited = 0;
         int deleted = 0;
         int unchanged = 0;
+        List<Exception> failures = [];
+
+        async Task<bool> ApplyAsync(Func<Task> operation)
+        {
+            try
+            {
+                await operation().ConfigureAwait(false);
+
+                return true;
+            }
+            catch (Exception failure) when (failure is not OperationCanceledException)
+            {
+                failures.Add(failure);
+
+                return false;
+            }
+        }
 
         foreach (CommandManifest manifest in BuildManifests())
         {
@@ -94,23 +111,37 @@ internal sealed class ApplicationCommandSynchronizer : IApplicationCommandSynchr
 
             foreach (CommandManifestEntry entry in plan.Create)
             {
-                await gateway.CreateAsync(target, entry, cancellationToken).ConfigureAwait(false);
-                created++;
+                if (await ApplyAsync(
+                    () => gateway.CreateAsync(target, entry, cancellationToken)).ConfigureAwait(false))
+                {
+                    created++;
+                }
             }
 
             foreach (CommandSyncEdit edit in plan.Edit)
             {
-                await gateway.EditAsync(target, edit, cancellationToken).ConfigureAwait(false);
-                edited++;
+                if (await ApplyAsync(
+                    () => gateway.EditAsync(target, edit, cancellationToken)).ConfigureAwait(false))
+                {
+                    edited++;
+                }
             }
 
             foreach (RegisteredCommand command in plan.Delete)
             {
-                await gateway.DeleteAsync(target, command, cancellationToken).ConfigureAwait(false);
-                deleted++;
+                if (await ApplyAsync(
+                    () => gateway.DeleteAsync(target, command, cancellationToken)).ConfigureAwait(false))
+                {
+                    deleted++;
+                }
             }
 
             unchanged += plan.Unchanged;
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException(failures);
         }
 
         return new DiscordCommandSyncOutcome(created, edited, deleted, unchanged);

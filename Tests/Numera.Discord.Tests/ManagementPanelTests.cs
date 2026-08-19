@@ -1,3 +1,5 @@
+using Numera.Discord.Commands;
+using Numera.Discord.Gateway;
 using Numera.Discord.Routing;
 using Numera.Discord.Rendering;
 using Numera.Discord.Sessions;
@@ -156,5 +158,48 @@ public sealed class ManagementPanelTests
         Assert.AreEqual(
             "管理する項目を選択してください。", Catalog.Resolve(ViewKeys.ManagePanel + ".description"));
         Assert.AreEqual("管理項目を選択", Catalog.Resolve(ViewKeys.ManagePanelPlaceholder));
+    }
+}
+
+[TestClass]
+public sealed class CommandSyncReplacementTests
+{
+    [TestMethod]
+    public void TheModifyOptionLimitMatchesTheMeasuredLibraryLimit()
+    {
+        int limit = Numera.Discord.Gateway.RestApplicationCommandGateway.ModifyOptionLimit;
+
+        Assert.AreEqual(10, limit);
+    }
+
+    [TestMethod]
+    public void ARootWithMoreOptionsThanModifyAllowsIsReplacedInstead()
+    {
+        GeneratedCommandManifestProvider provider = new();
+
+        CommandManifestEntry manage = provider.PrimaryCommands()
+            .Single(static entry => string.Equals(entry.Name, "manage", StringComparison.Ordinal));
+
+        Assert.IsGreaterThan(
+            Numera.Discord.Gateway.RestApplicationCommandGateway.ModifyOptionLimit,
+            manage.Options.Count);
+        Assert.IsTrue(Numera.Discord.Gateway.RestApplicationCommandGateway.RequiresReplacement(manage));
+    }
+
+    [TestMethod]
+    public void ARootWithinTheModifyLimitIsEditedInPlace()
+    {
+        GeneratedCommandManifestProvider provider = new();
+
+        foreach (CommandManifestEntry entry in provider.PrimaryCommands())
+        {
+            if (entry.Options.Count
+                <= Numera.Discord.Gateway.RestApplicationCommandGateway.ModifyOptionLimit)
+            {
+                Assert.IsFalse(
+                    Numera.Discord.Gateway.RestApplicationCommandGateway.RequiresReplacement(entry),
+                    entry.Name);
+            }
+        }
     }
 }
