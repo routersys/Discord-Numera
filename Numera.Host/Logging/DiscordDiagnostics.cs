@@ -76,8 +76,12 @@ internal sealed partial class DiscordDiagnostics : IDiscordDiagnostics
         LogCommandSyncCompleted(outcome.Created, outcome.Edited, outcome.Deleted, outcome.Unchanged);
     }
 
-    public void CommandSyncFailed(Exception exception) =>
-        LogCommandSyncFailed(exception, BankingErrorCodes.CommandSyncFailed);
+    public void CommandSyncFailed(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        LogCommandSyncFailed(exception, BankingErrorCodes.CommandSyncFailed, exception.Message);
+    }
 
     public void LibraryEvent(
         DiscordDiagnosticSeverity severity,
@@ -134,8 +138,8 @@ internal sealed partial class DiscordDiagnostics : IDiscordDiagnostics
         EventId = DiscordLogEvents.CommandSyncFailedId,
         EventName = DiscordLogEvents.CommandSyncFailedName,
         Level = LogLevel.Error,
-        Message = "Command synchronization failed: {errorCode}.")]
-    private partial void LogCommandSyncFailed(Exception exception, string errorCode);
+        Message = "Command synchronization failed: {errorCode}. {detail}")]
+    private partial void LogCommandSyncFailed(Exception exception, string errorCode, string detail);
 
     [LoggerMessage(
         EventId = DiscordLogEvents.LibraryEventId,
