@@ -563,8 +563,23 @@ public sealed record FxInterventionMandateView(
     long MaximumSourceMinorTotal,
     long UsedSourceMinor);
 
+public sealed record GetFxInterventionTargetQuery(
+    AuthorizationContext Actor,
+    string BaseCurrencyCode,
+    string QuoteCurrencyCode);
+
+public sealed record FxInterventionTargetView(
+    MonetaryAuthorityId AuthorityId,
+    MonetaryAuthorityStatus AuthorityStatus,
+    FxMarketId MarketId,
+    string PairCode);
+
 public interface IMonetaryAuthorityAdministrationApplicationService
 {
+    Task<Result<FxInterventionTargetView>> GetInterventionTargetAsync(
+        GetFxInterventionTargetQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<MonetaryAuthorityView>> GetAsync(
         GetMonetaryAuthorityQuery query,
         CancellationToken cancellationToken);
@@ -609,6 +624,56 @@ public sealed class MonetaryAuthorityAdministrationApplicationService
         this.markets = markets;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<FxInterventionTargetView>> GetInterventionTargetAsync(
+        GetFxInterventionTargetQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => InterventionTarget(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<FxInterventionTargetView> InterventionTarget(
+        IBankingUnitOfWork unitOfWork,
+        GetFxInterventionTargetQuery query)
+    {
+        Result<EconomyScopeId> scope = GovernanceAuthorization.Authorise(unitOfWork, query.Actor);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<FxInterventionTargetView>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Governance.FindMonetaryAuthority(scope.Value) is not { } authority)
+        {
+            return Result<FxInterventionTargetView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.MonetaryAuthorityNotFound);
+        }
+
+        if (unitOfWork.Currencies.FindByCode(query.BaseCurrencyCode) is not { } baseCurrency ||
+            unitOfWork.Currencies.FindByCode(query.QuoteCurrencyCode) is not { } quoteCurrency)
+        {
+            return Result<FxInterventionTargetView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
+        }
+
+        (CurrencyId first, CurrencyId second) =
+            FxAdministrationApplicationService.Orient(baseCurrency, quoteCurrency);
+
+        if (unitOfWork.Fx.FindMarketByPair(first, second) is not { } market)
+        {
+            return Result<FxInterventionTargetView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
+        }
+
+        return Result<FxInterventionTargetView>.Success(new FxInterventionTargetView(
+            authority.Id,
+            authority.Status,
+            market.Id,
+            query.BaseCurrencyCode + "/" + query.QuoteCurrencyCode));
     }
 
     public Task<Result<MonetaryAuthorityView>> GetAsync(

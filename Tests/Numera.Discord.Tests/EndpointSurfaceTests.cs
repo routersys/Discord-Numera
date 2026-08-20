@@ -164,8 +164,9 @@ public sealed class EndpointSurfaceTests
             new[]
             {
                 "bank-capital", "bank-create", "bank-loan", "panel-calendar-clear",
-                "panel-calendar-set", "panel-network-policy", "panel-network-state",
-                "panel-prudential-policy", "panel-trust-policy", "transfer",
+                "panel-calendar-set", "panel-insurance-scheme", "panel-insurance-state",
+                "panel-intervention", "panel-network-policy", "panel-network-state",
+                "panel-presentation", "panel-prudential-policy", "panel-trust-policy", "transfer",
             },
             EconomyCommandManifest.ModalActions.Order(StringComparer.Ordinal).ToArray());
     }

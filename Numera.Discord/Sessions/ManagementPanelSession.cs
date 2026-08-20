@@ -102,6 +102,10 @@ internal static class ManagementPanelCatalog
     internal const string NetworkPolicyEditor = "panel-network-policy";
     internal const string NetworkStateEditor = "panel-network-state";
     internal const string PrudentialPolicyEditor = "panel-prudential-policy";
+    internal const string PresentationEditor = "panel-presentation";
+    internal const string InsuranceSchemeEditor = "panel-insurance-scheme";
+    internal const string InsuranceStateEditor = "panel-insurance-state";
+    internal const string InterventionEditor = "panel-intervention";
 
     internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
     [
@@ -141,14 +145,18 @@ internal static class ManagementPanelCatalog
         new(CentralBank,
         [
             new("reserve-position", "/manage bank-asset"),
-            new("intervention", Pending),
+            new("intervention", Pending, InterventionEditor),
         ]),
-        new(DepositInsurance, [new("insurance-scheme", Pending)]),
+        new(DepositInsurance,
+        [
+            new("insurance-scheme", Pending, InsuranceSchemeEditor),
+            new("insurance-state", Pending, InsuranceStateEditor),
+        ]),
         new(PrudentialResolution,
         [
             new("prudential-policy", Pending, PrudentialPolicyEditor),
         ]),
-        new(Presentation, [new("presentation-profile", Pending)]),
+        new(Presentation, [new("presentation-profile", Pending, PresentationEditor)]),
         new(Audit, [new("reconcile", "/system reconcile")]),
     ];
 

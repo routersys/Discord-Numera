@@ -52,8 +52,21 @@ public sealed record PresentationProfileVersionView(
     BankId? BankId,
     PresentationProfileVersionStatus Status);
 
+public sealed record GetPresentationProfileQuery(AuthorizationContext Actor);
+
+public sealed record PresentationProfileStatusView(
+    EconomyScopeId EconomyScopeId,
+    bool HasPublished,
+    PresentationProfilePalette? Palette,
+    PresentationProfileVersionId? VersionId,
+    long Version);
+
 public interface IPresentationProfileAdministrationApplicationService
 {
+    Task<Result<PresentationProfileStatusView>> GetProfileStatusAsync(
+        GetPresentationProfileQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<PresentationProfileDraftView>> StartDraftAsync(
         StartPresentationProfileDraftCommand command,
         CancellationToken cancellationToken);
@@ -97,6 +110,47 @@ public sealed class PresentationProfileAdministrationApplicationService
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<PresentationProfileStatusView>> GetProfileStatusAsync(
+        GetPresentationProfileQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => ProfileStatus(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<PresentationProfileStatusView> ProfileStatus(
+        IBankingUnitOfWork unitOfWork,
+        GetPresentationProfileQuery query)
+    {
+        Result<EconomyScopeId> scope = GovernanceAuthorization.Authorise(unitOfWork, query.Actor);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<PresentationProfileStatusView>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Governance.FindPublishedPresentationProfile(scope.Value, null)
+            is not { } profile)
+        {
+            return Result<PresentationProfileStatusView>.Success(
+                new PresentationProfileStatusView(scope.Value, false, null, null, 0L));
+        }
+
+        return Result<PresentationProfileStatusView>.Success(new PresentationProfileStatusView(
+            scope.Value,
+            true,
+            new PresentationProfilePalette(
+                profile.InformationRgb,
+                profile.SuccessRgb,
+                profile.WarningRgb,
+                profile.ErrorRgb,
+                profile.NeutralRgb),
+            profile.Id,
+            profile.Version));
     }
 
     public Task<Result<PresentationProfileDraftView>> StartDraftAsync(

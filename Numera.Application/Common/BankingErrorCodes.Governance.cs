@@ -89,6 +89,15 @@ public static partial class BankingErrorCodes
     public static string CurrencyTrustThresholdInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 165);
 
+    public static string PresentationProfileColourInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 166);
+
+    public static string DepositInsuranceSchemeInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 167);
+
+    public static string FxInterventionMandateInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 168);
+
     public static string CurrencyTrustApprovalRequired { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Forbidden, 160);
 

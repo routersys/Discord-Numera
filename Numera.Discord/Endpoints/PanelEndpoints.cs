@@ -18,6 +18,9 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
     private readonly Numera.Application.Banking.ICurrencyTrustAdministrationApplicationService trusts;
     private readonly Numera.Application.Banking.IPaymentNetworkAdministrationApplicationService networks;
     private readonly Numera.Application.Banking.IPrudentialAdministrationApplicationService prudential;
+    private readonly Numera.Application.Banking.IPresentationProfileAdministrationApplicationService presentation;
+    private readonly Numera.Application.Banking.IDepositInsuranceAdministrationApplicationService insurance;
+    private readonly Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities;
 
     public ManagePanelEndpoints(
         Sessions.InteractionSessionService sessions,
@@ -25,7 +28,10 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         Numera.Application.Banking.IEconomyCalendarAdministrationApplicationService calendars,
         Numera.Application.Banking.ICurrencyTrustAdministrationApplicationService trusts,
         Numera.Application.Banking.IPaymentNetworkAdministrationApplicationService networks,
-        Numera.Application.Banking.IPrudentialAdministrationApplicationService prudential)
+        Numera.Application.Banking.IPrudentialAdministrationApplicationService prudential,
+        Numera.Application.Banking.IPresentationProfileAdministrationApplicationService presentation,
+        Numera.Application.Banking.IDepositInsuranceAdministrationApplicationService insurance,
+        Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -33,6 +39,9 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         ArgumentNullException.ThrowIfNull(trusts);
         ArgumentNullException.ThrowIfNull(networks);
         ArgumentNullException.ThrowIfNull(prudential);
+        ArgumentNullException.ThrowIfNull(presentation);
+        ArgumentNullException.ThrowIfNull(insurance);
+        ArgumentNullException.ThrowIfNull(authorities);
 
         this.sessions = sessions;
         this.catalog = catalog;
@@ -40,6 +49,9 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         this.trusts = trusts;
         this.networks = networks;
         this.prudential = prudential;
+        this.presentation = presentation;
+        this.insurance = insurance;
+        this.authorities = authorities;
     }
 
     [EconomySlashCommand("panel", "管理メニューを表示します。")]

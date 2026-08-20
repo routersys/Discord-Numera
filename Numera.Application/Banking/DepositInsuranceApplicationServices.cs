@@ -68,8 +68,27 @@ public sealed record DepositInsuranceSchemeVersionView(
     MoneyMinor EnrollmentFee,
     long Version);
 
+public sealed record GetDepositInsuranceSchemeQuery(
+    AuthorizationContext Actor,
+    string ProtectionClassCode);
+
+public sealed record DepositInsuranceSchemeStatusView(
+    EconomyScopeId EconomyScopeId,
+    CurrencyId CurrencyId,
+    bool HasFund,
+    DepositInsuranceFundId? FundId,
+    bool HasScheme,
+    DepositInsuranceSchemeId? SchemeId,
+    DepositInsuranceSchemeStatus? Status,
+    long CoverageLimitMinor,
+    long EnrollmentFeeMinor);
+
 public interface IDepositInsuranceAdministrationApplicationService
 {
+    Task<Result<DepositInsuranceSchemeStatusView>> GetSchemeStatusAsync(
+        GetDepositInsuranceSchemeQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<DepositInsuranceFundView>> CreateFundAsync(
         CreateDepositInsuranceFundCommand command,
         CancellationToken cancellationToken);
@@ -118,6 +137,56 @@ public sealed class DepositInsuranceAdministrationApplicationService
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<DepositInsuranceSchemeStatusView>> GetSchemeStatusAsync(
+        GetDepositInsuranceSchemeQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => SchemeStatus(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<DepositInsuranceSchemeStatusView> SchemeStatus(
+        IBankingUnitOfWork unitOfWork,
+        GetDepositInsuranceSchemeQuery query)
+    {
+        Result<EconomyScopeId> scope = GovernanceAuthorization.Authorise(unitOfWork, query.Actor);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<DepositInsuranceSchemeStatusView>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Currencies.FindCurrent(scope.Value) is not { } currency)
+        {
+            return Result<DepositInsuranceSchemeStatusView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
+        }
+
+        DepositInsuranceFundRecord? fund =
+            unitOfWork.DepositInsurance.FindFundByCurrency(scope.Value, currency.Id);
+
+        DepositInsuranceSchemeRecord? scheme = unitOfWork.DepositInsurance.FindSchemeByClass(
+            scope.Value, currency.Id, query.ProtectionClassCode);
+
+        DepositInsuranceSchemeVersionRecord? version =
+            scheme?.CurrentVersionId is { } versionId
+                ? unitOfWork.DepositInsurance.FindSchemeVersion(versionId)
+                : null;
+
+        return Result<DepositInsuranceSchemeStatusView>.Success(new DepositInsuranceSchemeStatusView(
+            scope.Value,
+            currency.Id,
+            fund is not null,
+            fund?.Id,
+            scheme is not null,
+            scheme?.Id,
+            scheme?.Status,
+            version?.CoverageLimit.Value ?? 0L,
+            version?.EnrollmentFee.Value ?? 0L));
     }
 
     public Task<Result<DepositInsuranceFundView>> CreateFundAsync(

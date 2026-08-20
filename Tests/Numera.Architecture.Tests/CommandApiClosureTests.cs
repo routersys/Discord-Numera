@@ -23,6 +23,9 @@ public sealed class CommandApiClosureTests
         "ICurrencyTrustAdministrationApplicationService.GetPolicyStatusAsync",
         "IPaymentNetworkAdministrationApplicationService.GetNetworkStatusAsync",
         "IPrudentialAdministrationApplicationService.GetPolicyStatusAsync",
+        "IPresentationProfileAdministrationApplicationService.GetProfileStatusAsync",
+        "IDepositInsuranceAdministrationApplicationService.GetSchemeStatusAsync",
+        "IMonetaryAuthorityAdministrationApplicationService.GetInterventionTargetAsync",
     ];
 
     private static readonly string[] EntriesWithoutCanonicalUseCase =

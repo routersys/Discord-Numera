@@ -421,6 +421,49 @@ public sealed class EconomyWalkthroughTests
         Assert.AreEqual(DiscordResponseKind.Failure, commit.Kind);
     }
 
+    [TestMethod]
+    public async Task TheManagementPanelPublishesThePresentationPalette()
+    {
+        await using Walkthrough walk = Walkthrough.Create();
+        CancellationToken token = TestContext.CancellationTokenSource.Token;
+
+        ManagePanelEndpoints panel = walk.Endpoint<ManagePanelEndpoints>();
+
+        string session = await PanelSessionAsync(
+            walk, panel, "presentation", "presentation-profile", token);
+
+        DiscordEndpointResponse review = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await panel.SubmitPresentationAsync(
+                walk.Context(
+                    Operator, AuthorizationLevel.GuildOperator, "panel-presentation", session),
+                new PanelPresentationForm
+                {
+                    Information = "1D4ED8",
+                    Success = "16A34A",
+                    Warning = "F59E0B",
+                    Error = "DC2626",
+                    Neutral = "6B7280",
+                },
+                token));
+
+        Assert.AreEqual("なし", review.ViewData["current"]);
+
+        Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await panel.CommitEditorAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-commit"),
+                new DiscordComponentInput("panel-commit", Walkthrough.TokenOf(review)),
+                token));
+
+        Assert.AreEqual(
+            1L,
+            walk.Scalar(
+                """
+                SELECT COUNT(*) FROM presentation_profile_versions WHERE status = 'PUBLISHED';
+                """));
+    }
+
     private async Task<string> PanelSessionAsync(
         Walkthrough walk,
         ManagePanelEndpoints panel,
