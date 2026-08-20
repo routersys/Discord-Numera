@@ -75,6 +75,7 @@ public sealed class EndpointSurfaceTests
                 "FxModule",
                 "ManageModule",
                 "NumeraDiscordEndpointsBankEndpointsInteractionsModule",
+                "NumeraDiscordEndpointsBankQueryEndpointsInteractionsModule",
                 "NumeraDiscordEndpointsHelpEndpointsModule",
                 "NumeraDiscordEndpointsManageBankEndpointsInteractionsModule",
                 "NumeraDiscordEndpointsManagePanelEndpointsInteractionsModule",
@@ -142,6 +143,9 @@ public sealed class EndpointSurfaceTests
                 "bank-capital-input",
                 "bank-create-commit",
                 "bank-create-input",
+                "bank-detail",
+                "bank-loan-commit",
+                "bank-loan-input",
                 "panel-action",
                 "panel-category",
                 "transfer-execute",
@@ -151,7 +155,7 @@ public sealed class EndpointSurfaceTests
             EconomyCommandManifest.ComponentActions.Order(StringComparer.Ordinal).ToArray());
 
         CollectionAssert.AreEqual(
-            new[] { "bank-capital", "bank-create", "transfer" },
+            new[] { "bank-capital", "bank-create", "bank-loan", "transfer" },
             EconomyCommandManifest.ModalActions.Order(StringComparer.Ordinal).ToArray());
     }
 

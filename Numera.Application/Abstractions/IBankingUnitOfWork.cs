@@ -200,7 +200,7 @@ public interface IBankCustomerRelationshipRepository
     long CountByBank(BankId bankId);
 }
 
-public interface ILedgerAccountRepository
+public partial interface ILedgerAccountRepository
 {
     void Add(Numera.Domain.Accounting.LedgerAccount account);
 

@@ -15,6 +15,7 @@ public sealed class EconomyWalkthroughTests
 {
     private const ulong Operator = 700_000_000_000_000_001UL;
     private const ulong Depositor = 700_000_000_000_000_002UL;
+    private const ulong Beneficiary = 700_000_000_000_000_003UL;
     private const ulong Guild = 1_284_327_110_349_164_587UL;
     private const string Institution = "NUM0001";
     private const long MinimumCapital = 1_000_000L;
@@ -106,6 +107,15 @@ public sealed class EconomyWalkthroughTests
             return customId[(customId.LastIndexOf(':') + 1)..];
         }
 
+        public static string SelectTokenOf(DiscordEndpointResponse response)
+        {
+            Assert.AreNotEqual(DiscordResponseKind.Failure, response.Kind, Detail(response));
+            Assert.IsNotNull(response.Body.Components.Select, response.ViewKey);
+
+            string customId = response.Body.Components.Select!.CustomId;
+            return customId[(customId.LastIndexOf(':') + 1)..];
+        }
+
         public static string ModalTokenOf(DiscordEndpointResponse response)
         {
             Assert.AreEqual(DiscordResponseKind.Modal, response.Kind, Detail(response));
@@ -139,6 +149,19 @@ public sealed class EconomyWalkthroughTests
             command.CommandText = sql;
             return command.ExecuteScalar() as string ?? string.Empty;
         }
+
+        public string BeneficiaryAccountNumber() => Text("""
+            SELECT d.account_number FROM deposit_accounts AS d
+            JOIN customer_accounts AS c ON c.customer_account_id = d.customer_account_id
+            WHERE c.public_handle = 'beneficiary';
+            """);
+
+        public long BalanceOf(string handle) => Scalar($"""
+            SELECT p.posted_balance_minor FROM ledger_balance_projections AS p
+            JOIN deposit_accounts AS d ON d.ledger_account_id = p.ledger_account_id
+            JOIN customer_accounts AS c ON c.customer_account_id = d.customer_account_id
+            WHERE c.public_handle = '{handle}';
+            """);
 
         public async ValueTask DisposeAsync()
         {
@@ -265,6 +288,93 @@ public sealed class EconomyWalkthroughTests
 
         Assert.AreEqual(1L, walk.Scalar("SELECT COUNT(*) FROM deposit_accounts;"));
         Assert.AreEqual("ACTIVE", walk.Text("SELECT status FROM deposit_accounts;"));
+
+        BankQueryEndpoints bankQueries = walk.Endpoint<BankQueryEndpoints>();
+
+        DiscordEndpointResponse banks = await bankQueries.ListAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "/bank list"), token);
+
+        string detailToken = Walkthrough.SelectTokenOf(banks);
+
+        DiscordEndpointResponse detail = await bankQueries.SelectBankDetailAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "bank-detail"),
+            new DiscordComponentInput("bank-detail", detailToken, [Institution]),
+            token);
+
+        DiscordEndpointResponse loanModal = await bankQueries.OpenBankLoanInputAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "bank-loan-input"),
+            new DiscordComponentInput("bank-loan-input", Walkthrough.TokenOf(detail)),
+            token);
+
+        DiscordEndpointResponse loanReview = await bankQueries.SubmitBankLoanAsync(
+            walk.Context(
+                Depositor,
+                AuthorizationLevel.Customer,
+                "bank-loan",
+                Walkthrough.ModalTokenOf(loanModal)),
+            new BankLoanForm { Principal = "500000", ProductCode = "DEMAND01" },
+            token);
+
+        DiscordEndpointResponse originated = await bankQueries.CommitBankLoanAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "bank-loan-commit"),
+            new DiscordComponentInput("bank-loan-commit", Walkthrough.TokenOf(loanReview)),
+            token);
+
+        Walkthrough.Succeeded(originated);
+        Assert.AreEqual(1L, walk.Scalar("SELECT COUNT(*) FROM loan_contracts;"));
+        Assert.AreEqual("ACTIVE", walk.Text("SELECT status FROM loan_contracts;"));
+
+        Walkthrough.Succeeded(await account.RegisterAsync(
+            walk.Context(Beneficiary, AuthorizationLevel.Unregistered, "/account register"),
+            "beneficiary",
+            "受取人",
+            token));
+
+        Walkthrough.Succeeded(await bank.OpenAsync(
+            walk.Context(Beneficiary, AuthorizationLevel.Customer, "/bank open"),
+            Institution,
+            token));
+
+        DiscordEndpointResponse sources = await bank.TransferAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "/bank transfer"), token);
+
+        DiscordEndpointResponse chosen = await bank.SelectTransferSourceAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "transfer-source"),
+            new DiscordComponentInput(
+                "transfer-source",
+                Walkthrough.SelectTokenOf(sources),
+                [sources.Body.Components.Select!.Options[0].Value]),
+            token);
+
+        DiscordEndpointResponse transferModal = await bank.OpenTransferInputAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "transfer-input"),
+            new DiscordComponentInput("transfer-input", Walkthrough.TokenOf(chosen)),
+            token);
+
+        DiscordEndpointResponse transferReview = await bank.SubmitTransferAsync(
+            walk.Context(
+                Depositor,
+                AuthorizationLevel.Customer,
+                "transfer",
+                Walkthrough.ModalTokenOf(transferModal)),
+            new TransferForm
+            {
+                BankCode = Institution,
+                BranchCode = "001",
+                AccountNumber = walk.BeneficiaryAccountNumber(),
+                Amount = "120000",
+                Memo = string.Empty,
+            },
+            token);
+
+        DiscordEndpointResponse transferred = await bank.ExecuteTransferAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "transfer-execute"),
+            new DiscordComponentInput("transfer-execute", Walkthrough.TokenOf(transferReview)),
+            token);
+
+        Walkthrough.Succeeded(transferred);
+        Assert.AreEqual(120_000L, walk.BalanceOf("beneficiary"));
+        Assert.AreEqual(380_000L, walk.BalanceOf("depositor"));
     }
 
     public TestContext TestContext { get; set; } = null!;

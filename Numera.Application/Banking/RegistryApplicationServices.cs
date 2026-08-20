@@ -38,12 +38,21 @@ public interface ILoanApplicationService
 public sealed class LoanApplicationService : ILoanApplicationService
 {
     private readonly IBankingWriteGateway writeGateway;
+    private readonly IClock clock;
+    private readonly IIdGenerator idGenerator;
 
-    public LoanApplicationService(IBankingWriteGateway writeGateway)
+    public LoanApplicationService(
+        IBankingWriteGateway writeGateway,
+        IClock clock,
+        IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(writeGateway);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(idGenerator);
 
         this.writeGateway = writeGateway;
+        this.clock = clock;
+        this.idGenerator = idGenerator;
     }
 
     public Task<Result<LoanProductPageView>> GetLoanProductsAsync(
@@ -87,24 +96,7 @@ public sealed class LoanApplicationService : ILoanApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(
-            unitOfWork =>
-            {
-                if (command.PrincipalMinor <= 0)
-                {
-                    return Result<LoanApplicationView>.Failure(
-                        ErrorCategory.Validation, BankingErrorCodes.LoanPrincipalInvalid);
-                }
-
-                if (unitOfWork.DepositAccounts.Find(command.DisbursementDepositAccountId) is not { } account
-                    || account.CustomerAccountId != command.CustomerAccountId)
-                {
-                    return Result<LoanApplicationView>.Failure(
-                        ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
-                }
-
-                return Result<LoanApplicationView>.Failure(
-                    ErrorCategory.InfrastructureUnavailable, BankingErrorCodes.LoanOriginationUnavailable);
-            },
+            unitOfWork => LoanOriginationService.Originate(unitOfWork, clock, idGenerator, command),
             cancellationToken);
     }
 }

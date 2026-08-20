@@ -64,8 +64,11 @@ public sealed class HostCompositionTests
                 "bank:v1:btn:bank-capital-input:*",
                 "bank:v1:btn:bank-create-commit:*",
                 "bank:v1:btn:bank-create-input:*",
+                "bank:v1:btn:bank-loan-commit:*",
+                "bank:v1:btn:bank-loan-input:*",
                 "bank:v1:btn:transfer-execute:*",
                 "bank:v1:btn:transfer-input:*",
+                "bank:v1:sel:bank-detail:*",
                 "bank:v1:sel:panel-action:*",
                 "bank:v1:sel:panel-category:*",
                 "bank:v1:sel:transfer-source:*",
@@ -79,6 +82,7 @@ public sealed class HostCompositionTests
             {
                 "bank:v1:modal:bank-capital:*",
                 "bank:v1:modal:bank-create:*",
+                "bank:v1:modal:bank-loan:*",
                 "bank:v1:modal:transfer:*",
             },
             interactions.ModalCommands.Select(static command => command.Name)

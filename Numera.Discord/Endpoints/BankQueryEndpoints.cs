@@ -9,26 +9,34 @@ using Numera.Domain.Banking;
 namespace Numera.Discord.Endpoints;
 
 [EconomyCommandGroup("bank", "銀行口座を操作します。")]
-public sealed class BankQueryEndpoints : IEconomyEndpoint
+public sealed partial class BankQueryEndpoints : IEconomyEndpoint
 {
     private const string Separator = " / ";
 
     private readonly IBankQueryApplicationService queries;
     private readonly ICustomerAccountApplicationService customers;
+    private readonly ILoanApplicationService loans;
     private readonly ITextCatalog catalog;
+    private readonly Sessions.InteractionSessionService sessions;
 
     public BankQueryEndpoints(
         IBankQueryApplicationService queries,
         ICustomerAccountApplicationService customers,
-        ITextCatalog catalog)
+        ILoanApplicationService loans,
+        ITextCatalog catalog,
+        Sessions.InteractionSessionService sessions)
     {
         ArgumentNullException.ThrowIfNull(queries);
         ArgumentNullException.ThrowIfNull(customers);
+        ArgumentNullException.ThrowIfNull(loans);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(sessions);
 
         this.queries = queries;
         this.customers = customers;
+        this.loans = loans;
         this.catalog = catalog;
+        this.sessions = sessions;
     }
 
     [EconomySlashCommand("list", "利用できる銀行の一覧を表示します。")]
@@ -48,16 +56,19 @@ public sealed class BankQueryEndpoints : IEconomyEndpoint
             return EndpointFailures.From(result.Error!);
         }
 
-        return DiscordEndpointResponse.Message(
-            result.Value.Items.Count == 0 ? ViewKeys.BankListEmpty : ViewKeys.BankList,
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["items"] = string.Join(
-                    Separator,
-                    result.Value.Items.Select(item =>
-                        $"{item.InstitutionCode} {item.Name} {Status(item.Status.ToToken())}")),
-                ["count"] = result.Value.Items.Count.ToString(CultureInfo.InvariantCulture),
-            });
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["items"] = string.Join(
+                Separator,
+                result.Value.Items.Select(item =>
+                    $"{item.InstitutionCode} {item.Name} {Status(item.Status.ToToken())}")),
+            ["count"] = result.Value.Items.Count.ToString(CultureInfo.InvariantCulture),
+        };
+
+        return result.Value.Items.Count == 0
+            ? DiscordEndpointResponse.Message(ViewKeys.BankListEmpty, data)
+            : await OpenBankDetailSelectionAsync(context, result.Value.Items, data, cancellationToken)
+                .ConfigureAwait(false);
     }
 
     [EconomySlashCommand("accounts", "自分の口座の一覧を表示します。")]

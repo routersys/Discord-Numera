@@ -89,8 +89,10 @@ public static partial class BankingErrorCodes
     public static string CurrencyTrustApprovalRequired { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Forbidden, 160);
 
-    public static string LoanOriginationUnavailable { get; } =
-        ErrorCodeFormat.Compose(ErrorCategory.InfrastructureUnavailable, 160);
+    public static string LoanProductNotFound { get; } = ErrorCodeFormat.Compose(ErrorCategory.NotFound, 170);
+
+    public static string LoanPrudentialFloorUnmet { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Conflict, 223);
 
     public static string ControlAccountUnavailable { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.BankUnavailable, 41);

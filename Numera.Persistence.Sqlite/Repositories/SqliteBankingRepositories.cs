@@ -294,6 +294,40 @@ public sealed class SqliteLedgerAccountRepository : ILedgerAccountRepository
         command.ExecuteNonQuery();
     }
 
+    public IReadOnlyList<LedgerExposure> ListPostedExposures(AccountingBookId bookId, CurrencyId currencyId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT a.account_kind, a.accounting_type,
+                   COALESCE(p.posted_balance_minor, 0),
+                   CASE WHEN c.status IN ('DEFAULTED', 'WRITTEN_OFF') THEN 1 ELSE 0 END
+            FROM ledger_accounts AS a
+            LEFT JOIN ledger_balance_projections AS p
+                ON p.ledger_account_id = a.ledger_account_id
+            LEFT JOIN loan_contracts AS c
+                ON c.loan_asset_ledger_account_id = a.ledger_account_id
+            WHERE a.accounting_book_id = $book
+              AND a.currency_id = $currency
+              AND a.posting_allowed = 1
+              AND a.status <> 'CLOSED';
+            """);
+        command.Parameters.AddWithValue("$book", SqliteValueMapper.ToBlob(bookId.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(currencyId.Value));
+
+        List<LedgerExposure> exposures = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            exposures.Add(new LedgerExposure(
+                LedgerAccountKindCatalog.ParseToken(reader.GetString(0)),
+                AccountingTypeCatalog.ParseToken(reader.GetString(1)),
+                MoneyMinor.FromMinor(reader.GetInt64(2)),
+                reader.GetInt64(3) == 1));
+        }
+
+        return exposures;
+    }
+
     public LedgerBalance? FindProjection(LedgerAccountId id)
     {
         using SqliteCommand command = unitOfWork.CreateCommand("""

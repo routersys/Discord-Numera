@@ -30,6 +30,15 @@ internal static class ViewKeys
     public const string ManageBankCapitalCommitLabel = "view.manage.bank_capital.commit_label";
     public const string ManageBankActivateLabel = "view.manage.bank_capital.activate_label";
     public const string ManageBankCapitalIssuerLabel = "view.manage.bank_capital.issuer_label";
+    public const string BankDetail = "view.bank.detail";
+    public const string BankDetailPlaceholder = "label.bank.detail_select";
+    public const string BankLoanModal = "view.bank.loan_modal";
+    public const string BankLoanReview = "view.bank.loan_review";
+    public const string BankLoanOriginated = "view.bank.loan_originated";
+    public const string BankLoanInputLabel = "label.bank.loan_input";
+    public const string BankLoanCommitLabel = "label.bank.loan_commit";
+    public const string FieldLoanPrincipal = "loan_principal";
+    public const string FieldLoanProduct = "loan_product";
     public const string FieldCapitalAmount = "capital_amount";
     public const string FieldCapitalSource = "capital_source";
     public const string FieldCapitalMinimum = "capital_minimum";
@@ -217,6 +226,27 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManageBankCapitalCommitLabel] = "この内容で払い込む",
             [ViewKeys.ManageBankActivateLabel] = "営業を開始する",
             [ViewKeys.ManageBankCapitalIssuerLabel] = "中央銀行",
+            [ViewKeys.BankDetail + ".title"] = "{bankName}",
+            [ViewKeys.BankDetail + ".description"] =
+                "{institutionCode} は {status} です。預金商品は {products} です。"
+                + "融資商品は {loanProducts} です。",
+            [ViewKeys.BankDetailPlaceholder] = "銀行を選択",
+            [ViewKeys.BankLoanModal + ".title"] = "融資の申込",
+            [ViewKeys.BankLoanModal + ".description"] = "借入額と商品コードを入力します。",
+            [ViewKeys.BankLoanInputLabel] = "融資を申し込む",
+            [ViewKeys.BankLoanCommitLabel] = "この内容で申し込む",
+            [ViewKeys.BankLoanReview + ".title"] = "融資内容の確認",
+            [ViewKeys.BankLoanReview + ".description"] =
+                "内容を確認して申込を確定してください。実行されると借入額が口座へ入金されます。",
+            [ViewKeys.FieldLabel(ViewKeys.BankLoanReview, ViewKeys.FieldInstitution)] = "金融機関コード",
+            [ViewKeys.FieldValue(ViewKeys.BankLoanReview, ViewKeys.FieldInstitution)] = "{institutionCode}",
+            [ViewKeys.FieldLabel(ViewKeys.BankLoanReview, ViewKeys.FieldLoanPrincipal)] = "借入額",
+            [ViewKeys.FieldValue(ViewKeys.BankLoanReview, ViewKeys.FieldLoanPrincipal)] = "{principal}",
+            [ViewKeys.FieldLabel(ViewKeys.BankLoanReview, ViewKeys.FieldLoanProduct)] = "商品コード",
+            [ViewKeys.FieldValue(ViewKeys.BankLoanReview, ViewKeys.FieldLoanProduct)] = "{productCode}",
+            [ViewKeys.BankLoanOriginated + ".title"] = "融資を実行しました",
+            [ViewKeys.BankLoanOriginated + ".description"] =
+                "{institutionCode} から {principal} を借り入れました。契約は {status} です。",
             [ViewKeys.ManageBankCapitalReview + ".title"] = "払込内容の確認",
             [ViewKeys.ManageBankCapitalReview + ".description"] =
                 "内容を確認して払込を確定してください。払込は取り消せません。",

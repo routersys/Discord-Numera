@@ -102,6 +102,8 @@ public sealed record LoanContractRecord(
     BankId BankId,
     CustomerAccountId CustomerAccountId,
     CurrencyId CurrencyId,
+    LedgerAccountId LoanAssetLedgerAccountId,
+    DepositAccountId DisbursementDepositAccountId,
     MoneyMinor PrincipalOriginal,
     MoneyMinor PrincipalOutstanding,
     int AnnualRatePpt,
@@ -191,6 +193,8 @@ public interface IGovernanceRepository
     IReadOnlyList<LoanProductRecord> ListLoanProducts(BankId bankId, int limit);
 
     void AddLoanContract(LoanContractRecord contract);
+
+    void UpdateLoanContract(LoanContractRecord contract);
 
     void AddMerchantOperatorGrant(MerchantOperatorGrantRecord grant);
 

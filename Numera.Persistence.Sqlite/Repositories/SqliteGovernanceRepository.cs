@@ -571,7 +571,54 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
     {
         ArgumentNullException.ThrowIfNull(contract);
 
-        throw new NotSupportedException(GovernanceFailure.LoanOriginationNotWired);
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            INSERT INTO loan_contracts(loan_contract_id, bank_id, customer_account_id, currency_id,
+                loan_asset_ledger_account_id, disbursement_deposit_account_id, principal_original_minor,
+                principal_outstanding_minor, annual_rate_ppt, status, originated_at, maturity_at, version)
+            VALUES($id, $bank, $customer, $currency, $asset, $deposit, $original, $outstanding,
+                $rate, $status, $originated, NULL, $version);
+            """);
+
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(contract.Id.Value));
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(contract.BankId.Value));
+        command.Parameters.AddWithValue(
+            "$customer", SqliteValueMapper.ToBlob(contract.CustomerAccountId.Value));
+        command.Parameters.AddWithValue("$currency", SqliteValueMapper.ToBlob(contract.CurrencyId.Value));
+        command.Parameters.AddWithValue(
+            "$asset", SqliteValueMapper.ToBlob(contract.LoanAssetLedgerAccountId.Value));
+        command.Parameters.AddWithValue(
+            "$deposit", SqliteValueMapper.ToBlob(contract.DisbursementDepositAccountId.Value));
+        command.Parameters.AddWithValue("$original", contract.PrincipalOriginal.Value);
+        command.Parameters.AddWithValue("$outstanding", contract.PrincipalOutstanding.Value);
+        command.Parameters.AddWithValue("$rate", contract.AnnualRatePpt);
+        command.Parameters.AddWithValue("$status", contract.Status.ToToken());
+        command.Parameters.AddWithValue("$originated", contract.OriginatedAt.UnixMilliseconds);
+        command.Parameters.AddWithValue("$version", contract.Version);
+        command.ExecuteNonQuery();
+    }
+
+    public void UpdateLoanContract(LoanContractRecord contract)
+    {
+        ArgumentNullException.ThrowIfNull(contract);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            UPDATE loan_contracts
+            SET principal_outstanding_minor = $outstanding,
+                status = $status,
+                version = $version
+            WHERE loan_contract_id = $id AND version = $expected;
+            """);
+
+        command.Parameters.AddWithValue("$outstanding", contract.PrincipalOutstanding.Value);
+        command.Parameters.AddWithValue("$status", contract.Status.ToToken());
+        command.Parameters.AddWithValue("$version", contract.Version);
+        command.Parameters.AddWithValue("$id", SqliteValueMapper.ToBlob(contract.Id.Value));
+        command.Parameters.AddWithValue("$expected", contract.Version - 1);
+
+        if (command.ExecuteNonQuery() != 1)
+        {
+            throw PersistenceFailureException.Create(PersistenceFailureCode.ConcurrencyConflict);
+        }
     }
 
     public void AddMerchantOperatorGrant(MerchantOperatorGrantRecord grant)
