@@ -272,6 +272,20 @@ public sealed class BankCreateViewTests
     }
 
     [TestMethod]
+    public void TheUnfilledOrderViewBindsEveryPlaceholderTheHandlerSupplies()
+    {
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["status"] = Catalog.Resolve(ViewKeys.StatusOf("EXPIRED")),
+            ["filled"] = "0",
+            ["remaining"] = "0",
+        };
+
+        Assert.DoesNotContain("{", Catalog.Format(ViewKeys.FxOrderUnfilled + ".description", data));
+        Assert.DoesNotContain("{", Catalog.Format(ViewKeys.FxOrderPlaced + ".description", data));
+    }
+
+    [TestMethod]
     public void TheShortfallViewBindsEveryPlaceholderTheHandlerSupplies()
     {
         Dictionary<string, string> data = new(StringComparer.Ordinal)

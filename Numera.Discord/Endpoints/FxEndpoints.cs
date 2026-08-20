@@ -382,17 +382,23 @@ public sealed class FxEndpoints : IEconomyEndpoint
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return result.IsSuccess
-            ? DiscordEndpointResponse.Message(
-                ViewKeys.FxOrderPlaced,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["status"] = Status(result.Value.Status.ToToken()),
-                    ["filled"] = result.Value.FilledBaseMinor.ToString(CultureInfo.InvariantCulture),
-                    ["remaining"] =
-                        result.Value.RemainingBaseMinor.ToString(CultureInfo.InvariantCulture),
-                })
-            : EndpointFailures.From(result.Error!);
+        if (!result.IsSuccess)
+        {
+            return EndpointFailures.From(result.Error!);
+        }
+
+        bool unfilled = result.Value.FilledBaseMinor == 0
+            && result.Value.Status is FxOrderStatus.Expired or FxOrderStatus.Cancelled;
+
+        return DiscordEndpointResponse.Message(
+            unfilled ? ViewKeys.FxOrderUnfilled : ViewKeys.FxOrderPlaced,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["status"] = Status(result.Value.Status.ToToken()),
+                ["filled"] = result.Value.FilledBaseMinor.ToString(CultureInfo.InvariantCulture),
+                ["remaining"] =
+                    result.Value.RemainingBaseMinor.ToString(CultureInfo.InvariantCulture),
+            });
     }
 
     private static long? Number(string? text) =>

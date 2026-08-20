@@ -123,6 +123,7 @@ internal static class ViewKeys
     public const string FxOrderCancelled = "view.fx.order_cancelled";
 
     public const string FxOrderPlaced = "view.fx.order_placed";
+    public const string FxOrderUnfilled = "view.fx.order_unfilled";
 
     public const string ShopStores = "view.shop.stores";
     public const string ShopStoresEmpty = "view.shop.stores_empty";
@@ -516,6 +517,11 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.FxOrderPlaced + ".title"] = "注文を受け付けました",
             [ViewKeys.FxOrderPlaced + ".description"] =
                 "状態は{status}で、約定数量は{filled}、残数量は{remaining}です。",
+            [ViewKeys.FxOrderUnfilled + ".title"] = "注文は約定しませんでした",
+            [ViewKeys.FxOrderUnfilled + ".description"] =
+                "状態は{status}で、約定数量は0です。"
+                + "対当する他の参加者の注文が板に無いか、最良気配が自分の注文のため交差できません。"
+                + "自分の注文とは約定しない規則です。板は /fx board、自分の注文は /fx orders で確認できます。",
             [ViewKeys.FxOrderCancelled + ".title"] = "注文を取り消しました",
             [ViewKeys.FxOrderCancelled + ".description"] = "注文の状態は{status}です。",
             [ViewKeys.StatusUnknown] = "状態を表示できません",

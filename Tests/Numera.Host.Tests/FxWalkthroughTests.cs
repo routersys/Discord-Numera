@@ -167,6 +167,15 @@ public sealed class FxWalkthroughTests
                 0L,
                 Scalar(factory, "SELECT COUNT(*) FROM fx_orders WHERE status IN ('OPEN','PARTIALLY_FILLED');"));
 
+            await PlaceAsync(fx, suggest, Maker, "SELL_BASE", "LIMIT", TradePriceUnits, token);
+
+            DiscordEndpointResponse selfMatched = Deliver(
+                DiscordInteractionKind.SlashCommand,
+                await SelfCrossAsync(fx, suggest, Maker, token));
+
+            Assert.AreEqual(ViewKeys.FxOrderUnfilled, selfMatched.ViewKey);
+            Assert.AreEqual(1L, Scalar(factory, "SELECT COUNT(*) FROM fx_trades;"));
+
             Deliver(
                 DiscordInteractionKind.SlashCommand,
                 await fx.MarketAsync(
@@ -433,6 +442,38 @@ public sealed class FxWalkthroughTests
                 priceUnits?.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 type == "LIMIT" ? null : "500",
                 token));
+    }
+
+    private async Task<DiscordEndpointResponse> SelfCrossAsync(
+        FxEndpoints fx,
+        SuggestionEndpoints suggest,
+        ulong userId,
+        CancellationToken token)
+    {
+        IReadOnlyList<DiscordAutocompleteOption> accounts = await suggest.SuggestDepositAccountsAsync(
+            new DiscordAutocompleteRequest(userId, HomeGuild, "/fx order", "source", string.Empty),
+            token);
+
+        DiscordAutocompleteOption home = accounts.First(
+            option => option.Name.StartsWith(HomeBank, StringComparison.Ordinal));
+        DiscordAutocompleteOption away = accounts.First(
+            option => option.Name.StartsWith(AwayBank, StringComparison.Ordinal));
+
+        IReadOnlyList<DiscordAutocompleteOption> markets = await suggest.SuggestFxMarketsAsync(
+            new DiscordAutocompleteRequest(userId, HomeGuild, "/fx order", "market", string.Empty),
+            token);
+
+        return await fx.OrderAsync(
+            Context(HomeGuild, userId, AuthorizationLevel.Customer, "/fx order"),
+            markets[0].Value,
+            "BUY_BASE",
+            "MARKET_IOC",
+            TradeBaseMinor,
+            away.Value,
+            home.Value,
+            null,
+            "500",
+            token);
     }
 
     private DiscordEndpointContext Context(
