@@ -16,6 +16,8 @@ public sealed class FxMatchingTests
 {
     private const ulong BaseGuildId = 980UL;
     private const ulong QuoteGuildId = 981UL;
+    private const string DisplayPattern = "{symbol}{amount}";
+
     private const string BaseInstitution = "NUM0001";
     private const string QuoteInstitution = "NUM0002";
     private const string ForeignInstitution = "NUM0003";
@@ -204,6 +206,14 @@ public sealed class FxMatchingTests
                 INSERT INTO currencies(currency_id, economy_scope_id, status, minor_unit_digits,
                     base_money_supply_cap_minor, created_at, retired_at, version)
                 VALUES({Blob(3)}, {Blob(5)}, 'ACTIVE', 2, NULL, 1, NULL, 1);
+
+                INSERT INTO currency_metadata_versions(currency_metadata_version_id, currency_id,
+                    name, code, symbol, display_pattern, effective_from, effective_to, version)
+                VALUES({Blob(200)}, {Blob(2)}, 'ベース通貨', 'BAS', 'B', '{DisplayPattern}', 1, NULL, 1);
+
+                INSERT INTO currency_metadata_versions(currency_metadata_version_id, currency_id,
+                    name, code, symbol, display_pattern, effective_from, effective_to, version)
+                VALUES({Blob(201)}, {Blob(3)}, 'クォート通貨', 'QUO', 'Q', '{DisplayPattern}', 1, NULL, 1);
                 """);
 
             SeedBank(16, BaseInstitution, scopeSeed: 1, currencySeed: 2);
@@ -1077,7 +1087,7 @@ public sealed class FxMatchingTests
             new GetFxBoardVisualQuery(harness.MarketId), CancellationToken.None);
 
         Result<FxChartVisualView> chart = await harness.Markets.GetFxChartVisualAsync(
-            new GetFxChartVisualQuery(harness.MarketId, 3600), CancellationToken.None);
+            new GetFxChartVisualQuery(harness.MarketId, 3600, 604_800L), CancellationToken.None);
 
         Assert.IsTrue(rate.IsSuccess);
         Assert.IsTrue(board.IsSuccess);
@@ -1090,6 +1100,9 @@ public sealed class FxMatchingTests
         Assert.AreEqual(3L, rate.Value.CacheKey.OrderBookVersion);
         Assert.AreEqual(1L, rate.Value.CacheKey.ProjectionVersion);
         Assert.AreEqual(1L, chart.Value.CacheKey.ProjectionVersion);
+        Assert.AreEqual("BAS/QUO", chart.Value.PairCode);
+        Assert.AreEqual(100L, chart.Value.PriceScale);
+        Assert.AreEqual(2, chart.Value.BaseMinorUnitDigits);
         Assert.AreEqual(150L, rate.Value.High24hPriceUnits);
         Assert.AreEqual(1_000L, rate.Value.Volume24hBaseMinor);
     }

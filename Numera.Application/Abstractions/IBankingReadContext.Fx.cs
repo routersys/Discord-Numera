@@ -4,6 +4,9 @@ namespace Numera.Application.Abstractions;
 
 public sealed record FxVisualSnapshot(
     FxMarketId MarketId,
+    string PairCode,
+    long PriceScale,
+    int BaseMinorUnitDigits,
     long? LastTradePriceUnits,
     long SummaryVersion,
     long OrderBookVersion,

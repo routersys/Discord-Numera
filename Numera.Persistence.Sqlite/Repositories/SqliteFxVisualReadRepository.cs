@@ -20,7 +20,7 @@ internal sealed class SqliteFxVisualReadRepository : IFxVisualReadRepository
     {
         using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
 
-        if (!Exists(marketId, transaction))
+        if (ReadMarket(marketId, transaction) is not { } market)
         {
             transaction.Commit();
             return null;
@@ -32,6 +32,9 @@ internal sealed class SqliteFxVisualReadRepository : IFxVisualReadRepository
 
         FxVisualSnapshot snapshot = new(
             marketId,
+            market.PairCode,
+            market.PriceScale,
+            market.BaseMinorUnitDigits,
             lastTrade,
             summaryVersion,
             orderBookVersion,
@@ -45,14 +48,36 @@ internal sealed class SqliteFxVisualReadRepository : IFxVisualReadRepository
         return snapshot;
     }
 
-    private bool Exists(FxMarketId marketId, SqliteTransaction transaction)
+    private (string PairCode, long PriceScale, int BaseMinorUnitDigits)? ReadMarket(
+        FxMarketId marketId,
+        SqliteTransaction transaction)
     {
         using SqliteCommand command = Command(
-            "SELECT 1 FROM fx_markets WHERE market_id = $market;", transaction);
+            """
+            SELECT b.code, q.code, m.price_scale, bc.minor_unit_digits
+            FROM fx_markets AS m
+            INNER JOIN currencies AS bc ON bc.currency_id = m.base_currency_id
+            LEFT JOIN currency_metadata_versions AS b
+                ON b.currency_id = m.base_currency_id AND b.effective_to IS NULL
+            LEFT JOIN currency_metadata_versions AS q
+                ON q.currency_id = m.quote_currency_id AND q.effective_to IS NULL
+            WHERE m.market_id = $market;
+            """,
+            transaction);
 
         command.Parameters.AddWithValue("$market", marketId.Value.ToByteArray());
 
-        return command.ExecuteScalar() is not null;
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        string baseCode = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+        string quoteCode = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+
+        return (baseCode + "/" + quoteCode, reader.GetInt64(2), reader.GetInt32(3));
     }
 
     private (long? LastTrade, long SummaryVersion, long OrderBookVersion) ReadSummary(

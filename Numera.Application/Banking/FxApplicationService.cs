@@ -13,7 +13,7 @@ public sealed record GetFxRateVisualQuery(FxMarketId MarketId);
 
 public sealed record GetFxBoardVisualQuery(FxMarketId MarketId);
 
-public sealed record GetFxChartVisualQuery(FxMarketId MarketId, int BucketSeconds);
+public sealed record GetFxChartVisualQuery(FxMarketId MarketId, int BucketSeconds, long WindowSeconds);
 
 public sealed record ListFxOrdersQuery(CustomerAccountId CustomerAccountId, string? Cursor);
 
@@ -92,6 +92,9 @@ public sealed record FxBoardVisualView(
 
 public sealed record FxChartVisualView(
     FxMarketId MarketId,
+    string PairCode,
+    long PriceScale,
+    int BaseMinorUnitDigits,
     int BucketSeconds,
     long StatisticsAsOfMinute,
     IReadOnlyList<FxOhlcBucket> Buckets,
@@ -365,13 +368,23 @@ public sealed partial class FxApplicationService : IFxApplicationService
                 ErrorCategory.Validation, BankingErrorCodes.FxBucketInvalid);
         }
 
+        if (query.WindowSeconds <= 0L)
+        {
+            return Result<FxChartVisualView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.FxBucketInvalid);
+        }
+
         long asOf = StatisticsAsOfMinute(clock.Now());
 
-        return Snapshot(context, query.MarketId, query.BucketSeconds, asOf) is not { } snapshot
+        return Snapshot(context, query.MarketId, query.BucketSeconds, asOf, query.WindowSeconds)
+            is not { } snapshot
             ? Result<FxChartVisualView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound)
             : Result<FxChartVisualView>.Success(new FxChartVisualView(
                 snapshot.MarketId,
+                snapshot.PairCode,
+                snapshot.PriceScale,
+                snapshot.BaseMinorUnitDigits,
                 query.BucketSeconds,
                 asOf,
                 snapshot.Buckets,
@@ -383,11 +396,12 @@ public sealed partial class FxApplicationService : IFxApplicationService
         IBankingReadContext context,
         FxMarketId marketId,
         int bucketSeconds,
-        long statisticsAsOfMinute) =>
+        long statisticsAsOfMinute,
+        long windowSeconds = RollingWindowSeconds) =>
         context.FxVisuals.Read(
             marketId,
             bucketSeconds,
-            statisticsAsOfMinute - RollingWindowSeconds,
+            statisticsAsOfMinute - windowSeconds,
             statisticsAsOfMinute,
             DepthLevels);
 
