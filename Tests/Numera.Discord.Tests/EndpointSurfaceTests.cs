@@ -168,7 +168,9 @@ public sealed class EndpointSurfaceTests
                 "panel-atm-terminal", "panel-calendar-clear",
                 "panel-calendar-set", "panel-cash-conversion", "panel-denomination",
                 "panel-insurance-scheme", "panel-insurance-state",
-                "panel-intervention", "panel-network-policy", "panel-network-state",
+                "panel-intervention",
+                "panel-merchant-price", "panel-merchant-product", "panel-merchant-stock",
+                "panel-network-policy", "panel-network-state",
                 "panel-presentation", "panel-prudential-policy", "panel-trust-policy", "transfer",
             },
             EconomyCommandManifest.ModalActions.Order(StringComparer.Ordinal).ToArray());

@@ -23,6 +23,7 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
     private readonly Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities;
     private readonly Numera.Application.Banking.IAtmAdministrationApplicationService atms;
     private readonly Numera.Application.Banking.ICashAdministrationApplicationService cash;
+    private readonly Numera.Application.Banking.IMerchantAdministrationApplicationService merchants;
 
     public ManagePanelEndpoints(
         Sessions.InteractionSessionService sessions,
@@ -35,7 +36,8 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         Numera.Application.Banking.IDepositInsuranceAdministrationApplicationService insurance,
         Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities,
         Numera.Application.Banking.IAtmAdministrationApplicationService atms,
-        Numera.Application.Banking.ICashAdministrationApplicationService cash)
+        Numera.Application.Banking.ICashAdministrationApplicationService cash,
+        Numera.Application.Banking.IMerchantAdministrationApplicationService merchants)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -48,6 +50,7 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         ArgumentNullException.ThrowIfNull(authorities);
         ArgumentNullException.ThrowIfNull(atms);
         ArgumentNullException.ThrowIfNull(cash);
+        ArgumentNullException.ThrowIfNull(merchants);
 
         this.sessions = sessions;
         this.catalog = catalog;
@@ -60,10 +63,11 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         this.authorities = authorities;
         this.atms = atms;
         this.cash = cash;
+        this.merchants = merchants;
     }
 
     [EconomySlashCommand("panel", "管理メニューを表示します。")]
-    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.MerchantOperator)]
     public async Task<DiscordEndpointResponse> ShowAsync(
         DiscordEndpointContext context,
         CancellationToken cancellationToken)

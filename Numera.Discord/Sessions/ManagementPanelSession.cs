@@ -112,6 +112,9 @@ internal static class ManagementPanelCatalog
     internal const string AtmCassetteEditor = "panel-atm-cassette";
     internal const string DenominationEditor = "panel-denomination";
     internal const string CashConversionEditor = "panel-cash-conversion";
+    internal const string MerchantProductEditor = "panel-merchant-product";
+    internal const string MerchantPriceEditor = "panel-merchant-price";
+    internal const string MerchantStockEditor = "panel-merchant-stock";
 
     internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
     [
@@ -149,7 +152,13 @@ internal static class ManagementPanelCatalog
             new("cash-denomination", Pending, DenominationEditor),
             new("cash-conversion", Pending, CashConversionEditor),
         ]),
-        new(MerchantCommerce, [new("merchant-profile", Pending)]),
+        new(MerchantCommerce,
+        [
+            new("merchant-product", Pending, MerchantProductEditor),
+            new("merchant-price", Pending, MerchantPriceEditor),
+            new("merchant-stock", Pending, MerchantStockEditor),
+        ],
+        AuthorizationLevel.MerchantOperator),
         new(PaymentNetwork,
         [
             new("network-policy", Pending, NetworkPolicyEditor),

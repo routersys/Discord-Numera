@@ -231,8 +231,8 @@ public sealed partial class ManagePanelEndpoints
                     .ConfigureAwait(false);
 
             default:
-                return Result.Failure(
-                    ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown);
+                return await ApplyMerchantAsync(actor, payload, cancellationToken)
+                    .ConfigureAwait(false);
         }
     }
 
@@ -473,7 +473,8 @@ public sealed partial class ManagePanelEndpoints
         if (payload.Action is not (ActionAtmNetwork or ActionAtmTerminal or ActionAtmService
             or ActionAtmCassette or ActionDenomination or ActionCashConversion))
         {
-            return null;
+            return await MerchantCurrentAsync(actor, payload, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         Result<AtmDeploymentView> deployment = await Deployment(actor, payload, cancellationToken)

@@ -215,8 +215,22 @@ public sealed record CommerceFulfillmentReversalView(
     CommerceFulfillmentReversalStatus Status,
     int AttemptCount);
 
+public sealed record GetMerchantContextQuery(AuthorizationContext Actor, string Sku);
+
+public sealed record MerchantContextView(
+    MerchantProfileId? MerchantProfileId,
+    string DisplayName,
+    MerchantProfileStatus? Status,
+    MerchantProductId? MerchantProductId,
+    MerchantProductStatus? ProductStatus,
+    long UnitPriceMinor);
+
 public interface IMerchantAdministrationApplicationService
 {
+    Task<Result<MerchantContextView>> GetMerchantContextAsync(
+        GetMerchantContextQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<MerchantProfileView>> CreateAsync(
         CreateMerchantProfileCommand command,
         CancellationToken cancellationToken);
@@ -308,6 +322,49 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
         this.markets = markets;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<MerchantContextView>> GetMerchantContextAsync(
+        GetMerchantContextQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => MerchantContext(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<MerchantContextView> MerchantContext(
+        IBankingUnitOfWork unitOfWork,
+        GetMerchantContextQuery query)
+    {
+        if (MerchantAuthorization.ResolveActorCustomer(unitOfWork, query.Actor) is not { } customer)
+        {
+            return Result<MerchantContextView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        if (unitOfWork.Commerce.FindMerchantProfileByParty(customer.PartyId) is not { } profile)
+        {
+            return Result<MerchantContextView>.Success(
+                new MerchantContextView(null, string.Empty, null, null, null, 0L));
+        }
+
+        MerchantProductRecord? product = query.Sku.Length > 0
+            ? unitOfWork.Commerce.FindProductBySku(profile.Id, query.Sku)
+            : null;
+
+        MerchantProductPriceRecord? price = product is { } found
+            ? unitOfWork.Commerce.FindPublishedPrice(found.Id)
+            : null;
+
+        return Result<MerchantContextView>.Success(new MerchantContextView(
+            profile.Id,
+            profile.DisplayName,
+            profile.Status,
+            product?.Id,
+            product?.Status,
+            price?.UnitPrice.Value ?? 0L));
     }
 
     public Task<Result<MerchantProfileView>> CreateAsync(

@@ -16,7 +16,7 @@ public sealed partial class ManagePanelEndpoints
     internal const string FieldCurrent = "current";
 
     [EconomyComponent(EconomyComponentKind.Button, ManagePanelFlow.EditAction)]
-    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.MerchantOperator)]
     internal async Task<DiscordEndpointResponse> OpenEditorAsync(
         DiscordEndpointContext context,
         DiscordComponentInput input,
@@ -104,7 +104,7 @@ public sealed partial class ManagePanelEndpoints
     }
 
     [EconomyComponent(EconomyComponentKind.Button, ManagePanelFlow.CommitAction)]
-    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.MerchantOperator)]
     internal async Task<DiscordEndpointResponse> CommitEditorAsync(
         DiscordEndpointContext context,
         DiscordComponentInput input,
@@ -131,6 +131,13 @@ public sealed partial class ManagePanelEndpoints
 
         ManagePanelPayload payload = ManagePanelPayloadCodec.Read(current.Value.PayloadJson);
         AuthorizationContext actor = EndpointAuthorization.ToActor(context);
+
+        if (ManagementPanelCatalog.Find(payload.Category) is not { } category ||
+            (int)actor.Level > (int)category.RequiredLevel)
+        {
+            return EndpointFailures.From(
+                ErrorCategory.Forbidden, BankingErrorCodes.ManagementAuthorityMissing);
+        }
 
         Result applied = await ApplyAsync(actor, payload, cancellationToken).ConfigureAwait(false);
 

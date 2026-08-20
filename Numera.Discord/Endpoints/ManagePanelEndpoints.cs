@@ -10,7 +10,7 @@ namespace Numera.Discord.Endpoints;
 public sealed partial class ManagePanelEndpoints
 {
     [EconomyComponent(EconomyComponentKind.Select, ManagePanelFlow.CategoryAction)]
-    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.MerchantOperator)]
     internal async Task<DiscordEndpointResponse> SelectCategoryAsync(
         DiscordEndpointContext context,
         DiscordComponentInput input,
@@ -69,7 +69,7 @@ public sealed partial class ManagePanelEndpoints
     }
 
     [EconomyComponent(EconomyComponentKind.Select, ManagePanelFlow.ActionAction)]
-    [EconomyAuthorization(Abstractions.AuthorizationLevel.GuildOperator)]
+    [EconomyAuthorization(Abstractions.AuthorizationLevel.MerchantOperator)]
     internal async Task<DiscordEndpointResponse> SelectActionAsync(
         DiscordEndpointContext context,
         DiscordComponentInput input,

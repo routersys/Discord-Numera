@@ -47,6 +47,12 @@ public static partial class BankingErrorCodes
     public static string MerchantInventoryNotFound { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.NotFound, 190);
 
+    public static string MerchantUnitPriceInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 195);
+
+    public static string MerchantInventoryInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 196);
+
     public static string MerchantSkuInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 180);
 
