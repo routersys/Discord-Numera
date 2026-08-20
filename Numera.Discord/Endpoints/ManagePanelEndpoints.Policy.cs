@@ -171,8 +171,7 @@ public sealed partial class ManagePanelEndpoints
                     .ConfigureAwait(false);
 
             default:
-                return Result.Failure(
-                    ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown);
+                return await ApplyAtmAsync(actor, payload, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -428,7 +427,8 @@ public sealed partial class ManagePanelEndpoints
             }
 
             default:
-                return null;
+                return await AtmCurrentAsync(actor, payload, cancellationToken)
+                    .ConfigureAwait(false);
         }
     }
 

@@ -113,8 +113,29 @@ public sealed record AtmCashCassetteView(
     long OnHandCount,
     AtmCashCassetteStatus Status);
 
+public sealed record GetAtmDeploymentQuery(
+    AuthorizationContext Actor,
+    string NetworkName,
+    string TerminalName,
+    string InstitutionCode,
+    long DenominationValueMinor);
+
+public sealed record AtmDeploymentView(
+    EconomyScopeId EconomyScopeId,
+    CurrencyId CurrencyId,
+    AtmNetworkId? NetworkId,
+    AtmNetworkStatus? NetworkStatus,
+    AtmTerminalId? TerminalId,
+    AtmTerminalStatus? TerminalStatus,
+    BankId? BankId,
+    CurrencyDenominationId? DenominationId);
+
 public interface IAtmAdministrationApplicationService
 {
+    Task<Result<AtmDeploymentView>> GetDeploymentAsync(
+        GetAtmDeploymentQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<AtmNetworkView>> CreateNetworkAsync(
         CreateAtmNetworkCommand command,
         CancellationToken cancellationToken);
@@ -174,6 +195,63 @@ public sealed class AtmAdministrationApplicationService : IAtmAdministrationAppl
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<AtmDeploymentView>> GetDeploymentAsync(
+        GetAtmDeploymentQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => Deployment(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<AtmDeploymentView> Deployment(
+        IBankingUnitOfWork unitOfWork,
+        GetAtmDeploymentQuery query)
+    {
+        Result<EconomyScopeId> scope = GovernanceAuthorization.Authorise(unitOfWork, query.Actor);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<AtmDeploymentView>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Currencies.FindCurrent(scope.Value) is not { } currency)
+        {
+            return Result<AtmDeploymentView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
+        }
+
+        AtmNetworkRecord? network = query.NetworkName.Length > 0
+            ? unitOfWork.Cash.FindNetworkByName(query.NetworkName)
+            : null;
+
+        AtmTerminalRecord? terminal = query.TerminalName.Length > 0
+            ? unitOfWork.Cash
+                .ListTerminals(query.Actor.GuildId.ToString(CultureInfo.InvariantCulture), 100)
+                .FirstOrDefault(entry => string.Equals(
+                    entry.DisplayName, query.TerminalName, StringComparison.Ordinal))
+            : null;
+
+        Bank? bank = query.InstitutionCode.Length > 0
+            ? unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.InstitutionCode)
+            : null;
+
+        CurrencyDenominationRecord? denomination = query.DenominationValueMinor > 0
+            ? unitOfWork.Cash.FindDenominationByValue(currency.Id, query.DenominationValueMinor)
+            : null;
+
+        return Result<AtmDeploymentView>.Success(new AtmDeploymentView(
+            scope.Value,
+            currency.Id,
+            network?.Id,
+            network?.Status,
+            terminal?.Id,
+            terminal?.Status,
+            bank?.Id,
+            denomination?.Id));
     }
 
     public Task<Result<AtmNetworkView>> CreateNetworkAsync(

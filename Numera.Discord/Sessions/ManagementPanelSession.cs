@@ -106,6 +106,12 @@ internal static class ManagementPanelCatalog
     internal const string InsuranceSchemeEditor = "panel-insurance-scheme";
     internal const string InsuranceStateEditor = "panel-insurance-state";
     internal const string InterventionEditor = "panel-intervention";
+    internal const string AtmNetworkEditor = "panel-atm-network";
+    internal const string AtmTerminalEditor = "panel-atm-terminal";
+    internal const string AtmServiceEditor = "panel-atm-service";
+    internal const string AtmCassetteEditor = "panel-atm-cassette";
+    internal const string DenominationEditor = "panel-denomination";
+    internal const string CashConversionEditor = "panel-cash-conversion";
 
     internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
     [
@@ -134,7 +140,15 @@ internal static class ManagementPanelCatalog
         new(DepositProduct, [new("account-product", Pending)]),
         new(FeeLimitDormancy, [new("fee-schedule", Pending)]),
         new(CardDesign, [new("card-design", Pending)]),
-        new(AtmCash, [new("atm-network", Pending)]),
+        new(AtmCash,
+        [
+            new("atm-network", Pending, AtmNetworkEditor),
+            new("atm-terminal", Pending, AtmTerminalEditor),
+            new("atm-service", Pending, AtmServiceEditor),
+            new("atm-cassette", Pending, AtmCassetteEditor),
+            new("cash-denomination", Pending, DenominationEditor),
+            new("cash-conversion", Pending, CashConversionEditor),
+        ]),
         new(MerchantCommerce, [new("merchant-profile", Pending)]),
         new(PaymentNetwork,
         [

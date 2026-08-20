@@ -21,6 +21,8 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
     private readonly Numera.Application.Banking.IPresentationProfileAdministrationApplicationService presentation;
     private readonly Numera.Application.Banking.IDepositInsuranceAdministrationApplicationService insurance;
     private readonly Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities;
+    private readonly Numera.Application.Banking.IAtmAdministrationApplicationService atms;
+    private readonly Numera.Application.Banking.ICashAdministrationApplicationService cash;
 
     public ManagePanelEndpoints(
         Sessions.InteractionSessionService sessions,
@@ -31,7 +33,9 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         Numera.Application.Banking.IPrudentialAdministrationApplicationService prudential,
         Numera.Application.Banking.IPresentationProfileAdministrationApplicationService presentation,
         Numera.Application.Banking.IDepositInsuranceAdministrationApplicationService insurance,
-        Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities)
+        Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities,
+        Numera.Application.Banking.IAtmAdministrationApplicationService atms,
+        Numera.Application.Banking.ICashAdministrationApplicationService cash)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -42,6 +46,8 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         ArgumentNullException.ThrowIfNull(presentation);
         ArgumentNullException.ThrowIfNull(insurance);
         ArgumentNullException.ThrowIfNull(authorities);
+        ArgumentNullException.ThrowIfNull(atms);
+        ArgumentNullException.ThrowIfNull(cash);
 
         this.sessions = sessions;
         this.catalog = catalog;
@@ -52,6 +58,8 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         this.presentation = presentation;
         this.insurance = insurance;
         this.authorities = authorities;
+        this.atms = atms;
+        this.cash = cash;
     }
 
     [EconomySlashCommand("panel", "管理メニューを表示します。")]

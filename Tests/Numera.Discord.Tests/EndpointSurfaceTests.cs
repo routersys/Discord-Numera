@@ -163,8 +163,11 @@ public sealed class EndpointSurfaceTests
         CollectionAssert.AreEqual(
             new[]
             {
-                "bank-capital", "bank-create", "bank-loan", "panel-calendar-clear",
-                "panel-calendar-set", "panel-insurance-scheme", "panel-insurance-state",
+                "bank-capital", "bank-create", "bank-loan",
+                "panel-atm-cassette", "panel-atm-network", "panel-atm-service",
+                "panel-atm-terminal", "panel-calendar-clear",
+                "panel-calendar-set", "panel-cash-conversion", "panel-denomination",
+                "panel-insurance-scheme", "panel-insurance-state",
                 "panel-intervention", "panel-network-policy", "panel-network-state",
                 "panel-presentation", "panel-prudential-policy", "panel-trust-policy", "transfer",
             },

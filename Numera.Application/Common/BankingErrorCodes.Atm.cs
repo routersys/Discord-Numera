@@ -29,6 +29,21 @@ public static partial class BankingErrorCodes
     public static string CurrencyDenominationNotFound { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.NotFound, 200);
 
+    public static string AtmNetworkInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 210);
+
+    public static string AtmTerminalInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 211);
+
+    public static string AtmCassetteInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 212);
+
+    public static string CurrencyDenominationInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 213);
+
+    public static string CashConversionInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 214);
+
     public static string AtmNetworkNotFound { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.NotFound, 201);
 
