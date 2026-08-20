@@ -45,8 +45,6 @@ public sealed partial class ManageBankEndpoints : IEconomyEndpoint
     public async Task<DiscordEndpointResponse> BankCreateAsync(
         DiscordEndpointContext context,
         [EconomyOption("institution-code", "金融機関コードを入力します。", true)] string institutionCode,
-        [EconomyOption("central-bank-book", "中央銀行の会計帳簿 ID を入力します。", true)]
-        string centralBankBook,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -54,12 +52,6 @@ public sealed partial class ManageBankEndpoints : IEconomyEndpoint
         if (sessions.FindEconomyScope(context.GuildId) is not { } scope)
         {
             return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
-        }
-
-        if (!Numera.Domain.Common.EntityIdValue.TryParse(centralBankBook, out _))
-        {
-            return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.CentralBankBookUnavailable);
         }
 
         Result<BankDetailView> existing = await bankQueries
@@ -109,7 +101,6 @@ public sealed partial class ManageBankEndpoints : IEconomyEndpoint
                         Sessions.BankCreatePayloadCodec.Empty with
                         {
                             InstitutionCode = result.Value.InstitutionCode,
-                            CentralBankAccountingBookId = centralBankBook,
                         })),
                 cancellationToken)
             .ConfigureAwait(false);

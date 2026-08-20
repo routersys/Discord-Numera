@@ -146,12 +146,6 @@ public sealed partial class ManageBankEndpoints
 
         BankCreatePayload payload = BankCreatePayloadCodec.Read(current.Value.PayloadJson);
 
-        if (!EntityIdValue.TryParse(payload.CentralBankAccountingBookId, out EntityIdValue book))
-        {
-            return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.CentralBankBookUnavailable);
-        }
-
         Result<BankView> result = await banks
             .CommitCreateBankAsync(
                 new CommitCreateBankCommand(
@@ -170,7 +164,7 @@ public sealed partial class ManageBankEndpoints
                     DefaultPublicReceiving,
                     SettlementParticipationMode.Direct,
                     SettlementAgentInstitutionCode: null,
-                    AccountingBookId.FromValue(book)),
+                    CentralBankAccountingBookId: null),
                 cancellationToken)
             .ConfigureAwait(false);
 

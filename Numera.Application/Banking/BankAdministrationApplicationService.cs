@@ -773,7 +773,8 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
             return Result.Success();
         }
 
-        if (command.CentralBankAccountingBookId is not { } centralBankBookId)
+        if (ResolveCentralBankBook(unitOfWork, command.CentralBankAccountingBookId, currencyId)
+            is not { } centralBankBookId)
         {
             return Result.Failure(
                 ErrorCategory.BankUnavailable, BankingErrorCodes.CentralBankBookUnavailable);
@@ -803,6 +804,21 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
             now));
 
         return Result.Success();
+    }
+
+    private static AccountingBookId? ResolveCentralBankBook(
+        IBankingUnitOfWork unitOfWork,
+        AccountingBookId? requested,
+        CurrencyId currencyId)
+    {
+        if (requested is { } explicitBook)
+        {
+            return explicitBook;
+        }
+
+        return unitOfWork.Currencies.FindIssuanceLiabilityAccount(currencyId) is { } issuance
+            ? issuance.BookId
+            : null;
     }
 
     private Result<AccountOpeningApplicationView> Approve(

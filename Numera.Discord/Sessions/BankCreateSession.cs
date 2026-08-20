@@ -15,7 +15,6 @@ internal static class BankCreateFlow
 
 internal sealed record BankCreatePayload(
     [property: JsonPropertyName("institution")] string InstitutionCode,
-    [property: JsonPropertyName("book")] string CentralBankAccountingBookId,
     [property: JsonPropertyName("bankName")] string BankName,
     [property: JsonPropertyName("branchCode")] string BranchCode,
     [property: JsonPropertyName("branchName")] string BranchName,
@@ -29,7 +28,7 @@ internal sealed partial class BankCreatePayloadContext : JsonSerializerContext;
 internal static class BankCreatePayloadCodec
 {
     internal static readonly BankCreatePayload Empty = new(
-        string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
 
     internal static string Write(BankCreatePayload payload) =>
         JsonSerializer.Serialize(payload, BankCreatePayloadContext.Default.BankCreatePayload);

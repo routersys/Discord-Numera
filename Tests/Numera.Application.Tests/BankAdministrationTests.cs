@@ -812,6 +812,26 @@ public sealed class BankAdministrationTests
     }
 
     [TestMethod]
+    public async Task TheCentralBankBookIsResolvedFromTheCurrencyWhenItIsNotGiven()
+    {
+        await using Harness harness = Harness.Create();
+        harness.SeedIssuance(100_000_000);
+
+        CommitCreateBankCommand command = harness.CreateCommand() with
+        {
+            CentralBankAccountingBookId = null,
+        };
+
+        Result<BankView> created = await harness.CreateBankAsync(command);
+
+        Assert.IsTrue(created.IsSuccess, created.Error?.Code);
+        Assert.AreEqual(
+            0L,
+            harness.PostedBalance(Harness.CentralBankBookHex, "2100-" + Institution));
+        Assert.AreEqual(1L, harness.Count("central_bank_settlement_accounts"));
+    }
+
+    [TestMethod]
     public async Task IssuerFundedCapitalPostsBothLegsOfTheSameOperation()
     {
         await using Harness harness = Harness.Create();
