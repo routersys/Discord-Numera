@@ -64,6 +64,7 @@ internal static class ViewKeys
     public const string PanelValueAfter = "view.manage.panel.value.after";
     public const string PanelCurrentUnavailable = "view.manage.panel.current.unavailable";
     public const string PanelCurrentDefaultSuffix = "view.manage.panel.current.default";
+    public const string PanelFundExists = "view.manage.panel.fund.exists";
 
     public static string PanelEditorModal(string action) =>
         "view.manage.panel.modal." + action;
@@ -340,6 +341,11 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.PanelValueAfter] = "{after}",
             [ViewKeys.PanelCurrentUnavailable] = "なし",
             [ViewKeys.PanelCurrentDefaultSuffix] = "（既定）",
+            [ViewKeys.PanelFundExists] = "作成済み",
+            [ViewKeys.PanelActionLabel("deposit-insurance", "insurance-fund")] = "保険基金の作成",
+            [ViewKeys.PanelActionLabel("prudential-resolution", "resolution-case")] = "破綻処理の手続",
+            [ViewKeys.PanelEditorModal("insurance-fund")] = "保険基金の作成",
+            [ViewKeys.PanelEditorModal("resolution-case")] = "破綻処理の手続",
             [ViewKeys.PanelEditorModal("calendar-set")] = "営業日区分を設定",
             [ViewKeys.PanelEditorModal("calendar-clear")] = "営業日区分の上書きを解除",
             [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.CurrencyIssuance)] = "通貨・発行",

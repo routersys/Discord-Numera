@@ -464,6 +464,66 @@ public sealed class EconomyWalkthroughTests
                 """));
     }
 
+    [TestMethod]
+    public async Task TheManagementPanelProvisionsTheDepositInsuranceFund()
+    {
+        await using Walkthrough walk = Walkthrough.Create();
+        CancellationToken token = TestContext.CancellationTokenSource.Token;
+
+        ManageEndpoints manage = walk.Endpoint<ManageEndpoints>();
+        ManagePanelEndpoints panel = walk.Endpoint<ManagePanelEndpoints>();
+
+        Walkthrough.Deliver(DiscordInteractionKind.SlashCommand, await manage.CreateCurrencyAsync(
+            walk.Context(Operator, AuthorizationLevel.GuildOperator, "/manage currency-create"),
+            walk.IssuanceBookId, "ヌメラ", "NMR", "N", 2, Genesis, token));
+
+        string session = await PanelSessionAsync(
+            walk, panel, "deposit-insurance", "insurance-fund", token);
+
+        DiscordEndpointResponse review = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await panel.SubmitInsuranceFundAsync(
+                walk.Context(
+                    Operator, AuthorizationLevel.GuildOperator, "panel-insurance-fund", session),
+                new PanelInsuranceFundForm { Confirmation = "CREATE" },
+                token));
+
+        Assert.AreEqual("なし", review.ViewData["current"]);
+        Assert.AreEqual(0L, walk.Scalar("SELECT COUNT(*) FROM deposit_insurance_funds;"));
+
+        Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await panel.CommitEditorAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-commit"),
+                new DiscordComponentInput("panel-commit", Walkthrough.TokenOf(review)),
+                token));
+
+        Assert.AreEqual(1L, walk.Scalar("SELECT COUNT(*) FROM deposit_insurance_funds;"));
+
+        Assert.AreEqual(
+            4L,
+            walk.Scalar(
+                """
+                SELECT COUNT(*) FROM ledger_accounts WHERE account_kind IN (
+                    'CENTRAL_BANK_SETTLEMENT_LIABILITY', 'CENTRAL_BANK_RESERVE_ASSET',
+                    'FEE_REVENUE', 'RESOLUTION_LOSS_EXPENSE')
+                  AND account_code LIKE '%510-%';
+                """));
+
+        Assert.AreEqual(
+            1L,
+            walk.Scalar(
+                "SELECT COUNT(*) FROM parties WHERE display_name = 'DEPOSIT_INSURANCE_FUND';"));
+
+        Assert.AreEqual(
+            1L,
+            walk.Scalar(
+                """
+                SELECT COUNT(*) FROM accounting_periods AS p
+                JOIN deposit_insurance_funds AS f ON f.accounting_book_id = p.accounting_book_id;
+                """));
+    }
+
     private async Task<string> PanelSessionAsync(
         Walkthrough walk,
         ManagePanelEndpoints panel,

@@ -27,6 +27,7 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
     private readonly Numera.Application.Banking.IBankOperatorGrantApplicationService grants;
     private readonly Numera.Application.Banking.IFeeAdministrationApplicationService fees;
     private readonly Numera.Application.Banking.IBankAdministrationApplicationService banks;
+    private readonly Numera.Application.Banking.IResolutionAdministrationApplicationService resolutions;
 
     public ManagePanelEndpoints(
         Sessions.InteractionSessionService sessions,
@@ -43,7 +44,8 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         Numera.Application.Banking.IMerchantAdministrationApplicationService merchants,
         Numera.Application.Banking.IBankOperatorGrantApplicationService grants,
         Numera.Application.Banking.IFeeAdministrationApplicationService fees,
-        Numera.Application.Banking.IBankAdministrationApplicationService banks)
+        Numera.Application.Banking.IBankAdministrationApplicationService banks,
+        Numera.Application.Banking.IResolutionAdministrationApplicationService resolutions)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -60,6 +62,7 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         ArgumentNullException.ThrowIfNull(grants);
         ArgumentNullException.ThrowIfNull(fees);
         ArgumentNullException.ThrowIfNull(banks);
+        ArgumentNullException.ThrowIfNull(resolutions);
 
         this.sessions = sessions;
         this.catalog = catalog;
@@ -76,6 +79,7 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         this.grants = grants;
         this.fees = fees;
         this.banks = banks;
+        this.resolutions = resolutions;
     }
 
     [EconomySlashCommand("panel", "管理メニューを表示します。")]

@@ -62,3 +62,23 @@ internal sealed class PanelInterventionForm
     [EconomyModalField("until", "有効期限", EconomyModalFieldStyle.Short, true, 1, 20, "Unix秒")]
     public string ValidUntil { get; set; } = string.Empty;
 }
+
+[EconomyModalForm("預金保険基金の作成")]
+internal sealed class PanelInsuranceFundForm
+{
+    [EconomyModalField("confirm", "作成の確認", EconomyModalFieldStyle.Short, true, 6, 8, "CREATE と入力します")]
+    public string Confirmation { get; set; } = string.Empty;
+}
+
+[EconomyModalForm("破綻処理")]
+internal sealed class PanelResolutionForm
+{
+    [EconomyModalField("institution", "破綻銀行のコード", EconomyModalFieldStyle.Short, true, 1, 16, "例 0009")]
+    public string InstitutionCode { get; set; } = string.Empty;
+
+    [EconomyModalField("step", "手続", EconomyModalFieldStyle.Short, true, 1, 24, "SUCCESSOR / BRIDGE / TRANSFER / LIQUIDATE")]
+    public string Step { get; set; } = string.Empty;
+
+    [EconomyModalField("successor", "承継銀行のコード", EconomyModalFieldStyle.Short, false, 0, 16, "SUCCESSOR のときだけ使います")]
+    public string SuccessorCode { get; set; } = string.Empty;
+}

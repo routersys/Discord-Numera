@@ -119,6 +119,8 @@ internal static class ManagementPanelCatalog
     internal const string FeeScheduleEditor = "panel-fee-schedule";
     internal const string AccountReviewEditor = "panel-account-review";
     internal const string BankDesignEditor = "panel-bank-design";
+    internal const string InsuranceFundEditor = "panel-insurance-fund";
+    internal const string ResolutionEditor = "panel-resolution";
 
     internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
     [
@@ -175,12 +177,14 @@ internal static class ManagementPanelCatalog
         ]),
         new(DepositInsurance,
         [
+            new("insurance-fund", Pending, InsuranceFundEditor),
             new("insurance-scheme", Pending, InsuranceSchemeEditor),
             new("insurance-state", Pending, InsuranceStateEditor),
         ]),
         new(PrudentialResolution,
         [
             new("prudential-policy", Pending, PrudentialPolicyEditor),
+            new("resolution-case", Pending, ResolutionEditor),
         ]),
         new(Presentation, [new("presentation-profile", Pending, PresentationEditor)]),
         new(Audit, [new("reconcile", "/system reconcile")]),

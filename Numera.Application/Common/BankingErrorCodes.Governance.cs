@@ -98,6 +98,9 @@ public static partial class BankingErrorCodes
     public static string FxInterventionMandateInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 168);
 
+    public static string ResolutionStepInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 169);
+
     public static string CurrencyTrustApprovalRequired { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Forbidden, 160);
 

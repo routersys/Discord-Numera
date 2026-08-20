@@ -3,18 +3,19 @@ using Numera.Application.Common;
 using Numera.Domain.Accounting;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
+using Numera.Domain.Identity;
 
 namespace Numera.Application.Banking;
 
 public sealed record CreateDepositInsuranceFundCommand(
     AuthorizationContext Actor,
     CurrencyId CurrencyId,
-    PartyId OwnerPartyId,
-    AccountingBookId AccountingBookId,
-    LedgerAccountId CentralBankSettlementLiabilityLedgerAccountId,
-    LedgerAccountId LiquidAssetLedgerAccountId,
-    LedgerAccountId PremiumRevenueLedgerAccountId,
-    LedgerAccountId ClaimExpenseLedgerAccountId);
+    PartyId? OwnerPartyId = null,
+    AccountingBookId? AccountingBookId = null,
+    LedgerAccountId? CentralBankSettlementLiabilityLedgerAccountId = null,
+    LedgerAccountId? LiquidAssetLedgerAccountId = null,
+    LedgerAccountId? PremiumRevenueLedgerAccountId = null,
+    LedgerAccountId? ClaimExpenseLedgerAccountId = null);
 
 public sealed record StartDepositInsuranceSchemeDraftCommand(
     AuthorizationContext Actor,
@@ -121,6 +122,12 @@ public interface IDepositInsuranceAdministrationApplicationService
 public sealed class DepositInsuranceAdministrationApplicationService
     : IDepositInsuranceAdministrationApplicationService
 {
+    public const string FundPartyName = "DEPOSIT_INSURANCE_FUND";
+
+    public const string FundPeriodKey = "FUND_OPENING";
+
+    private const int FundAccountSuffixLength = 8;
+
     private readonly IBankingWriteGateway writeGateway;
     private readonly IClock clock;
     private readonly IIdGenerator idGenerator;
@@ -268,6 +275,112 @@ public sealed class DepositInsuranceAdministrationApplicationService
         return outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
     }
 
+    private Result<CreateDepositInsuranceFundCommand> Provision(
+        IBankingUnitOfWork unitOfWork,
+        EconomyScopeId economyScopeId,
+        CreateDepositInsuranceFundCommand command)
+    {
+        if (command.OwnerPartyId is not null &&
+            command.AccountingBookId is not null &&
+            command.CentralBankSettlementLiabilityLedgerAccountId is not null &&
+            command.LiquidAssetLedgerAccountId is not null &&
+            command.PremiumRevenueLedgerAccountId is not null &&
+            command.ClaimExpenseLedgerAccountId is not null)
+        {
+            return Result<CreateDepositInsuranceFundCommand>.Success(command);
+        }
+
+        if (unitOfWork.Currencies.FindIssuanceLiabilityAccount(command.CurrencyId)
+            is not { } issuance)
+        {
+            return Result<CreateDepositInsuranceFundCommand>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.CentralBankBookUnavailable);
+        }
+
+        if (!DisplayName.TryParse(FundPartyName, out DisplayName partyName))
+        {
+            return Result<CreateDepositInsuranceFundCommand>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.DisplayNameInvalid);
+        }
+
+        UtcTimestamp now = clock.Now();
+
+        Party party = Party.Create(
+            PartyId.FromValue(idGenerator.NextId()), PartyType.System, partyName, now);
+
+        AccountingBookId bookId = AccountingBookId.FromValue(idGenerator.NextId());
+
+        unitOfWork.Parties.Add(party);
+        unitOfWork.BankAdministration.AddAccountingBook(bookId, party.Id, now);
+        unitOfWork.AccountingPeriods.Open(
+            AccountingPeriodId.FromValue(idGenerator.NextId()),
+            bookId,
+            FundPeriodKey,
+            BusinessDate.FromDayNumber(DateOnly.MinValue.DayNumber),
+            BusinessDate.FromDayNumber(DateOnly.MaxValue.DayNumber));
+
+        string suffix = economyScopeId.Value.ToString()[^FundAccountSuffixLength..];
+
+        return Result<CreateDepositInsuranceFundCommand>.Success(command with
+        {
+            OwnerPartyId = party.Id,
+            AccountingBookId = bookId,
+            CentralBankSettlementLiabilityLedgerAccountId = Posting(
+                unitOfWork,
+                issuance.BookId,
+                command.CurrencyId,
+                "2510-" + suffix,
+                LedgerAccountKind.CentralBankSettlementLiability,
+                now),
+            LiquidAssetLedgerAccountId = Posting(
+                unitOfWork,
+                bookId,
+                command.CurrencyId,
+                "1510-" + suffix,
+                LedgerAccountKind.CentralBankReserveAsset,
+                now),
+            PremiumRevenueLedgerAccountId = Posting(
+                unitOfWork,
+                bookId,
+                command.CurrencyId,
+                "4510-" + suffix,
+                LedgerAccountKind.FeeRevenue,
+                now),
+            ClaimExpenseLedgerAccountId = Posting(
+                unitOfWork,
+                bookId,
+                command.CurrencyId,
+                "5510-" + suffix,
+                LedgerAccountKind.ResolutionLossExpense,
+                now),
+        });
+    }
+
+    private LedgerAccountId Posting(
+        IBankingUnitOfWork unitOfWork,
+        AccountingBookId bookId,
+        CurrencyId currencyId,
+        string accountCode,
+        LedgerAccountKind kind,
+        UtcTimestamp now)
+    {
+        LedgerAccountId id = LedgerAccountId.FromValue(idGenerator.NextId());
+
+        unitOfWork.LedgerAccounts.Add(LedgerAccount.CreatePosting(
+            id,
+            bookId,
+            parentAccountId: null,
+            accountCode,
+            kind,
+            currencyId,
+            LedgerOwnerReferenceType.None,
+            EntityIdValue.Empty));
+
+        unitOfWork.LedgerAccounts.UpsertProjection(id, LedgerBalance.Empty, now);
+
+        return id;
+    }
+
     private Result<DepositInsuranceFundView> CreateFund(
         IBankingUnitOfWork unitOfWork,
         CreateDepositInsuranceFundCommand command)
@@ -285,7 +398,17 @@ public sealed class DepositInsuranceAdministrationApplicationService
                 ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundAlreadyExists);
         }
 
-        if (unitOfWork.Parties.Find(command.OwnerPartyId) is null)
+        Result<CreateDepositInsuranceFundCommand> provisioned =
+            Provision(unitOfWork, scope.Value, command);
+
+        if (!provisioned.IsSuccess)
+        {
+            return Result<DepositInsuranceFundView>.Failure(provisioned.Error!);
+        }
+
+        command = provisioned.Value;
+
+        if (unitOfWork.Parties.Find(command.OwnerPartyId!.Value) is null)
         {
             return Result<DepositInsuranceFundView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.PartyNotFound);
@@ -293,10 +416,10 @@ public sealed class DepositInsuranceAdministrationApplicationService
 
         LedgerAccountId[] accounts =
         [
-            command.CentralBankSettlementLiabilityLedgerAccountId,
-            command.LiquidAssetLedgerAccountId,
-            command.PremiumRevenueLedgerAccountId,
-            command.ClaimExpenseLedgerAccountId,
+            command.CentralBankSettlementLiabilityLedgerAccountId!.Value,
+            command.LiquidAssetLedgerAccountId!.Value,
+            command.PremiumRevenueLedgerAccountId!.Value,
+            command.ClaimExpenseLedgerAccountId!.Value,
         ];
 
         foreach (LedgerAccountId accountId in accounts)
@@ -309,12 +432,12 @@ public sealed class DepositInsuranceAdministrationApplicationService
                     ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundAccountInvalid);
             }
 
-            bool central = accountId == command.CentralBankSettlementLiabilityLedgerAccountId;
+            bool central = accountId == command.CentralBankSettlementLiabilityLedgerAccountId!.Value;
 
             if (central
-                ? account.BookId == command.AccountingBookId ||
+                ? account.BookId == command.AccountingBookId!.Value ||
                     account.Kind != LedgerAccountKind.CentralBankSettlementLiability
-                : account.BookId != command.AccountingBookId)
+                : account.BookId != command.AccountingBookId!.Value)
             {
                 return Result<DepositInsuranceFundView>.Failure(
                     ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundAccountInvalid);
@@ -331,12 +454,12 @@ public sealed class DepositInsuranceAdministrationApplicationService
             DepositInsuranceFundId.FromValue(idGenerator.NextId()),
             scope.Value,
             command.CurrencyId,
-            command.OwnerPartyId,
-            command.AccountingBookId,
-            command.CentralBankSettlementLiabilityLedgerAccountId,
-            command.LiquidAssetLedgerAccountId,
-            command.PremiumRevenueLedgerAccountId,
-            command.ClaimExpenseLedgerAccountId,
+            command.OwnerPartyId!.Value,
+            command.AccountingBookId!.Value,
+            command.CentralBankSettlementLiabilityLedgerAccountId!.Value,
+            command.LiquidAssetLedgerAccountId!.Value,
+            command.PremiumRevenueLedgerAccountId!.Value,
+            command.ClaimExpenseLedgerAccountId!.Value,
             DepositInsuranceFundStatus.Active,
             clock.Now(),
             VersionedEntity.InitialVersion);

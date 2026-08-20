@@ -182,6 +182,8 @@ public interface IGovernanceRepository
 
     ResolutionCaseRecord? FindResolutionCase(ResolutionCaseId id);
 
+    ResolutionCaseRecord? FindOpenResolutionCaseByBank(BankId bankId);
+
     void UpdateResolutionCase(ResolutionCaseRecord resolutionCase);
 
     void AddResolutionTransfer(ResolutionTransferRecord transfer);

@@ -32,8 +32,24 @@ public sealed record ResolutionCaseView(
     BankId? SelectedSuccessorBankId,
     BankId? BridgeBankId);
 
+public sealed record FindResolutionCaseQuery(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    string SuccessorInstitutionCode);
+
+public sealed record ResolutionCaseLookupView(
+    ResolutionCaseId? Id,
+    ResolutionCaseStatus? Status,
+    BankId BankId,
+    BankId? SuccessorBankId,
+    string InstitutionCode);
+
 public interface IResolutionAdministrationApplicationService
 {
+    Task<Result<ResolutionCaseLookupView>> FindCaseAsync(
+        FindResolutionCaseQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<ResolutionCaseView>> GetCaseAsync(
         GetResolutionCaseQuery query,
         CancellationToken cancellationToken);
@@ -80,6 +96,43 @@ public sealed class ResolutionAdministrationApplicationService
         bridges = new ResolutionBridgeService(idGenerator);
         transfers = new ResolutionTransferService(idGenerator);
         claims = new DepositInsuranceClaimService(idGenerator);
+    }
+
+    public Task<Result<ResolutionCaseLookupView>> FindCaseAsync(
+        FindResolutionCaseQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(unitOfWork => FindCase(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<ResolutionCaseLookupView> FindCase(
+        IBankingUnitOfWork unitOfWork,
+        FindResolutionCaseQuery query)
+    {
+        Result<EconomyScopeId> scope = GovernanceAuthorization.Authorise(unitOfWork, query.Actor);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<ResolutionCaseLookupView>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.InstitutionCode)
+            is not { } bank)
+        {
+            return Result<ResolutionCaseLookupView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        BankId? successor = query.SuccessorInstitutionCode.Length > 0
+            ? unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.SuccessorInstitutionCode)?.Id
+            : null;
+
+        ResolutionCaseRecord? found = unitOfWork.Governance.FindOpenResolutionCaseByBank(bank.Id);
+
+        return Result<ResolutionCaseLookupView>.Success(new ResolutionCaseLookupView(
+            found?.Id, found?.Status, bank.Id, successor, bank.InstitutionCode.Value));
     }
 
     public Task<Result<ResolutionCaseView>> GetCaseAsync(

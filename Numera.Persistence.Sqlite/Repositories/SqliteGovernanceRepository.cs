@@ -445,6 +445,34 @@ internal sealed class SqliteGovernanceRepository : IGovernanceRepository
             : null;
     }
 
+    public ResolutionCaseRecord? FindOpenResolutionCaseByBank(BankId bankId)
+    {
+        using SqliteCommand command = unitOfWork.CreateCommand($"""
+            SELECT {ResolutionColumns} FROM resolution_cases
+            WHERE bank_id = $bank AND status NOT IN ('RESOLVED', 'LIQUIDATED')
+            ORDER BY opened_at DESC LIMIT 1;
+            """);
+
+        command.Parameters.AddWithValue("$bank", SqliteValueMapper.ToBlob(bankId.Value));
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        return reader.Read()
+            ? new ResolutionCaseRecord(
+                ResolutionCaseId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(0))),
+                BankId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(1))),
+                ResolutionCaseStatusCatalog.ParseToken(reader.GetString(2)),
+                UtcTimestamp.FromUnixMilliseconds(reader.GetInt64(3)),
+                reader.IsDBNull(4)
+                    ? null
+                    : BankId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(4))),
+                reader.IsDBNull(5)
+                    ? null
+                    : BankId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(5))),
+                reader.GetInt64(6))
+            : null;
+    }
+
     public void AddResolutionTransfer(ResolutionTransferRecord transfer)
     {
         ArgumentNullException.ThrowIfNull(transfer);

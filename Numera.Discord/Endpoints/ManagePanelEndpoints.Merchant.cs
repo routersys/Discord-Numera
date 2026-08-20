@@ -112,6 +112,11 @@ public sealed partial class ManagePanelEndpoints
         Sessions.ManagePanelPayload payload,
         CancellationToken cancellationToken)
     {
+        if (payload.Action is not (ActionMerchantProduct or ActionMerchantPrice or ActionMerchantStock))
+        {
+            return await ApplyBankAsync(actor, payload, cancellationToken).ConfigureAwait(false);
+        }
+
         Result<MerchantContextView> shop = await merchants
             .GetMerchantContextAsync(
                 new GetMerchantContextQuery(actor, Field(payload, FieldSku)), cancellationToken)
@@ -170,8 +175,8 @@ public sealed partial class ManagePanelEndpoints
                     .ConfigureAwait(false);
 
             default:
-                return await ApplyBankAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
+                return Result.Failure(
+                    ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown);
         }
     }
 

@@ -109,8 +109,8 @@ public sealed partial class ManagePanelEndpoints
                     .ConfigureAwait(false);
 
             default:
-                return Result.Failure(
-                    ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown);
+                return await ApplyResolutionAsync(actor, payload, cancellationToken)
+                    .ConfigureAwait(false);
         }
     }
 
@@ -356,7 +356,8 @@ public sealed partial class ManagePanelEndpoints
     {
         if (payload.Action is not (ActionAccountReview or ActionBankDesign))
         {
-            return null;
+            return await ResolutionCurrentAsync(actor, payload, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         Result<AccountOpeningReviewView> review =
