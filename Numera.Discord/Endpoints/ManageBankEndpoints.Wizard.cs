@@ -190,6 +190,7 @@ public sealed partial class ManageBankEndpoints
                     ["bankName"] = result.Value.Name,
                     ["status"] = catalog.Resolve(ViewKeys.StatusOf(result.Value.Status.ToToken())),
                 },
+                replacesOriginalMessage: true,
                 cancellationToken)
             .ConfigureAwait(false);
     }

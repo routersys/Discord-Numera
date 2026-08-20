@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Numera.Discord.Abstractions;
+using Numera.Discord.Commands;
 using Numera.Discord.Endpoints;
 using Numera.Host.Configuration;
 using Numera.Persistence.Sqlite;
@@ -97,6 +98,21 @@ public sealed class EconomyWalkthroughTests
             string commandPath,
             string sessionToken = "") =>
             new(interaction++, userId, Guild, 1UL, "ja", commandPath, level, sessionToken);
+
+        public static DiscordEndpointResponse Deliver(
+            DiscordInteractionKind kind,
+            DiscordEndpointResponse response)
+        {
+            Assert.AreNotEqual(DiscordResponseKind.Failure, response.Kind, Detail(response));
+
+            ResponsePlan plan = new DiscordResponseStateMachine(kind).PlanResponse(response.Kind);
+
+            Assert.IsTrue(
+                plan.IsPermitted,
+                $"{kind} は {response.Kind} を返せません（{plan.Failure}）。{response.ViewKey}");
+
+            return response;
+        }
 
         public static string TokenOf(DiscordEndpointResponse response)
         {
@@ -196,7 +212,7 @@ public sealed class EconomyWalkthroughTests
         AccountEndpoints account = walk.Endpoint<AccountEndpoints>();
         BankEndpoints bank = walk.Endpoint<BankEndpoints>();
 
-        Walkthrough.Succeeded(await manage.CreateCurrencyAsync(
+        Walkthrough.Deliver(DiscordInteractionKind.SlashCommand, await manage.CreateCurrencyAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "/manage currency-create"),
             walk.IssuanceBookId,
             "ヌメラ",
@@ -206,19 +222,25 @@ public sealed class EconomyWalkthroughTests
             Genesis,
             token));
 
-        DiscordEndpointResponse draft = await manageBank.BankCreateAsync(
+        DiscordEndpointResponse draft = Walkthrough.Deliver(
+            DiscordInteractionKind.SlashCommand,
+            await manageBank.BankCreateAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "/manage bank-create"),
             Institution,
-            token);
+            token));
 
         string createToken = Walkthrough.TokenOf(draft);
 
-        DiscordEndpointResponse identityModal = await manageBank.OpenBankCreateInputAsync(
+        DiscordEndpointResponse identityModal = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await manageBank.OpenBankCreateInputAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-create-input"),
             new DiscordComponentInput("bank-create-input", createToken),
-            token);
+            token));
 
-        DiscordEndpointResponse review = await manageBank.SubmitBankCreateAsync(
+        DiscordEndpointResponse review = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await manageBank.SubmitBankCreateAsync(
             walk.Context(
                 Operator,
                 AuthorizationLevel.GuildOperator,
@@ -232,23 +254,29 @@ public sealed class EconomyWalkthroughTests
                 ProductCode = "DEMAND01",
                 ProductName = "普通預金",
             },
-            token);
+            token));
 
-        DiscordEndpointResponse created = await manageBank.CommitBankCreateAsync(
+        DiscordEndpointResponse created = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await manageBank.CommitBankCreateAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-create-commit"),
             new DiscordComponentInput("bank-create-commit", Walkthrough.TokenOf(review)),
-            token);
+            token));
 
         Assert.AreEqual("PENDING_ACTIVATION", walk.Text("SELECT status FROM banks;"));
 
         string capitalToken = Walkthrough.TokenOf(created);
 
-        DiscordEndpointResponse capitalModal = await manageBank.OpenBankCapitalInputAsync(
+        DiscordEndpointResponse capitalModal = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await manageBank.OpenBankCapitalInputAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-capital-input"),
             new DiscordComponentInput("bank-capital-input", capitalToken),
-            token);
+            token));
 
-        DiscordEndpointResponse capitalReview = await manageBank.SubmitBankCapitalAsync(
+        DiscordEndpointResponse capitalReview = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await manageBank.SubmitBankCapitalAsync(
             walk.Context(
                 Operator,
                 AuthorizationLevel.GuildOperator,
@@ -259,29 +287,33 @@ public sealed class EconomyWalkthroughTests
                 Amount = MinimumCapital.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 SourceInstitutionCode = string.Empty,
             },
-            token);
+            token));
 
-        DiscordEndpointResponse contributed = await manageBank.CommitBankCapitalAsync(
+        DiscordEndpointResponse contributed = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await manageBank.CommitBankCapitalAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-capital-commit"),
             new DiscordComponentInput("bank-capital-commit", Walkthrough.TokenOf(capitalReview)),
-            token);
+            token));
 
-        DiscordEndpointResponse activated = await manageBank.ActivateBankAsync(
+        DiscordEndpointResponse activated = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await manageBank.ActivateBankAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-activate"),
             new DiscordComponentInput("bank-activate", Walkthrough.TokenOf(contributed)),
-            token);
+            token));
 
         Walkthrough.Succeeded(activated);
         Assert.AreEqual("OPERATING", walk.Text("SELECT status FROM banks;"));
         Assert.AreEqual("ACTIVE", walk.Text("SELECT status FROM settlement_participations;"));
 
-        Walkthrough.Succeeded(await account.RegisterAsync(
+        Walkthrough.Deliver(DiscordInteractionKind.SlashCommand, await account.RegisterAsync(
             walk.Context(Depositor, AuthorizationLevel.Unregistered, "/account register"),
             "depositor",
             "預金者",
             token));
 
-        Walkthrough.Succeeded(await bank.OpenAsync(
+        Walkthrough.Deliver(DiscordInteractionKind.SlashCommand, await bank.OpenAsync(
             walk.Context(Depositor, AuthorizationLevel.Customer, "/bank open"),
             Institution,
             token));
@@ -291,34 +323,44 @@ public sealed class EconomyWalkthroughTests
 
         BankQueryEndpoints bankQueries = walk.Endpoint<BankQueryEndpoints>();
 
-        DiscordEndpointResponse banks = await bankQueries.ListAsync(
-            walk.Context(Depositor, AuthorizationLevel.Customer, "/bank list"), token);
+        DiscordEndpointResponse banks = Walkthrough.Deliver(
+            DiscordInteractionKind.SlashCommand,
+            await bankQueries.ListAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "/bank list"), token));
 
         string detailToken = Walkthrough.SelectTokenOf(banks);
 
-        DiscordEndpointResponse detail = await bankQueries.SelectBankDetailAsync(
+        DiscordEndpointResponse detail = Walkthrough.Deliver(
+            DiscordInteractionKind.SelectMenu,
+            await bankQueries.SelectBankDetailAsync(
             walk.Context(Depositor, AuthorizationLevel.Customer, "bank-detail"),
             new DiscordComponentInput("bank-detail", detailToken, [Institution]),
-            token);
+            token));
 
-        DiscordEndpointResponse loanModal = await bankQueries.OpenBankLoanInputAsync(
+        DiscordEndpointResponse loanModal = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await bankQueries.OpenBankLoanInputAsync(
             walk.Context(Depositor, AuthorizationLevel.Customer, "bank-loan-input"),
             new DiscordComponentInput("bank-loan-input", Walkthrough.TokenOf(detail)),
-            token);
+            token));
 
-        DiscordEndpointResponse loanReview = await bankQueries.SubmitBankLoanAsync(
+        DiscordEndpointResponse loanReview = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await bankQueries.SubmitBankLoanAsync(
             walk.Context(
                 Depositor,
                 AuthorizationLevel.Customer,
                 "bank-loan",
                 Walkthrough.ModalTokenOf(loanModal)),
             new BankLoanForm { Principal = "500000", ProductCode = "DEMAND01" },
-            token);
+            token));
 
-        DiscordEndpointResponse originated = await bankQueries.CommitBankLoanAsync(
+        DiscordEndpointResponse originated = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await bankQueries.CommitBankLoanAsync(
             walk.Context(Depositor, AuthorizationLevel.Customer, "bank-loan-commit"),
             new DiscordComponentInput("bank-loan-commit", Walkthrough.TokenOf(loanReview)),
-            token);
+            token));
 
         Walkthrough.Succeeded(originated);
         Assert.AreEqual(1L, walk.Scalar("SELECT COUNT(*) FROM loan_contracts;"));
@@ -335,23 +377,31 @@ public sealed class EconomyWalkthroughTests
             Institution,
             token));
 
-        DiscordEndpointResponse sources = await bank.TransferAsync(
-            walk.Context(Depositor, AuthorizationLevel.Customer, "/bank transfer"), token);
+        DiscordEndpointResponse sources = Walkthrough.Deliver(
+            DiscordInteractionKind.SlashCommand,
+            await bank.TransferAsync(
+            walk.Context(Depositor, AuthorizationLevel.Customer, "/bank transfer"), token));
 
-        DiscordEndpointResponse chosen = await bank.SelectTransferSourceAsync(
+        DiscordEndpointResponse chosen = Walkthrough.Deliver(
+            DiscordInteractionKind.SelectMenu,
+            await bank.SelectTransferSourceAsync(
             walk.Context(Depositor, AuthorizationLevel.Customer, "transfer-source"),
             new DiscordComponentInput(
                 "transfer-source",
                 Walkthrough.SelectTokenOf(sources),
                 [sources.Body.Components.Select!.Options[0].Value]),
-            token);
+            token));
 
-        DiscordEndpointResponse transferModal = await bank.OpenTransferInputAsync(
+        DiscordEndpointResponse transferModal = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await bank.OpenTransferInputAsync(
             walk.Context(Depositor, AuthorizationLevel.Customer, "transfer-input"),
             new DiscordComponentInput("transfer-input", Walkthrough.TokenOf(chosen)),
-            token);
+            token));
 
-        DiscordEndpointResponse transferReview = await bank.SubmitTransferAsync(
+        DiscordEndpointResponse transferReview = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await bank.SubmitTransferAsync(
             walk.Context(
                 Depositor,
                 AuthorizationLevel.Customer,
@@ -365,12 +415,14 @@ public sealed class EconomyWalkthroughTests
                 Amount = "120000",
                 Memo = string.Empty,
             },
-            token);
+            token));
 
-        DiscordEndpointResponse transferred = await bank.ExecuteTransferAsync(
+        DiscordEndpointResponse transferred = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await bank.ExecuteTransferAsync(
             walk.Context(Depositor, AuthorizationLevel.Customer, "transfer-execute"),
             new DiscordComponentInput("transfer-execute", Walkthrough.TokenOf(transferReview)),
-            token);
+            token));
 
         Walkthrough.Succeeded(transferred);
         Assert.AreEqual(120_000L, walk.BalanceOf("beneficiary"));

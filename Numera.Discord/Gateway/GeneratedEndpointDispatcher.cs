@@ -40,22 +40,26 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
     private readonly IAuthorizationResolver authorization;
     private readonly ErrorRenderer errorRenderer;
     private readonly IModalFormCatalog modalForms;
+    private readonly IDiscordDiagnostics diagnostics;
 
     public GeneratedEndpointDispatcher(
         IDiscordEndpointExecutor executor,
         IAuthorizationResolver authorization,
         ErrorRenderer errorRenderer,
-        IModalFormCatalog modalForms)
+        IModalFormCatalog modalForms,
+        IDiscordDiagnostics diagnostics)
     {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(authorization);
         ArgumentNullException.ThrowIfNull(errorRenderer);
         ArgumentNullException.ThrowIfNull(modalForms);
+        ArgumentNullException.ThrowIfNull(diagnostics);
 
         this.executor = executor;
         this.authorization = authorization;
         this.errorRenderer = errorRenderer;
         this.modalForms = modalForms;
+        this.diagnostics = diagnostics;
     }
 
     public async Task<DiscordEndpointContext> CreateContextAsync(
@@ -116,7 +120,7 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
             interaction.Data.Current.Value?.ToString() ?? string.Empty);
     }
 
-    public Task<ResponsePlanFailure> DispatchAutocompleteAsync(
+    public async Task<ResponsePlanFailure> DispatchAutocompleteAsync(
         SocketInteractionContext context,
         IReadOnlyList<DiscordAutocompleteOption> options,
         CancellationToken cancellationToken)
@@ -127,10 +131,12 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
         DiscordInteractionExchange exchange = new(
             DiscordInteractionKind.Autocomplete, new SocketResponseSink(context.Interaction));
 
-        return executor.ExecuteAutocompleteAsync(exchange, options, cancellationToken);
+        return Report(
+            await executor.ExecuteAutocompleteAsync(exchange, options, cancellationToken)
+                .ConfigureAwait(false));
     }
 
-    public Task<ResponsePlanFailure> DispatchAsync(
+    public async Task<ResponsePlanFailure> DispatchAsync(
         SocketInteractionContext context,
         DiscordInteractionKind kind,
         DiscordEndpointResponse response,
@@ -143,19 +149,34 @@ internal sealed class GeneratedEndpointDispatcher : IGeneratedEndpointDispatcher
 
         if (response.Kind == DiscordResponseKind.Modal)
         {
-            return executor.ExecuteModalAsync(exchange, response, ResolveFields(response), cancellationToken);
+            return Report(
+                await executor
+                    .ExecuteModalAsync(exchange, response, ResolveFields(response), cancellationToken)
+                    .ConfigureAwait(false));
         }
 
         if (response.Kind != DiscordResponseKind.Failure)
         {
-            return executor.ExecuteAsync(exchange, response, cancellationToken);
+            return Report(
+                await executor.ExecuteAsync(exchange, response, cancellationToken).ConfigureAwait(false));
         }
 
         RenderedError rendered = errorRenderer.Render(
             EndpointFailures.ToApplicationError(response.Failure!),
             OperationPublicId.From(context.Interaction.Id));
 
-        return executor.ExecuteErrorAsync(exchange, rendered, cancellationToken);
+        return Report(
+            await executor.ExecuteErrorAsync(exchange, rendered, cancellationToken).ConfigureAwait(false));
+    }
+
+    private ResponsePlanFailure Report(ResponsePlanFailure failure)
+    {
+        if (failure != ResponsePlanFailure.None)
+        {
+            diagnostics.InteractionFailed(ResponsePlanFailureCode.Of(failure));
+        }
+
+        return failure;
     }
 
     private IReadOnlyList<DiscordModalField> ResolveFields(DiscordEndpointResponse response)

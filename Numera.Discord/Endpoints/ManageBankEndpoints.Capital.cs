@@ -257,6 +257,7 @@ public sealed partial class ManageBankEndpoints
         string institutionCode,
         string viewKey,
         Dictionary<string, string> data,
+        bool replacesOriginalMessage,
         CancellationToken cancellationToken)
     {
         Result<InteractionSessionTicket> ticket = await sessions
@@ -277,17 +278,18 @@ public sealed partial class ManageBankEndpoints
             return EndpointFailures.From(ticket.Error!);
         }
 
-        return DiscordEndpointResponse.Message(
-            viewKey,
-            data,
-            DiscordResponseBody.WithComponents(new DiscordResponseComponents(
-                null,
-                [
-                    new DiscordResponseButton(
-                        DiscordCustomId.Button(BankCapitalFlow.InputAction, ticket.Value.RawToken),
-                        ViewKeys.ManageBankCapitalInputLabel,
-                        DiscordButtonStyle.Primary),
-                ])));
+        DiscordResponseBody body = DiscordResponseBody.WithComponents(new DiscordResponseComponents(
+            null,
+            [
+                new DiscordResponseButton(
+                    DiscordCustomId.Button(BankCapitalFlow.InputAction, ticket.Value.RawToken),
+                    ViewKeys.ManageBankCapitalInputLabel,
+                    DiscordButtonStyle.Primary),
+            ]));
+
+        return replacesOriginalMessage
+            ? DiscordEndpointResponse.UpdateMessage(viewKey, data, body)
+            : DiscordEndpointResponse.Message(viewKey, data, body);
     }
 
     private Dictionary<string, string> CapitalReview(BankCapitalPayload payload) =>

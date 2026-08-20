@@ -73,6 +73,7 @@ public sealed partial class ManageBankEndpoints : IEconomyEndpoint
                             ["status"] = catalog.Resolve(
                                 ViewKeys.StatusOf(existing.Value.Status.ToToken())),
                         },
+                        replacesOriginalMessage: false,
                         cancellationToken)
                     .ConfigureAwait(false)
                 : EndpointFailures.From(ErrorCategory.Conflict, BankingErrorCodes.BankAlreadyExists);
