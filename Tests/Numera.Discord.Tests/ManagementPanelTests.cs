@@ -114,7 +114,7 @@ public sealed class ManagementPanelTests
         {
             foreach (ManagementPanelAction action in category.Actions)
             {
-                if (!action.IsImplemented)
+                if (action.Route.Length == 0)
                 {
                     continue;
                 }
@@ -142,12 +142,22 @@ public sealed class ManagementPanelTests
         {
             Category = ManagementPanelCatalog.CurrencyIssuance,
             Action = "currency-issue",
+            Fields = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["date"] = "2026-08-20",
+                ["class"] = "NON_BUSINESS_DAY",
+            },
         };
 
         ManagePanelPayload restored =
             ManagePanelPayloadCodec.Read(ManagePanelPayloadCodec.Write(payload));
 
-        Assert.AreEqual(payload, restored);
+        Assert.AreEqual(payload.Category, restored.Category);
+        Assert.AreEqual(payload.Action, restored.Action);
+        Assert.AreEqual(payload.TargetGuildId, restored.TargetGuildId);
+
+        CollectionAssert.AreEquivalent(
+            payload.Fields.ToArray(), restored.Fields.ToArray());
         Assert.AreEqual(ManagePanelPayloadCodec.Empty, ManagePanelPayloadCodec.Read(string.Empty));
         Assert.AreEqual(ManagePanelPayloadCodec.Empty, ManagePanelPayloadCodec.Read("{"));
     }

@@ -16,10 +16,22 @@ public sealed record ClearBusinessCalendarDateCommand(
     string LocalDate,
     EconomyScopeId? TargetEconomyScopeId = null);
 
+public sealed record GetBusinessCalendarDateQuery(
+    AuthorizationContext Actor,
+    string LocalDate,
+    EconomyScopeId? TargetEconomyScopeId = null);
+
 public sealed record BusinessCalendarDateView(
     EconomyScopeId EconomyScopeId,
     string LocalDate,
     BusinessDayClass DayClass);
+
+public sealed record BusinessCalendarDateStatusView(
+    EconomyScopeId EconomyScopeId,
+    string CanonicalTimezone,
+    string LocalDate,
+    BusinessDayClass DayClass,
+    bool HasOverride);
 
 public interface IEconomyCalendarAdministrationApplicationService
 {
@@ -29,6 +41,10 @@ public interface IEconomyCalendarAdministrationApplicationService
 
     Task<Result> ClearDateOverrideAsync(
         ClearBusinessCalendarDateCommand command,
+        CancellationToken cancellationToken);
+
+    Task<Result<BusinessCalendarDateStatusView>> GetDateStatusAsync(
+        GetBusinessCalendarDateQuery query,
         CancellationToken cancellationToken);
 }
 
@@ -62,6 +78,49 @@ public sealed class EconomyCalendarAdministrationApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return ClearAsync(command, cancellationToken);
+    }
+
+    public Task<Result<BusinessCalendarDateStatusView>> GetDateStatusAsync(
+        GetBusinessCalendarDateQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(unitOfWork => Status(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<BusinessCalendarDateStatusView> Status(
+        IBankingUnitOfWork unitOfWork,
+        GetBusinessCalendarDateQuery query)
+    {
+        Result<EconomyScopeId> scope = Authorise(unitOfWork, query.Actor, query.TargetEconomyScopeId);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<BusinessCalendarDateStatusView>.Failure(scope.Error!);
+        }
+
+        if (!BusinessDate.TryParse(query.LocalDate, out BusinessDate localDate))
+        {
+            return Result<BusinessCalendarDateStatusView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CalendarDateInvalid);
+        }
+
+        if (unitOfWork.EconomyCalendars.FindCanonicalTimezone(scope.Value) is not { } timezone)
+        {
+            return Result<BusinessCalendarDateStatusView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound);
+        }
+
+        BusinessDayClass? overridden =
+            unitOfWork.EconomyCalendars.FindDayClassOverride(scope.Value, localDate);
+
+        return Result<BusinessCalendarDateStatusView>.Success(new BusinessCalendarDateStatusView(
+            scope.Value,
+            timezone,
+            localDate.ToString(),
+            overridden ?? BusinessDayClassCatalog.FromWeekday(localDate),
+            overridden is not null));
     }
 
     private static Result<BusinessCalendarDateView> SetOverride(

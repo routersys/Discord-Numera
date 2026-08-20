@@ -68,6 +68,8 @@ public sealed class HostCompositionTests
                 "bank:v1:btn:bank-loan-input:*",
                 "bank:v1:btn:fx-chart-style:*",
                 "bank:v1:btn:fx-chart-theme:*",
+                "bank:v1:btn:panel-commit:*",
+                "bank:v1:btn:panel-edit:*",
                 "bank:v1:btn:transfer-execute:*",
                 "bank:v1:btn:transfer-input:*",
                 "bank:v1:sel:bank-detail:*",
@@ -86,6 +88,8 @@ public sealed class HostCompositionTests
                 "bank:v1:modal:bank-capital:*",
                 "bank:v1:modal:bank-create:*",
                 "bank:v1:modal:bank-loan:*",
+                "bank:v1:modal:panel-calendar-clear:*",
+                "bank:v1:modal:panel-calendar-set:*",
                 "bank:v1:modal:transfer:*",
             },
             interactions.ModalCommands.Select(static command => command.Name)

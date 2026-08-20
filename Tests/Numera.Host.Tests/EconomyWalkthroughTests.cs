@@ -246,6 +246,80 @@ public sealed class EconomyWalkthroughTests
     }
 
     [TestMethod]
+    public async Task TheManagementPanelEditsTheBusinessCalendarThroughItsReviewStep()
+    {
+        await using Walkthrough walk = Walkthrough.Create();
+        CancellationToken token = TestContext.CancellationTokenSource.Token;
+
+        ManagePanelEndpoints panel = walk.Endpoint<ManagePanelEndpoints>();
+
+        DiscordEndpointResponse opened = Walkthrough.Deliver(
+            DiscordInteractionKind.SlashCommand,
+            await panel.ShowAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "/manage panel"), token));
+
+        string session = Walkthrough.SelectTokenOf(opened);
+
+        Walkthrough.Deliver(
+            DiscordInteractionKind.SelectMenu,
+            await panel.SelectCategoryAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-category"),
+                new DiscordComponentInput("panel-category", session, ["economy-calendar"]),
+                token));
+
+        DiscordEndpointResponse editor = Walkthrough.Deliver(
+            DiscordInteractionKind.SelectMenu,
+            await panel.SelectActionAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-action"),
+                new DiscordComponentInput("panel-action", session, ["calendar-set"]),
+                token));
+
+        Assert.AreEqual(ViewKeys.ManagePanelEditor, editor.ViewKey);
+
+        DiscordEndpointResponse modal = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await panel.OpenEditorAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-edit"),
+                new DiscordComponentInput("panel-edit", session),
+                token));
+
+        DiscordEndpointResponse review = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await panel.SubmitCalendarSetAsync(
+                walk.Context(
+                    Operator,
+                    AuthorizationLevel.GuildOperator,
+                    "panel-calendar-set",
+                    Walkthrough.ModalTokenOf(modal)),
+                new PanelCalendarSetForm
+                {
+                    LocalDate = "2026-08-20",
+                    DayClass = "NON_BUSINESS_DAY",
+                    Description = "臨時休業",
+                },
+                token));
+
+        Assert.AreEqual(ViewKeys.ManagePanelReview, review.ViewKey);
+        Assert.AreEqual("営業日（既定）", review.ViewData["current"]);
+        StringAssert.Contains(review.ViewData["after"], "NON_BUSINESS_DAY");
+        Assert.AreEqual(0L, walk.Scalar("SELECT COUNT(*) FROM economy_calendar_overrides;"));
+
+        DiscordEndpointResponse applied = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await panel.CommitEditorAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-commit"),
+                new DiscordComponentInput("panel-commit", Walkthrough.TokenOf(review)),
+                token));
+
+        Assert.AreEqual(ViewKeys.ManagePanelApplied, applied.ViewKey);
+        Assert.AreEqual(1L, walk.Scalar("SELECT COUNT(*) FROM economy_calendar_overrides;"));
+
+        Assert.AreEqual(
+            "NON_BUSINESS_DAY",
+            walk.Text("SELECT day_class FROM economy_calendar_overrides LIMIT 1;"));
+    }
+
+    [TestMethod]
     public async Task TheCanonicalRouteCarriesAFreshEconomyToAFundedDepositAccount()
     {
         await using Walkthrough walk = Walkthrough.Create();

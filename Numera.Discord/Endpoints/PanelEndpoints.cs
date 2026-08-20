@@ -14,14 +14,20 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
 
     private readonly Sessions.InteractionSessionService sessions;
     private readonly ITextCatalog catalog;
+    private readonly Numera.Application.Banking.IEconomyCalendarAdministrationApplicationService calendars;
 
-    public ManagePanelEndpoints(Sessions.InteractionSessionService sessions, ITextCatalog catalog)
+    public ManagePanelEndpoints(
+        Sessions.InteractionSessionService sessions,
+        ITextCatalog catalog,
+        Numera.Application.Banking.IEconomyCalendarAdministrationApplicationService calendars)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(calendars);
 
         this.sessions = sessions;
         this.catalog = catalog;
+        this.calendars = calendars;
     }
 
     [EconomySlashCommand("panel", "管理メニューを表示します。")]
@@ -63,7 +69,7 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
                         Sessions.ManagePanelFlow.CategoryAction, ticket.Value.RawToken),
                     ViewKeys.ManagePanelPlaceholder,
                     [
-                        .. Sessions.ManagementPanelCatalog.Categories.Select(
+                        .. Sessions.ManagementPanelCatalog.Visible(EndpointAuthorization.ToActor(context).Level).Select(
                             category => new DiscordResponseSelectOption(
                                 catalog.Resolve(ViewKeys.PanelCategoryLabel(category.Value)),
                                 category.Value)),

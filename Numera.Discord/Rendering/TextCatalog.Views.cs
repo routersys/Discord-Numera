@@ -53,6 +53,20 @@ internal static class ViewKeys
     public const string ManagePanelActionPlaceholder = "view.manage.panel.action.placeholder";
     public const string ManagePanelRoute = "view.manage.panel.route";
     public const string ManagePanelPending = "view.manage.panel.pending";
+    public const string ManagePanelEditor = "view.manage.panel.editor";
+    public const string ManagePanelEditLabel = "view.manage.panel.edit_label";
+    public const string ManagePanelReview = "view.manage.panel.review";
+    public const string ManagePanelCommitLabel = "view.manage.panel.commit_label";
+    public const string ManagePanelApplied = "view.manage.panel.applied";
+    public const string PanelFieldCurrent = "view.manage.panel.field.current";
+    public const string PanelFieldAfter = "view.manage.panel.field.after";
+    public const string PanelValueCurrent = "view.manage.panel.value.current";
+    public const string PanelValueAfter = "view.manage.panel.value.after";
+    public const string PanelCurrentUnavailable = "view.manage.panel.current.unavailable";
+    public const string PanelCurrentDefaultSuffix = "view.manage.panel.current.default";
+
+    public static string PanelEditorModal(string action) =>
+        "view.manage.panel.modal." + action;
 
     public static string PanelCategoryLabel(string category) =>
         "view.manage.panel.category." + category;
@@ -310,7 +324,24 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.ManagePanelPending + ".title"] = "{action}",
             [ViewKeys.ManagePanelPending + ".description"] = "{category} の {action} は編集画面を実装していません。",
             [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.EconomyCalendar)] = "経済・営業日",
-            [ViewKeys.PanelActionLabel("economy-calendar", "calendar")] = "営業日カレンダー",
+            [ViewKeys.PanelActionLabel("economy-calendar", "calendar-set")] = "営業日区分を設定",
+            [ViewKeys.PanelActionLabel("economy-calendar", "calendar-clear")] = "営業日区分の上書きを解除",
+            [ViewKeys.ManagePanelEditor + ".title"] = "{action}",
+            [ViewKeys.ManagePanelEditor + ".description"] = "{category} の {action} を編集します。入力してください。",
+            [ViewKeys.ManagePanelEditLabel] = "入力する",
+            [ViewKeys.ManagePanelReview + ".title"] = "{action}",
+            [ViewKeys.ManagePanelReview + ".description"] = "{category} の {action} を確定します。現在値と変更後を確認してください。",
+            [ViewKeys.ManagePanelCommitLabel] = "確定する",
+            [ViewKeys.ManagePanelApplied + ".title"] = "{action}",
+            [ViewKeys.ManagePanelApplied + ".description"] = "{category} の {action} を {after} で適用しました。",
+            [ViewKeys.PanelFieldCurrent] = "現在値",
+            [ViewKeys.PanelFieldAfter] = "変更後",
+            [ViewKeys.PanelValueCurrent] = "{current}",
+            [ViewKeys.PanelValueAfter] = "{after}",
+            [ViewKeys.PanelCurrentUnavailable] = "なし",
+            [ViewKeys.PanelCurrentDefaultSuffix] = "（既定）",
+            [ViewKeys.PanelEditorModal("calendar-set")] = "営業日区分を設定",
+            [ViewKeys.PanelEditorModal("calendar-clear")] = "営業日区分の上書きを解除",
             [ViewKeys.PanelCategoryLabel(ManagementPanelCatalog.CurrencyIssuance)] = "通貨・発行",
             [ViewKeys.PanelActionLabel("currency-issuance", "currency-create")] = "通貨の作成",
             [ViewKeys.PanelActionLabel("currency-issuance", "currency-issue")] = "追加発行",
@@ -404,6 +435,8 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.TransferSourcePlaceholder] = "送金元口座を選んでください",
             [ViewKeys.TransferInputLabel] = "振込内容を入力",
             [ViewKeys.TransferExecuteLabel] = "振込を実行",
+            [ViewKeys.StatusOf("BUSINESS_DAY")] = "営業日",
+            [ViewKeys.StatusOf("NON_BUSINESS_DAY")] = "非営業日",
             [ViewKeys.StatusOf("ACTIVE")] = "利用可能",
             [ViewKeys.StatusOf("OPERATING")] = "利用可能",
             [ViewKeys.StatusOf("PENDING")] = "処理待ち",

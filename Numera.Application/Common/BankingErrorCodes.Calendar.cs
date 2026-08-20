@@ -10,4 +10,7 @@ public static partial class BankingErrorCodes
 
     public static string CalendarDescriptionInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 121);
+
+    public static string CalendarDayClassInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 122);
 }

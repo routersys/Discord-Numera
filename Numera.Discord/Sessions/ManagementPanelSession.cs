@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Numera.Application.Common;
 using System.Text.Json.Serialization;
 
 namespace Numera.Discord.Sessions;
@@ -8,16 +9,20 @@ internal static class ManagePanelFlow
     internal const string FlowType = "MANAGE_PANEL";
     internal const string CategoryState = "CATEGORY_SELECT";
     internal const string ActionState = "ACTION_SELECT";
+    internal const string EditorState = "EDITOR";
     internal const string ReviewState = "REVIEW";
     internal const string CategoryAction = "panel-category";
     internal const string ActionAction = "panel-action";
     internal const string BackAction = "panel-back";
+    internal const string EditAction = "panel-edit";
+    internal const string CommitAction = "panel-commit";
 }
 
 internal sealed record ManagePanelPayload(
     [property: JsonPropertyName("category")] string Category,
     [property: JsonPropertyName("action")] string Action,
-    [property: JsonPropertyName("scope")] string TargetGuildId);
+    [property: JsonPropertyName("scope")] string TargetGuildId,
+    [property: JsonPropertyName("fields")] IReadOnlyDictionary<string, string> Fields);
 
 [JsonSerializable(typeof(ManagePanelPayload))]
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Default)]
@@ -25,8 +30,11 @@ internal sealed partial class ManagePanelPayloadContext : JsonSerializerContext;
 
 internal static class ManagePanelPayloadCodec
 {
+    private static readonly IReadOnlyDictionary<string, string> NoFields =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     internal static readonly ManagePanelPayload Empty =
-        new(string.Empty, string.Empty, string.Empty);
+        new(string.Empty, string.Empty, string.Empty, NoFields);
 
     internal static string Write(ManagePanelPayload payload) =>
         JsonSerializer.Serialize(payload, ManagePanelPayloadContext.Default.ManagePanelPayload);
@@ -40,8 +48,12 @@ internal static class ManagePanelPayloadCodec
 
         try
         {
-            return JsonSerializer.Deserialize(
-                json, ManagePanelPayloadContext.Default.ManagePanelPayload) ?? Empty;
+            ManagePanelPayload? payload = JsonSerializer.Deserialize(
+                json, ManagePanelPayloadContext.Default.ManagePanelPayload);
+
+            return payload is null
+                ? Empty
+                : payload with { Fields = payload.Fields ?? NoFields };
         }
         catch (JsonException)
         {
@@ -50,14 +62,17 @@ internal static class ManagePanelPayloadCodec
     }
 }
 
-internal sealed record ManagementPanelAction(string Value, string Route)
+internal sealed record ManagementPanelAction(string Value, string Route, string Editor = "")
 {
-    internal bool IsImplemented => Route.Length > 0;
+    internal bool IsImplemented => Route.Length > 0 || Editor.Length > 0;
+
+    internal bool HasEditor => Editor.Length > 0;
 }
 
 internal sealed record ManagementPanelCategory(
     string Value,
-    IReadOnlyList<ManagementPanelAction> Actions);
+    IReadOnlyList<ManagementPanelAction> Actions,
+    AuthorizationLevel RequiredLevel = AuthorizationLevel.GuildOperator);
 
 internal static class ManagementPanelCatalog
 {
@@ -81,9 +96,16 @@ internal static class ManagementPanelCatalog
 
     internal const string Pending = "";
 
+    internal const string CalendarSetEditor = "panel-calendar-set";
+    internal const string CalendarClearEditor = "panel-calendar-clear";
+
     internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
     [
-        new(EconomyCalendar, [new("calendar", Pending)]),
+        new(EconomyCalendar,
+        [
+            new("calendar-set", Pending, CalendarSetEditor),
+            new("calendar-clear", Pending, CalendarClearEditor),
+        ]),
         new(CurrencyIssuance,
         [
             new("currency-create", "/manage currency-create"),
@@ -117,6 +139,11 @@ internal static class ManagementPanelCatalog
         new(PrudentialResolution, [new("prudential-policy", Pending)]),
         new(Presentation, [new("presentation-profile", Pending)]),
         new(Audit, [new("reconcile", "/system reconcile")]),
+    ];
+
+    internal static IReadOnlyList<ManagementPanelCategory> Visible(AuthorizationLevel level) =>
+    [
+        .. Categories.Where(category => (int)level <= (int)category.RequiredLevel),
     ];
 
     internal static ManagementPanelCategory? Find(string value)

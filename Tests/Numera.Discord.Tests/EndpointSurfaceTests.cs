@@ -152,6 +152,8 @@ public sealed class EndpointSurfaceTests
                 "fx-chart-theme",
                 "panel-action",
                 "panel-category",
+                "panel-commit",
+                "panel-edit",
                 "transfer-execute",
                 "transfer-input",
                 "transfer-source",
@@ -159,7 +161,11 @@ public sealed class EndpointSurfaceTests
             EconomyCommandManifest.ComponentActions.Order(StringComparer.Ordinal).ToArray());
 
         CollectionAssert.AreEqual(
-            new[] { "bank-capital", "bank-create", "bank-loan", "transfer" },
+            new[]
+            {
+                "bank-capital", "bank-create", "bank-loan", "panel-calendar-clear",
+                "panel-calendar-set", "transfer",
+            },
             EconomyCommandManifest.ModalActions.Order(StringComparer.Ordinal).ToArray());
     }
 

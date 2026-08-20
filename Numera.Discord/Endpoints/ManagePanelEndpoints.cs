@@ -30,6 +30,12 @@ public sealed partial class ManagePanelEndpoints
             return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown);
         }
 
+        if ((int)EndpointAuthorization.ToActor(context).Level > (int)category.RequiredLevel)
+        {
+            return EndpointFailures.From(
+                ErrorCategory.Forbidden, BankingErrorCodes.ManagementAuthorityMissing);
+        }
+
         Result<InteractionSessionSnapshot> advanced = await sessions
             .AdvanceAsync(
                 Request(context, input.SessionToken, scope, ManagePanelFlow.CategoryState, 0L),
@@ -100,7 +106,7 @@ public sealed partial class ManagePanelEndpoints
         Result<InteractionSessionSnapshot> advanced = await sessions
             .AdvanceAsync(
                 Request(context, input.SessionToken, scope, ManagePanelFlow.ActionState, 1L),
-                ManagePanelFlow.ReviewState,
+                action.HasEditor ? ManagePanelFlow.EditorState : ManagePanelFlow.ReviewState,
                 ManagePanelPayloadCodec.Write(payload with { Action = action.Value }),
                 cancellationToken)
             .ConfigureAwait(false);
@@ -110,18 +116,34 @@ public sealed partial class ManagePanelEndpoints
             return EndpointFailures.From(advanced.Error!);
         }
 
-        _ = await sessions
-            .CompleteAsync(
-                Request(context, input.SessionToken, scope, ManagePanelFlow.ReviewState, 2L),
-                cancellationToken)
-            .ConfigureAwait(false);
-
         Dictionary<string, string> data = new(StringComparer.Ordinal)
         {
             ["category"] = catalog.Resolve(ViewKeys.PanelCategoryLabel(category.Value)),
             ["action"] = catalog.Resolve(ViewKeys.PanelActionLabel(category.Value, action.Value)),
             ["route"] = action.Route,
         };
+
+        if (action.HasEditor)
+        {
+            return DiscordEndpointResponse.UpdateMessage(
+                ViewKeys.ManagePanelEditor,
+                data,
+                DiscordResponseBody.WithComponents(new DiscordResponseComponents(
+                    null,
+                    [
+                        new DiscordResponseButton(
+                            DiscordCustomId.Button(
+                                ManagePanelFlow.EditAction, input.SessionToken),
+                            ViewKeys.ManagePanelEditLabel,
+                            DiscordButtonStyle.Primary),
+                    ])));
+        }
+
+        _ = await sessions
+            .CompleteAsync(
+                Request(context, input.SessionToken, scope, ManagePanelFlow.ReviewState, 2L),
+                cancellationToken)
+            .ConfigureAwait(false);
 
         return DiscordEndpointResponse.UpdateMessage(
             action.IsImplemented ? ViewKeys.ManagePanelRoute : ViewKeys.ManagePanelPending, data);
