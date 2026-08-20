@@ -207,6 +207,31 @@ public sealed class FxWalkthroughTests
                 await fx.BoardAsync(
                     Context(HomeGuild, Maker, AuthorizationLevel.Customer, "/fx board"), market, token));
 
+            foreach (string period in new[] { "1H", "24H", "7D", "30D" })
+            {
+                DiscordEndpointResponse chart = Deliver(
+                    DiscordInteractionKind.SlashCommand,
+                    await fx.ChartAsync(
+                        Context(HomeGuild, Maker, AuthorizationLevel.Customer, "/fx chart"),
+                        market,
+                        period,
+                        "CANDLE",
+                        token));
+
+                AssertChartImage(chart, market, period);
+            }
+
+            DiscordEndpointResponse lineChart = Deliver(
+                DiscordInteractionKind.SlashCommand,
+                await fx.ChartAsync(
+                    Context(HomeGuild, Maker, AuthorizationLevel.Customer, "/fx chart"),
+                    market,
+                    null,
+                    null,
+                    token));
+
+            AssertChartImage(lineChart, market, "1H");
+
             Deliver(
                 DiscordInteractionKind.SlashCommand,
                 await fx.OrdersAsync(
@@ -501,6 +526,46 @@ public sealed class FxWalkthroughTests
         new(interaction++, userId, guildId, 1UL, "ja", commandPath, level, sessionToken);
 
     private static readonly CatalogResponseComposer Composer = new(CanonicalTextCatalog.Create());
+
+    private static void AssertChartImage(
+        DiscordEndpointResponse response,
+        string market,
+        string period)
+    {
+        if (response.ViewKey == ViewKeys.FxChartEmpty)
+        {
+            Assert.IsNull(response.Body.Attachment, period);
+            return;
+        }
+
+        Assert.AreEqual(ViewKeys.FxChart, response.ViewKey, period);
+
+        DiscordResponseAttachment attachment = response.Body.Attachment!;
+
+        Assert.IsNotNull(attachment, period);
+        Assert.AreEqual("fx-chart.png", attachment.FileName, period);
+
+        CollectionAssert.AreEqual(
+            new byte[] { 0x89, 0x50, 0x4E, 0x47 }, attachment.Content[..4], period);
+
+        Assert.AreEqual(1280, PngDimension(attachment.Content, 16), period);
+        Assert.AreEqual(720, PngDimension(attachment.Content, 20), period);
+
+        Assert.AreEqual(period, response.ViewData["period"], period);
+        Assert.DoesNotContain(market, response.ViewData["pair"], period);
+        Assert.IsNotEmpty(response.ViewData["pair"], period);
+
+        DiscordEmbedPayload embed = Composer.Compose(response);
+
+        Assert.DoesNotContain(market, embed.Description, period);
+        StringAssert.Contains(embed.Description, response.ViewData["pair"], period);
+    }
+
+    private static int PngDimension(byte[] content, int offset) =>
+        (content[offset] << 24)
+        | (content[offset + 1] << 16)
+        | (content[offset + 2] << 8)
+        | content[offset + 3];
 
     private static DiscordEndpointResponse Deliver(
         DiscordInteractionKind kind,

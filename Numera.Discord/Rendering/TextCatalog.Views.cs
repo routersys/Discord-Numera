@@ -116,6 +116,18 @@ internal static class ViewKeys
     public const string FxBoardEmpty = "view.fx.board_empty";
     public const string FxChart = "view.fx.chart";
     public const string FxChartEmpty = "view.fx.chart_empty";
+
+    public const string FxChartStart = "view.fx.chart.start";
+
+    public const string FxChartEnd = "view.fx.chart.end";
+
+    public const string FxChartHigh = "view.fx.chart.high";
+
+    public const string FxChartLow = "view.fx.chart.low";
+
+    public const string FxChartChange = "view.fx.chart.change";
+
+    public const string FxChartVolume = "view.fx.chart.volume";
     public const string FxOrders = "view.fx.orders";
     public const string FxOrdersEmpty = "view.fx.orders_empty";
     public const string FxHistory = "view.fx.history";
@@ -503,7 +515,13 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.FxBoardEmpty + ".title"] = "板がありません",
             [ViewKeys.FxBoardEmpty + ".description"] = "この市場にはまだ注文がありません。",
             [ViewKeys.FxChart + ".title"] = "為替チャート",
-            [ViewKeys.FxChart + ".description"] = "{interval}秒足で{count}本の足があります。",
+            [ViewKeys.FxChart + ".description"] = "{pair}の{period}です。{count}本の足があり変化率は{change}です。",
+            [ViewKeys.FxChartStart] = "始値",
+            [ViewKeys.FxChartEnd] = "終値",
+            [ViewKeys.FxChartHigh] = "高値",
+            [ViewKeys.FxChartLow] = "安値",
+            [ViewKeys.FxChartChange] = "変化率",
+            [ViewKeys.FxChartVolume] = "出来高",
             [ViewKeys.FxChartEmpty + ".title"] = "チャートがありません",
             [ViewKeys.FxChartEmpty + ".description"] = "この市場にはまだ約定がありません。",
             [ViewKeys.FxOrders + ".title"] = "為替注文の一覧",

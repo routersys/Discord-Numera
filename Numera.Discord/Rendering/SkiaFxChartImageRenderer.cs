@@ -30,10 +30,14 @@ internal sealed class SkiaFxChartImageRenderer : IFxChartImageRenderer
         try
         {
             byte[] content = renderer.Render(new FxChartRenderRequest(
-                model.Title,
-                IntervalLabel(model.BucketSeconds),
+                model.PairCode,
+                model.PeriodLabel,
+                model.BucketSeconds,
                 model.Buckets,
-                model.MinorUnitDigits));
+                model.PriceScale,
+                model.Metrics,
+                model.Style,
+                model.Theme));
 
             return new FxChartImage(FileName, FxChartCanvas.Width, FxChartCanvas.Height, content);
         }
@@ -44,11 +48,4 @@ internal sealed class SkiaFxChartImageRenderer : IFxChartImageRenderer
             return null;
         }
     }
-
-    internal static string IntervalLabel(int bucketSeconds) => bucketSeconds switch
-    {
-        300 => "5m",
-        3600 => "1h",
-        _ => "1m",
-    };
 }

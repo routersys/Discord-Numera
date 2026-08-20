@@ -18,7 +18,13 @@ public sealed class FxEndpoints : IEconomyEndpoint
     private const int FiveMinuteBucket = 300;
     private const int HourBucket = 3600;
 
-    private const int ChartMinorUnitDigits = 4;
+    private const string PeriodHour = "1H";
+    private const string PeriodDay = "24H";
+    private const string PeriodWeek = "7D";
+    private const string PeriodMonth = "30D";
+
+    private const string StyleLine = "LINE";
+    private const string StyleCandle = "CANDLE";
 
     private const string TypeLimit = "LIMIT";
 
@@ -161,11 +167,16 @@ public sealed class FxEndpoints : IEconomyEndpoint
         [EconomyOption("market", "市場を指定します。", true)]
         [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
         string market,
-        [EconomyOption("interval", "足の長さを選びます。", false)]
-        [EconomyChoice("1分足", "60")]
-        [EconomyChoice("5分足", "300")]
-        [EconomyChoice("1時間足", "3600")]
-        string? interval,
+        [EconomyOption("period", "表示する期間を選びます。", false)]
+        [EconomyChoice("1時間", PeriodHour)]
+        [EconomyChoice("24時間", PeriodDay)]
+        [EconomyChoice("7日", PeriodWeek)]
+        [EconomyChoice("30日", PeriodMonth)]
+        string? period,
+        [EconomyOption("style", "描画の種類を選びます。", false)]
+        [EconomyChoice("折れ線", StyleLine)]
+        [EconomyChoice("ローソク足", StyleCandle)]
+        string? style,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -175,15 +186,12 @@ public sealed class FxEndpoints : IEconomyEndpoint
             return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
-        int bucket = interval switch
-        {
-            "300" => FiveMinuteBucket,
-            "3600" => HourBucket,
-            _ => MinuteBucket,
-        };
+        FxChartPeriod window = FxChartPeriod.Resolve(period);
 
         Result<FxChartVisualView> result = await markets
-            .GetFxChartVisualAsync(new GetFxChartVisualQuery(id, bucket), cancellationToken)
+            .GetFxChartVisualAsync(
+                new GetFxChartVisualQuery(id, window.BucketSeconds, window.WindowSeconds),
+                cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.IsSuccess)
@@ -197,14 +205,26 @@ public sealed class FxEndpoints : IEconomyEndpoint
                 ViewKeys.FxChartEmpty, new Dictionary<string, string>(StringComparer.Ordinal));
         }
 
+        FxChartVisualView view = result.Value;
+
         Dictionary<string, string> data = new(StringComparer.Ordinal)
         {
-            ["count"] = result.Value.Buckets.Count.ToString(CultureInfo.InvariantCulture),
-            ["interval"] = bucket.ToString(CultureInfo.InvariantCulture),
+            ["pair"] = view.PairCode,
+            ["period"] = window.Token,
+            ["count"] = view.Buckets.Count.ToString(CultureInfo.InvariantCulture),
+            ["change"] = FxChartScale.FormatChange(
+                view.Buckets[0].OpenPriceUnits, view.Buckets[^1].ClosePriceUnits),
         };
 
         FxChartImage? image = charts.TryRender(new FxChartRenderModel(
-            market, bucket, result.Value.Buckets, ChartMinorUnitDigits));
+            view.PairCode,
+            window.Token,
+            window.BucketSeconds,
+            view.Buckets,
+            view.PriceScale,
+            ChartMetrics(view),
+            style == StyleCandle ? FxChartSeriesStyle.Candle : FxChartSeriesStyle.Line,
+            FxChartTheme.Light));
 
         return image is { } rendered
             ? DiscordEndpointResponse.Message(
@@ -213,6 +233,45 @@ public sealed class FxEndpoints : IEconomyEndpoint
                 DiscordResponseBody.WithAttachment(
                     new DiscordResponseAttachment(rendered.FileName, rendered.Content)))
             : DiscordEndpointResponse.Message(ViewKeys.FxChart, data);
+    }
+
+    private IReadOnlyList<FxChartMetric> ChartMetrics(FxChartVisualView view)
+    {
+        long high = view.Buckets[0].HighPriceUnits;
+        long low = view.Buckets[0].LowPriceUnits;
+        long volume = 0L;
+
+        foreach (FxOhlcBucket bucket in view.Buckets)
+        {
+            high = Math.Max(high, bucket.HighPriceUnits);
+            low = Math.Min(low, bucket.LowPriceUnits);
+            volume = checked(volume + bucket.BaseVolumeMinor);
+        }
+
+        long open = view.Buckets[0].OpenPriceUnits;
+        long close = view.Buckets[^1].ClosePriceUnits;
+
+        return
+        [
+            new FxChartMetric(
+                catalog.Resolve(ViewKeys.FxChartStart),
+                FxChartScale.FormatPrice(open, view.PriceScale)),
+            new FxChartMetric(
+                catalog.Resolve(ViewKeys.FxChartEnd),
+                FxChartScale.FormatPrice(close, view.PriceScale)),
+            new FxChartMetric(
+                catalog.Resolve(ViewKeys.FxChartHigh),
+                FxChartScale.FormatPrice(high, view.PriceScale)),
+            new FxChartMetric(
+                catalog.Resolve(ViewKeys.FxChartLow),
+                FxChartScale.FormatPrice(low, view.PriceScale)),
+            new FxChartMetric(
+                catalog.Resolve(ViewKeys.FxChartChange),
+                FxChartScale.FormatChange(open, close)),
+            new FxChartMetric(
+                catalog.Resolve(ViewKeys.FxChartVolume),
+                FxChartScale.FormatAmount(volume, view.BaseMinorUnitDigits)),
+        ];
     }
 
     [EconomySlashCommand("orders", "自分の為替注文を一覧します。")]
@@ -466,6 +525,25 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
     private static string Depth(IReadOnlyList<FxDepthLevel> levels) =>
         string.Join('\n', levels.Select(static level => $"{level.PriceUnits} {level.BaseMinor}"));
+}
+
+internal sealed record FxChartPeriod(string Token, int BucketSeconds, long WindowSeconds)
+{
+    internal static FxChartPeriod Hour { get; } = new("1H", 60, 3_600L);
+
+    internal static FxChartPeriod Day { get; } = new("24H", 300, 86_400L);
+
+    internal static FxChartPeriod Week { get; } = new("7D", 3600, 604_800L);
+
+    internal static FxChartPeriod Month { get; } = new("30D", 3600, 2_592_000L);
+
+    internal static FxChartPeriod Resolve(string? token) => token switch
+    {
+        "24H" => Day,
+        "7D" => Week,
+        "30D" => Month,
+        _ => Hour,
+    };
 }
 
 internal static class FxMarketReference
