@@ -20,6 +20,9 @@ public sealed class CommandApiClosureTests
         "IBankAdministrationApplicationService.ContributeBankCapitalAsync",
         "IBankAdministrationApplicationService.GetBankCapitalStatusAsync",
         "IEconomyCalendarAdministrationApplicationService.GetDateStatusAsync",
+        "ICurrencyTrustAdministrationApplicationService.GetPolicyStatusAsync",
+        "IPaymentNetworkAdministrationApplicationService.GetNetworkStatusAsync",
+        "IPrudentialAdministrationApplicationService.GetPolicyStatusAsync",
     ];
 
     private static readonly string[] EntriesWithoutCanonicalUseCase =

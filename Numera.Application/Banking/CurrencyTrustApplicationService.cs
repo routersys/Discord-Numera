@@ -63,8 +63,19 @@ public sealed record CurrencyTrustDesignationView(
     CurrencyTrustTier Tier,
     CurrencyTrustDesignationStatus Status);
 
+public sealed record GetCurrencyTrustPolicyQuery(AuthorizationContext Actor);
+
+public sealed record CurrencyTrustPolicyStatusView(
+    EconomyScopeId EconomyScopeId,
+    bool HasPublished,
+    CurrencyTrustPolicyInput? Policy);
+
 public interface ICurrencyTrustAdministrationApplicationService
 {
+    Task<Result<CurrencyTrustPolicyStatusView>> GetPolicyStatusAsync(
+        GetCurrencyTrustPolicyQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<CurrencyTrustPolicyDraftView>> StartPolicyDraftAsync(
         StartCurrencyTrustPolicyDraftCommand command,
         CancellationToken cancellationToken);
@@ -119,6 +130,51 @@ public sealed class CurrencyTrustAdministrationApplicationService
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<CurrencyTrustPolicyStatusView>> GetPolicyStatusAsync(
+        GetCurrencyTrustPolicyQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => PolicyStatus(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<CurrencyTrustPolicyStatusView> PolicyStatus(
+        IBankingUnitOfWork unitOfWork,
+        GetCurrencyTrustPolicyQuery query)
+    {
+        Result<EconomyScopeId> scope = GovernanceAuthorization.Authorise(unitOfWork, query.Actor);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<CurrencyTrustPolicyStatusView>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Governance.FindPublishedTrustPolicy(scope.Value) is not { } policy)
+        {
+            return Result<CurrencyTrustPolicyStatusView>.Success(
+                new CurrencyTrustPolicyStatusView(scope.Value, false, null));
+        }
+
+        return Result<CurrencyTrustPolicyStatusView>.Success(new CurrencyTrustPolicyStatusView(
+            scope.Value,
+            true,
+            new CurrencyTrustPolicyInput(
+                new CurrencyTrustTierThresholds(
+                    policy.EstablishedMinAgeSeconds,
+                    policy.EstablishedMinTradeDays,
+                    policy.EstablishedMinCounterparties),
+                new CurrencyTrustTierThresholds(
+                    policy.TrustedMinAgeSeconds,
+                    policy.TrustedMinTradeDays,
+                    policy.TrustedMinCounterparties),
+                new CurrencyTrustTierThresholds(
+                    policy.ReserveMinAgeSeconds,
+                    policy.ReserveMinTradeDays,
+                    policy.ReserveMinCounterparties))));
     }
 
     public Task<Result<CurrencyTrustPolicyDraftView>> StartPolicyDraftAsync(

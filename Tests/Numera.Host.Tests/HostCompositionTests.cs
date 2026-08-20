@@ -90,6 +90,10 @@ public sealed class HostCompositionTests
                 "bank:v1:modal:bank-loan:*",
                 "bank:v1:modal:panel-calendar-clear:*",
                 "bank:v1:modal:panel-calendar-set:*",
+                "bank:v1:modal:panel-network-policy:*",
+                "bank:v1:modal:panel-network-state:*",
+                "bank:v1:modal:panel-prudential-policy:*",
+                "bank:v1:modal:panel-trust-policy:*",
                 "bank:v1:modal:transfer:*",
             },
             interactions.ModalCommands.Select(static command => command.Name)

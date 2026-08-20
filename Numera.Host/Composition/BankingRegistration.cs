@@ -60,6 +60,7 @@ internal static class BankingRegistration
             provider => provider.GetRequiredService<FxApplicationService>());
         services.AddSingleton<IPresentationProfileAdministrationApplicationService, PresentationProfileAdministrationApplicationService>();
         services.AddSingleton<ICurrencyTrustAdministrationApplicationService, CurrencyTrustAdministrationApplicationService>();
+        services.AddSingleton<IPaymentNetworkAdministrationApplicationService, PaymentNetworkAdministrationApplicationService>();
         services.AddSingleton<ILoanApplicationService, LoanApplicationService>();
         services.AddSingleton<IMerchantOperatorGrantApplicationService, MerchantOperatorGrantApplicationService>();
         services.AddSingleton<

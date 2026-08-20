@@ -15,19 +15,31 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
     private readonly Sessions.InteractionSessionService sessions;
     private readonly ITextCatalog catalog;
     private readonly Numera.Application.Banking.IEconomyCalendarAdministrationApplicationService calendars;
+    private readonly Numera.Application.Banking.ICurrencyTrustAdministrationApplicationService trusts;
+    private readonly Numera.Application.Banking.IPaymentNetworkAdministrationApplicationService networks;
+    private readonly Numera.Application.Banking.IPrudentialAdministrationApplicationService prudential;
 
     public ManagePanelEndpoints(
         Sessions.InteractionSessionService sessions,
         ITextCatalog catalog,
-        Numera.Application.Banking.IEconomyCalendarAdministrationApplicationService calendars)
+        Numera.Application.Banking.IEconomyCalendarAdministrationApplicationService calendars,
+        Numera.Application.Banking.ICurrencyTrustAdministrationApplicationService trusts,
+        Numera.Application.Banking.IPaymentNetworkAdministrationApplicationService networks,
+        Numera.Application.Banking.IPrudentialAdministrationApplicationService prudential)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(calendars);
+        ArgumentNullException.ThrowIfNull(trusts);
+        ArgumentNullException.ThrowIfNull(networks);
+        ArgumentNullException.ThrowIfNull(prudential);
 
         this.sessions = sessions;
         this.catalog = catalog;
         this.calendars = calendars;
+        this.trusts = trusts;
+        this.networks = networks;
+        this.prudential = prudential;
     }
 
     [EconomySlashCommand("panel", "管理メニューを表示します。")]

@@ -86,6 +86,9 @@ public static partial class BankingErrorCodes
     public static string LoanPrincipalInvalid { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Validation, 164);
 
+    public static string CurrencyTrustThresholdInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 165);
+
     public static string CurrencyTrustApprovalRequired { get; } =
         ErrorCodeFormat.Compose(ErrorCategory.Forbidden, 160);
 

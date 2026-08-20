@@ -58,8 +58,24 @@ public sealed record PaymentNetworkPolicyVersionView(
     BeneficiaryPostingPolicy BeneficiaryPostingPolicy,
     long Version);
 
+public sealed record GetPaymentNetworkQuery(
+    AuthorizationContext Actor,
+    string NetworkCode,
+    EconomyScopeId? TargetEconomyScopeId = null);
+
+public sealed record PaymentNetworkStatusView(
+    PaymentNetworkId Id,
+    string NetworkCode,
+    PaymentNetworkStatus Status,
+    bool HasPolicy,
+    PaymentNetworkPolicyInput? Policy);
+
 public interface IPaymentNetworkAdministrationApplicationService
 {
+    Task<Result<PaymentNetworkStatusView>> GetNetworkStatusAsync(
+        GetPaymentNetworkQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<PaymentNetworkDraftView>> StartNetworkDraftAsync(
         StartPaymentNetworkDraftCommand command,
         CancellationToken cancellationToken);
@@ -100,6 +116,61 @@ public sealed class PaymentNetworkAdministrationApplicationService
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<PaymentNetworkStatusView>> GetNetworkStatusAsync(
+        GetPaymentNetworkQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => NetworkStatus(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<PaymentNetworkStatusView> NetworkStatus(
+        IBankingUnitOfWork unitOfWork,
+        GetPaymentNetworkQuery query)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, query.Actor, query.TargetEconomyScopeId);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<PaymentNetworkStatusView>.Failure(scope.Error!);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(unitOfWork, query.Actor, scope.Value);
+
+        if (!authorized.IsSuccess)
+        {
+            return Result<PaymentNetworkStatusView>.Failure(authorized.Error!);
+        }
+
+        if (unitOfWork.PaymentNetworks.FindByCode(scope.Value, query.NetworkCode) is not { } network)
+        {
+            return Result<PaymentNetworkStatusView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.PaymentNetworkNotFound);
+        }
+
+        PaymentNetworkPolicyVersion? policy = network.CurrentPolicyVersionId is { } versionId
+            ? unitOfWork.PaymentNetworks.FindPolicy(versionId)
+            : null;
+
+        return Result<PaymentNetworkStatusView>.Success(new PaymentNetworkStatusView(
+            network.Id,
+            network.NetworkCode,
+            network.Status,
+            policy is not null,
+            policy is { } current
+                ? new PaymentNetworkPolicyInput(
+                    current.SettlementMode,
+                    current.BeneficiaryPostingPolicy,
+                    current.RtgsThreshold?.Value,
+                    current.ClearingCycleIntervalSeconds,
+                    current.PrecreditPrefundRatioBasisPoints,
+                    current.PerBankPrecreditExposureLimit.Value)
+                : null));
     }
 
     public Task<Result<PaymentNetworkDraftView>> StartNetworkDraftAsync(

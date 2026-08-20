@@ -188,8 +188,8 @@ public sealed partial class ManagePanelEndpoints
                     .ConfigureAwait(false);
 
             default:
-                return Result.Failure(
-                    ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown);
+                return await ApplyGovernanceAsync(actor, payload, cancellationToken)
+                    .ConfigureAwait(false);
         }
     }
 
@@ -200,7 +200,10 @@ public sealed partial class ManagePanelEndpoints
     {
         if (payload.Action is not ("calendar-set" or "calendar-clear"))
         {
-            return catalog.Resolve(ViewKeys.PanelCurrentUnavailable);
+            string? described = await GovernanceCurrentAsync(actor, payload, cancellationToken)
+                .ConfigureAwait(false);
+
+            return described ?? catalog.Resolve(ViewKeys.PanelCurrentUnavailable);
         }
 
         Result<BusinessCalendarDateStatusView> status = await calendars

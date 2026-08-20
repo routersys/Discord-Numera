@@ -33,8 +33,21 @@ public sealed record PrudentialPolicyVersionView(
     PrudentialPolicyVersionId Id,
     MoneyMinor MinimumInitialBankCapital);
 
+public sealed record GetPrudentialPolicyQuery(
+    AuthorizationContext Actor,
+    EconomyScopeId? TargetEconomyScopeId = null);
+
+public sealed record PrudentialPolicyStatusView(
+    EconomyScopeId EconomyScopeId,
+    bool HasPublished,
+    PrudentialPolicyInput? Policy);
+
 public interface IPrudentialAdministrationApplicationService
 {
+    Task<Result<PrudentialPolicyStatusView>> GetPolicyStatusAsync(
+        GetPrudentialPolicyQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<PrudentialPolicyDraftView>> StartDraftAsync(
         StartPrudentialPolicyDraftCommand command,
         CancellationToken cancellationToken);
@@ -68,6 +81,53 @@ public sealed class PrudentialAdministrationApplicationService : IPrudentialAdmi
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<PrudentialPolicyStatusView>> GetPolicyStatusAsync(
+        GetPrudentialPolicyQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => PolicyStatus(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<PrudentialPolicyStatusView> PolicyStatus(
+        IBankingUnitOfWork unitOfWork,
+        GetPrudentialPolicyQuery query)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, query.Actor, query.TargetEconomyScopeId);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<PrudentialPolicyStatusView>.Failure(scope.Error!);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(unitOfWork, query.Actor, scope.Value);
+
+        if (!authorized.IsSuccess)
+        {
+            return Result<PrudentialPolicyStatusView>.Failure(authorized.Error!);
+        }
+
+        if (unitOfWork.PrudentialPolicies.FindPublished(scope.Value) is not { } policy)
+        {
+            return Result<PrudentialPolicyStatusView>.Success(
+                new PrudentialPolicyStatusView(scope.Value, false, null));
+        }
+
+        return Result<PrudentialPolicyStatusView>.Success(new PrudentialPolicyStatusView(
+            scope.Value,
+            true,
+            new PrudentialPolicyInput(
+                policy.MinimumCet1BasisPoints,
+                policy.LendingCet1BasisPoints,
+                policy.MinimumLeverageBasisPoints,
+                policy.ConfiguredWarningLeverageBasisPoints,
+                policy.MinimumLiquidityBasisPoints,
+                policy.MinimumInitialBankCapital.Value)));
     }
 
     public Task<Result<PrudentialPolicyDraftView>> StartDraftAsync(

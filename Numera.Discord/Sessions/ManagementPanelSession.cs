@@ -98,6 +98,10 @@ internal static class ManagementPanelCatalog
 
     internal const string CalendarSetEditor = "panel-calendar-set";
     internal const string CalendarClearEditor = "panel-calendar-clear";
+    internal const string TrustPolicyEditor = "panel-trust-policy";
+    internal const string NetworkPolicyEditor = "panel-network-policy";
+    internal const string NetworkStateEditor = "panel-network-state";
+    internal const string PrudentialPolicyEditor = "panel-prudential-policy";
 
     internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
     [
@@ -114,7 +118,7 @@ internal static class ManagementPanelCatalog
             new("currency-edit", "/manage currency-edit"),
             new("currency-retire", "/manage currency-retire"),
         ]),
-        new(CurrencyTrust, [new("trust", Pending)]),
+        new(CurrencyTrust, [new("trust-policy", Pending, TrustPolicyEditor)]),
         new(BankBranch,
         [
             new("bank-create", "/manage bank-create"),
@@ -128,7 +132,11 @@ internal static class ManagementPanelCatalog
         new(CardDesign, [new("card-design", Pending)]),
         new(AtmCash, [new("atm-network", Pending)]),
         new(MerchantCommerce, [new("merchant-profile", Pending)]),
-        new(PaymentNetwork, [new("network-policy", Pending)]),
+        new(PaymentNetwork,
+        [
+            new("network-policy", Pending, NetworkPolicyEditor),
+            new("network-state", Pending, NetworkStateEditor),
+        ]),
         new(FxMarket, [new("fx-market", "/manage fx-market")]),
         new(CentralBank,
         [
@@ -136,7 +144,10 @@ internal static class ManagementPanelCatalog
             new("intervention", Pending),
         ]),
         new(DepositInsurance, [new("insurance-scheme", Pending)]),
-        new(PrudentialResolution, [new("prudential-policy", Pending)]),
+        new(PrudentialResolution,
+        [
+            new("prudential-policy", Pending, PrudentialPolicyEditor),
+        ]),
         new(Presentation, [new("presentation-profile", Pending)]),
         new(Audit, [new("reconcile", "/system reconcile")]),
     ];

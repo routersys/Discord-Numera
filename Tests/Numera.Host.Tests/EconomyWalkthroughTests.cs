@@ -320,6 +320,148 @@ public sealed class EconomyWalkthroughTests
     }
 
     [TestMethod]
+    public async Task TheManagementPanelPublishesThePrudentialAndTrustPolicies()
+    {
+        await using Walkthrough walk = Walkthrough.Create();
+        CancellationToken token = TestContext.CancellationTokenSource.Token;
+
+        ManagePanelEndpoints panel = walk.Endpoint<ManagePanelEndpoints>();
+
+        string trust = await PanelSessionAsync(
+            walk, panel, "currency-trust", "trust-policy", token);
+
+        DiscordEndpointResponse trustReview = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await panel.SubmitTrustPolicyAsync(
+                walk.Context(
+                    Operator, AuthorizationLevel.GuildOperator, "panel-trust-policy", trust),
+                new PanelTrustPolicyForm
+                {
+                    Established = "604800,3,2",
+                    Trusted = "2592000,10,5",
+                    Reserve = "7776000,30,12",
+                },
+                token));
+
+        Assert.AreEqual("なし", trustReview.ViewData["current"]);
+
+        Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await panel.CommitEditorAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-commit"),
+                new DiscordComponentInput("panel-commit", Walkthrough.TokenOf(trustReview)),
+                token));
+
+        Assert.AreEqual(
+            1L,
+            walk.Scalar(
+                "SELECT COUNT(*) FROM currency_trust_policy_versions WHERE status = 'PUBLISHED';"));
+
+        string prudential = await PanelSessionAsync(
+            walk, panel, "prudential-resolution", "prudential-policy", token);
+
+        DiscordEndpointResponse prudentialReview = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await panel.SubmitPrudentialPolicyAsync(
+                walk.Context(
+                    Operator, AuthorizationLevel.GuildOperator, "panel-prudential-policy", prudential),
+                new PanelPrudentialPolicyForm
+                {
+                    Cet1 = "500,800",
+                    Leverage = "350,400",
+                    Liquidity = "10500",
+                    MinimumCapital = "2000000",
+                },
+                token));
+
+        StringAssert.Contains(prudentialReview.ViewData["after"], "10500");
+
+        Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await panel.CommitEditorAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-commit"),
+                new DiscordComponentInput("panel-commit", Walkthrough.TokenOf(prudentialReview)),
+                token));
+
+        Assert.AreEqual(
+            10500L,
+            walk.Scalar(
+                """
+                SELECT minimum_liquidity_bps FROM prudential_policy_versions
+                WHERE status = 'PUBLISHED' ORDER BY version DESC LIMIT 1;
+                """));
+    }
+
+    [TestMethod]
+    public async Task TheManagementPanelRejectsAnUnknownPaymentNetwork()
+    {
+        await using Walkthrough walk = Walkthrough.Create();
+        CancellationToken token = TestContext.CancellationTokenSource.Token;
+
+        ManagePanelEndpoints panel = walk.Endpoint<ManagePanelEndpoints>();
+
+        string session = await PanelSessionAsync(
+            walk, panel, "payment-network", "network-state", token);
+
+        DiscordEndpointResponse review = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await panel.SubmitNetworkStateAsync(
+                walk.Context(
+                    Operator, AuthorizationLevel.GuildOperator, "panel-network-state", session),
+                new PanelNetworkStateForm { NetworkCode = "MISSING", DesiredState = "SUSPENDED" },
+                token));
+
+        Assert.AreEqual("なし", review.ViewData["current"]);
+
+        DiscordEndpointResponse commit = await panel.CommitEditorAsync(
+            walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-commit"),
+            new DiscordComponentInput("panel-commit", Walkthrough.TokenOf(review)),
+            token);
+
+        Assert.AreEqual(DiscordResponseKind.Failure, commit.Kind);
+    }
+
+    private async Task<string> PanelSessionAsync(
+        Walkthrough walk,
+        ManagePanelEndpoints panel,
+        string category,
+        string action,
+        CancellationToken token)
+    {
+        DiscordEndpointResponse opened = Walkthrough.Deliver(
+            DiscordInteractionKind.SlashCommand,
+            await panel.ShowAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "/manage panel"), token));
+
+        string session = Walkthrough.SelectTokenOf(opened);
+
+        Walkthrough.Deliver(
+            DiscordInteractionKind.SelectMenu,
+            await panel.SelectCategoryAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-category"),
+                new DiscordComponentInput("panel-category", session, [category]),
+                token));
+
+        DiscordEndpointResponse editor = Walkthrough.Deliver(
+            DiscordInteractionKind.SelectMenu,
+            await panel.SelectActionAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-action"),
+                new DiscordComponentInput("panel-action", session, [action]),
+                token));
+
+        Assert.AreEqual(ViewKeys.ManagePanelEditor, editor.ViewKey);
+
+        DiscordEndpointResponse modal = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await panel.OpenEditorAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "panel-edit"),
+                new DiscordComponentInput("panel-edit", session),
+                token));
+
+        return Walkthrough.ModalTokenOf(modal);
+    }
+
+    [TestMethod]
     public async Task TheCanonicalRouteCarriesAFreshEconomyToAFundedDepositAccount()
     {
         await using Walkthrough walk = Walkthrough.Create();
