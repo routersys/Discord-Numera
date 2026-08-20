@@ -12,7 +12,7 @@ using Numera.Domain.Common;
 namespace Numera.Discord.Endpoints;
 
 [EconomyCommandGroup("fx", "外国為替市場を操作します。")]
-public sealed class FxEndpoints : IEconomyEndpoint
+public sealed partial class FxEndpoints : IEconomyEndpoint
 {
     private const int MinuteBucket = 60;
     private const int FiveMinuteBucket = 300;
@@ -186,92 +186,13 @@ public sealed class FxEndpoints : IEconomyEndpoint
             return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
-        FxChartPeriod window = FxChartPeriod.Resolve(period);
-
-        Result<FxChartVisualView> result = await markets
-            .GetFxChartVisualAsync(
-                new GetFxChartVisualQuery(id, window.BucketSeconds, window.WindowSeconds),
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        if (!result.IsSuccess)
-        {
-            return EndpointFailures.From(result.Error!);
-        }
-
-        if (result.Value.Buckets.Count == 0)
-        {
-            return DiscordEndpointResponse.Message(
-                ViewKeys.FxChartEmpty, new Dictionary<string, string>(StringComparer.Ordinal));
-        }
-
-        FxChartVisualView view = result.Value;
-
-        Dictionary<string, string> data = new(StringComparer.Ordinal)
-        {
-            ["pair"] = view.PairCode,
-            ["period"] = window.Token,
-            ["count"] = view.Buckets.Count.ToString(CultureInfo.InvariantCulture),
-            ["change"] = FxChartScale.FormatChange(
-                view.Buckets[0].OpenPriceUnits, view.Buckets[^1].ClosePriceUnits),
-        };
-
-        FxChartImage? image = charts.TryRender(new FxChartRenderModel(
-            view.PairCode,
-            window.Token,
-            window.BucketSeconds,
-            view.Buckets,
-            view.PriceScale,
-            ChartMetrics(view),
+        FxChartState state = new(
+            id,
+            FxChartPeriod.Resolve(period),
             style == StyleCandle ? FxChartSeriesStyle.Candle : FxChartSeriesStyle.Line,
-            FxChartTheme.Light));
+            FxChartTheme.Light);
 
-        return image is { } rendered
-            ? DiscordEndpointResponse.Message(
-                ViewKeys.FxChart,
-                data,
-                DiscordResponseBody.WithAttachment(
-                    new DiscordResponseAttachment(rendered.FileName, rendered.Content)))
-            : DiscordEndpointResponse.Message(ViewKeys.FxChart, data);
-    }
-
-    private IReadOnlyList<FxChartMetric> ChartMetrics(FxChartVisualView view)
-    {
-        long high = view.Buckets[0].HighPriceUnits;
-        long low = view.Buckets[0].LowPriceUnits;
-        long volume = 0L;
-
-        foreach (FxOhlcBucket bucket in view.Buckets)
-        {
-            high = Math.Max(high, bucket.HighPriceUnits);
-            low = Math.Min(low, bucket.LowPriceUnits);
-            volume = checked(volume + bucket.BaseVolumeMinor);
-        }
-
-        long open = view.Buckets[0].OpenPriceUnits;
-        long close = view.Buckets[^1].ClosePriceUnits;
-
-        return
-        [
-            new FxChartMetric(
-                catalog.Resolve(ViewKeys.FxChartStart),
-                FxChartScale.FormatPrice(open, view.PriceScale)),
-            new FxChartMetric(
-                catalog.Resolve(ViewKeys.FxChartEnd),
-                FxChartScale.FormatPrice(close, view.PriceScale)),
-            new FxChartMetric(
-                catalog.Resolve(ViewKeys.FxChartHigh),
-                FxChartScale.FormatPrice(high, view.PriceScale)),
-            new FxChartMetric(
-                catalog.Resolve(ViewKeys.FxChartLow),
-                FxChartScale.FormatPrice(low, view.PriceScale)),
-            new FxChartMetric(
-                catalog.Resolve(ViewKeys.FxChartChange),
-                FxChartScale.FormatChange(open, close)),
-            new FxChartMetric(
-                catalog.Resolve(ViewKeys.FxChartVolume),
-                FxChartScale.FormatAmount(volume, view.BaseMinorUnitDigits)),
-        ];
+        return await RenderChartAsync(state, update: false, cancellationToken).ConfigureAwait(false);
     }
 
     [EconomySlashCommand("orders", "自分の為替注文を一覧します。")]

@@ -58,6 +58,19 @@ internal sealed class RecordingResponseSink : IDiscordResponseSink
         return Task.CompletedTask;
     }
 
+    public Task UpdateWithAttachmentAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        DiscordResponseAttachment attachment,
+        CancellationToken cancellationToken)
+    {
+        Calls.Add(nameof(UpdateWithAttachmentAsync));
+        Embeds.Add(embed);
+        Components.Add(components);
+        Attachments.Add(attachment);
+        return Task.CompletedTask;
+    }
+
     public Task UpdateAsync(
         DiscordEmbedPayload embed,
         DiscordComponentPayload components,

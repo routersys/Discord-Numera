@@ -72,15 +72,46 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
         CancellationToken cancellationToken) =>
         interaction is IComponentInteraction component
             ? component.UpdateAsync(
-                properties => Apply(properties, embed, components), Options(cancellationToken))
+                properties => Apply(properties, embed, components, []), Options(cancellationToken))
             : throw new InvalidOperationException(SinkFailure.ComponentInteractionRequired);
+
+    public async Task UpdateWithAttachmentAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        DiscordResponseAttachment attachment,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+
+        if (interaction is not IComponentInteraction component)
+        {
+            throw new InvalidOperationException(SinkFailure.ComponentInteractionRequired);
+        }
+
+        using MemoryStream content = new(attachment.Content, writable: false);
+
+        FileAttachment file = new(content, attachment.FileName);
+
+        try
+        {
+            await component
+                .UpdateAsync(
+                    properties => Apply(properties, embed, components, [file]),
+                    Options(cancellationToken))
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            file.Dispose();
+        }
+    }
 
     public Task ModifyOriginalResponseAsync(
         DiscordEmbedPayload embed,
         DiscordComponentPayload components,
         CancellationToken cancellationToken) =>
         interaction.ModifyOriginalResponseAsync(
-            properties => Apply(properties, embed, components), Options(cancellationToken));
+            properties => Apply(properties, embed, components, []), Options(cancellationToken));
 
     public Task RespondWithModalAsync(DiscordModalPayload modal, CancellationToken cancellationToken) =>
         interaction.RespondWithModalAsync(BuildModal(modal), Options(cancellationToken));
@@ -219,11 +250,13 @@ internal sealed class SocketResponseSink : IDiscordResponseSink
     private static void Apply(
         MessageProperties properties,
         DiscordEmbedPayload payload,
-        DiscordComponentPayload components)
+        DiscordComponentPayload components,
+        IReadOnlyList<FileAttachment> attachments)
     {
         properties.Embed = BuildEmbed(payload);
         properties.Components = BuildComponents(components);
         properties.AllowedMentions = DiscordClientConfiguration.CanonicalAllowedMentions;
+        properties.Attachments = new List<FileAttachment>(attachments);
     }
 
     private static RequestOptions Options(CancellationToken cancellationToken) =>

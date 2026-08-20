@@ -128,6 +128,24 @@ internal static class ViewKeys
     public const string FxChartChange = "view.fx.chart.change";
 
     public const string FxChartVolume = "view.fx.chart.volume";
+
+    public const string FxChartPeriodPlaceholder = "view.fx.chart.period_placeholder";
+
+    public const string FxChartPeriodHour = "view.fx.chart.period_hour";
+
+    public const string FxChartPeriodDay = "view.fx.chart.period_day";
+
+    public const string FxChartPeriodWeek = "view.fx.chart.period_week";
+
+    public const string FxChartPeriodMonth = "view.fx.chart.period_month";
+
+    public const string FxChartToLine = "view.fx.chart.to_line";
+
+    public const string FxChartToCandle = "view.fx.chart.to_candle";
+
+    public const string FxChartToLight = "view.fx.chart.to_light";
+
+    public const string FxChartToDark = "view.fx.chart.to_dark";
     public const string FxOrders = "view.fx.orders";
     public const string FxOrdersEmpty = "view.fx.orders_empty";
     public const string FxHistory = "view.fx.history";
@@ -522,8 +540,17 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.FxChartLow] = "安値",
             [ViewKeys.FxChartChange] = "変化率",
             [ViewKeys.FxChartVolume] = "出来高",
+            [ViewKeys.FxChartPeriodPlaceholder] = "期間を選びます",
+            [ViewKeys.FxChartPeriodHour] = "1時間",
+            [ViewKeys.FxChartPeriodDay] = "24時間",
+            [ViewKeys.FxChartPeriodWeek] = "7日",
+            [ViewKeys.FxChartPeriodMonth] = "30日",
+            [ViewKeys.FxChartToLine] = "折れ線",
+            [ViewKeys.FxChartToCandle] = "ローソク足",
+            [ViewKeys.FxChartToLight] = "ライト",
+            [ViewKeys.FxChartToDark] = "ダーク",
             [ViewKeys.FxChartEmpty + ".title"] = "チャートがありません",
-            [ViewKeys.FxChartEmpty + ".description"] = "この市場にはまだ約定がありません。",
+            [ViewKeys.FxChartEmpty + ".description"] = "{pair}の{period}には完了した足がありません。期間を変えてください。",
             [ViewKeys.FxOrders + ".title"] = "為替注文の一覧",
             [ViewKeys.FxOrders + ".description"] = "{count}件の注文があります。{items}",
             [ViewKeys.FxOrdersEmpty + ".title"] = "注文がありません",

@@ -249,6 +249,160 @@ public sealed class FxChartEndpointTests
     }
 
     [TestMethod]
+    public async Task AnEmptyChartStillOffersThePeriodControlsSoTheReaderCanEscape()
+    {
+        (FxEndpoints endpoints, _) = Build([]);
+
+        DiscordEndpointResponse response = await endpoints.ChartAsync(
+            Context(), MarketReference, "1H", null, CancellationToken.None);
+
+        Assert.IsNotNull(response.Body.Components.Select);
+        Assert.AreEqual(2, response.Body.Components.Buttons.Count);
+    }
+
+    [TestMethod]
+    public async Task TheChartCarriesThePeriodSelectAndBothToggles()
+    {
+        (FxEndpoints endpoints, _) = Build(Flat(2, 150));
+
+        DiscordEndpointResponse response = await endpoints.ChartAsync(
+            Context(), MarketReference, "24H", "CANDLE", CancellationToken.None);
+
+        DiscordResponseSelect select = response.Body.Components.Select!;
+
+        Assert.IsNotNull(select);
+        Assert.AreEqual(4, select.Options.Count);
+
+        CollectionAssert.AreEqual(
+            new[] { "1H", "24H", "7D", "30D" },
+            select.Options.Select(static option => option.Value).ToArray());
+
+        Assert.AreEqual(2, response.Body.Components.Buttons.Count);
+
+        foreach (string customId in response.Body.Components.Buttons
+                     .Select(static button => button.CustomId)
+                     .Append(select.CustomId))
+        {
+            Assert.IsLessThanOrEqualTo(100, customId.Length, customId);
+            Assert.DoesNotContain(MarketReference, customId);
+        }
+    }
+
+    [TestMethod]
+    public void TheChartStateSurvivesTheCustomIdRoundTrip()
+    {
+        FxChartState original = new(
+            FxMarketId.FromValue(EntityIdValue.FromBits(0x2CF0)),
+            FxChartPeriod.Week,
+            FxChartSeriesStyle.Candle,
+            FxChartTheme.Dark);
+
+        string token = original.ToToken();
+
+        Assert.AreEqual(FxChartState.TokenLength, token.Length);
+        Assert.IsTrue(token.All(static value => char.IsAsciiLetterOrDigit(value)), token);
+        Assert.IsTrue(FxChartState.TryParse(token, out FxChartState parsed));
+        Assert.AreEqual(original, parsed);
+    }
+
+    [TestMethod]
+    public void AMalformedChartStateIsRejected()
+    {
+        Assert.IsFalse(FxChartState.TryParse(null, out _));
+        Assert.IsFalse(FxChartState.TryParse("short", out _));
+        Assert.IsFalse(FxChartState.TryParse(new string('z', FxChartState.TokenLength), out _));
+    }
+
+    [TestMethod]
+    public async Task TheStyleToggleUpdatesTheMessageWithAFreshImage()
+    {
+        (FxEndpoints endpoints, _) = Build(Flat(2, 150));
+
+        FxChartState state = new(
+            FxMarketId.FromValue(EntityIdValue.FromBits(1)),
+            FxChartPeriod.Day,
+            FxChartSeriesStyle.Line,
+            FxChartTheme.Light);
+
+        DiscordEndpointResponse response = await endpoints.ToggleChartStyleAsync(
+            Context(),
+            new DiscordComponentInput(FxEndpoints.ChartStyleAction, state.ToToken()),
+            CancellationToken.None);
+
+        Assert.AreEqual(DiscordResponseKind.UpdateMessage, response.Kind);
+        Assert.IsNotNull(response.Body.Attachment);
+        CollectionAssert.AreEqual(
+            new byte[] { 0x89, 0x50, 0x4E, 0x47 }, response.Body.Attachment!.Content[..4]);
+
+        Assert.IsTrue(FxChartState.TryParse(
+            response.Body.Components.Buttons[0].CustomId.Split(':')[^1], out FxChartState next));
+
+        Assert.AreEqual(FxChartSeriesStyle.Candle, next.Style);
+    }
+
+    [TestMethod]
+    public async Task TheThemeToggleFlipsOnlyTheTheme()
+    {
+        (FxEndpoints endpoints, _) = Build(Flat(2, 150));
+
+        FxChartState state = new(
+            FxMarketId.FromValue(EntityIdValue.FromBits(1)),
+            FxChartPeriod.Week,
+            FxChartSeriesStyle.Candle,
+            FxChartTheme.Light);
+
+        DiscordEndpointResponse response = await endpoints.ToggleChartThemeAsync(
+            Context(),
+            new DiscordComponentInput(FxEndpoints.ChartThemeAction, state.ToToken()),
+            CancellationToken.None);
+
+        Assert.AreEqual(DiscordResponseKind.UpdateMessage, response.Kind);
+
+        Assert.IsTrue(FxChartState.TryParse(
+            response.Body.Components.Buttons[1].CustomId.Split(':')[^1], out FxChartState next));
+
+        Assert.AreEqual(FxChartTheme.Dark, next.Theme);
+        Assert.AreEqual(FxChartSeriesStyle.Candle, next.Style);
+        Assert.AreEqual(FxChartPeriod.Week, next.Period);
+    }
+
+    [TestMethod]
+    public async Task ThePeriodSelectRequeriesWithTheChosenWindow()
+    {
+        (FxEndpoints endpoints, StubMarkets markets) = Build(Flat(2, 150));
+
+        FxChartState state = new(
+            FxMarketId.FromValue(EntityIdValue.FromBits(1)),
+            FxChartPeriod.Hour,
+            FxChartSeriesStyle.Line,
+            FxChartTheme.Light);
+
+        DiscordEndpointResponse response = await endpoints.SelectChartPeriodAsync(
+            Context(),
+            new DiscordComponentInput(FxEndpoints.ChartPeriodAction, state.ToToken(), ["7D"]),
+            CancellationToken.None);
+
+        Assert.AreEqual(DiscordResponseKind.UpdateMessage, response.Kind);
+        Assert.AreEqual(3600, markets.LastChartQuery!.BucketSeconds);
+        Assert.AreEqual(604_800L, markets.LastChartQuery!.WindowSeconds);
+        Assert.AreEqual("7D", response.ViewData["period"]);
+    }
+
+    [TestMethod]
+    public async Task AToggleOnAMalformedStateFails()
+    {
+        (FxEndpoints endpoints, StubMarkets markets) = Build(Flat(2, 150));
+
+        DiscordEndpointResponse response = await endpoints.ToggleChartThemeAsync(
+            Context(),
+            new DiscordComponentInput(FxEndpoints.ChartThemeAction, "broken"),
+            CancellationToken.None);
+
+        Assert.AreEqual(DiscordResponseKind.Failure, response.Kind);
+        Assert.IsNull(markets.LastChartQuery);
+    }
+
+    [TestMethod]
     public async Task AMalformedMarketReferenceIsRejectedBeforeTheQuery()
     {
         (FxEndpoints endpoints, StubMarkets markets) = Build(Flat(2, 150));

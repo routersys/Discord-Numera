@@ -71,6 +71,12 @@ internal interface IDiscordResponseSink
         DiscordComponentPayload components,
         CancellationToken cancellationToken);
 
+    Task UpdateWithAttachmentAsync(
+        DiscordEmbedPayload embed,
+        DiscordComponentPayload components,
+        DiscordResponseAttachment attachment,
+        CancellationToken cancellationToken);
+
     Task ModifyOriginalResponseAsync(
         DiscordEmbedPayload embed,
         DiscordComponentPayload components,

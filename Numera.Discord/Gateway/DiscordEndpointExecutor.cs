@@ -257,6 +257,9 @@ internal sealed class DiscordEndpointExecutor : IDiscordEndpointExecutor
                     embed, components, attachment, ephemeral, cancellationToken),
             DiscordResponseOperation.Respond =>
                 exchange.Sink.RespondAsync(embed, components, ephemeral, cancellationToken),
+            DiscordResponseOperation.UpdateMessage when attachment is not null =>
+                exchange.Sink.UpdateWithAttachmentAsync(
+                    embed, components, attachment, cancellationToken),
             DiscordResponseOperation.UpdateMessage =>
                 exchange.Sink.UpdateAsync(embed, components, cancellationToken),
             _ => exchange.Sink.ModifyOriginalResponseAsync(embed, components, cancellationToken),
