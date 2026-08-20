@@ -1,3 +1,4 @@
+using Numera.Application.Common;
 using Numera.Discord.Commands;
 using Numera.Discord.Gateway;
 using Numera.Discord.Routing;
@@ -217,6 +218,7 @@ public sealed class BankCreateViewTests
             ["institutionCode"] = "NUM0001",
             ["bankName"] = "ヌメラ銀行",
             ["status"] = Catalog.Resolve(ViewKeys.StatusOf("OPERATING")),
+            ["minimum"] = "1000000",
         };
 
         string rendered = Catalog.Format(ViewKeys.ManageBankCreated + ".description", data);
@@ -262,9 +264,44 @@ public sealed class BankCreateViewTests
         {
             ["institutionCode"] = "NUM0001",
             ["status"] = Catalog.Resolve(ViewKeys.StatusOf("PENDING_ACTIVATION")),
+            ["paidIn"] = "0",
+            ["minimum"] = "1000000",
         };
 
         Assert.DoesNotContain("{", Catalog.Format(ViewKeys.ManageBankCapitalPrompt + ".description", data));
+    }
+
+    [TestMethod]
+    public void TheShortfallViewBindsEveryPlaceholderTheHandlerSupplies()
+    {
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = "NUM0001",
+            ["amount"] = "201000",
+            ["paidIn"] = "201000",
+            ["minimum"] = "1000000",
+        };
+
+        Assert.DoesNotContain(
+            "{", Catalog.Format(ViewKeys.ManageBankCapitalShortfall + ".description", data));
+    }
+
+    [TestMethod]
+    public void TheValidationErrorNamesTheFieldWhenOneIsGiven()
+    {
+        ErrorRenderer renderer = new(Catalog);
+
+        RenderedError named = renderer.Render(
+            ApplicationError.Create(ErrorCategory.Validation, "BANK-VAL-030", "InstitutionCode"),
+            "1");
+
+        RenderedError anonymous = renderer.Render(
+            ApplicationError.Create(ErrorCategory.Validation, "BANK-VAL-030", null),
+            "1");
+
+        StringAssert.Contains(named.Description, "InstitutionCode");
+        Assert.DoesNotContain("{", named.Description);
+        Assert.DoesNotContain("{", anonymous.Description);
     }
 
     [TestMethod]

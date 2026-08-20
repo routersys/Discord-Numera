@@ -111,6 +111,10 @@ public interface IBankAdministrationApplicationService
     Task<Result<BankView>> ActivateBankAsync(
         ActivateBankCommand command,
         CancellationToken cancellationToken);
+
+    Task<Result<BankCapitalView>> GetBankCapitalStatusAsync(
+        GetBankCapitalStatusQuery query,
+        CancellationToken cancellationToken);
 }
 
 public sealed partial class BankAdministrationApplicationService : IBankAdministrationApplicationService
@@ -462,17 +466,45 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
             return Result<BankView>.Failure(authorized.Error!);
         }
 
-        if (!InstitutionCode.TryParse(command.InstitutionCode, out InstitutionCode institutionCode) ||
-            !BankName.TryParse(command.BankName, out BankName bankName) ||
-            !DisplayName.TryParse(command.BankName, out DisplayName partyName) ||
-            !BranchCode.TryParse(command.BranchCode, out BranchCode branchCode) ||
-            !DisplayName.TryParse(command.BranchName, out DisplayName branchName) ||
-            !DisplayName.TryParse(command.ProductName, out DisplayName productName) ||
-            command.MinimumCustomerAccountAgeDays < 0 ||
-            command.MinimumInitialFundingMinor < 0 ||
-            string.IsNullOrEmpty(command.ProductCode))
+        if (!InstitutionCode.TryParse(command.InstitutionCode, out InstitutionCode institutionCode))
         {
-            return Result<BankView>.Failure(ErrorCategory.Validation, BankingErrorCodes.BankIdentityInvalid);
+            return Invalid(nameof(command.InstitutionCode));
+        }
+
+        if (!BankName.TryParse(command.BankName, out BankName bankName) ||
+            !DisplayName.TryParse(command.BankName, out DisplayName partyName))
+        {
+            return Invalid(nameof(command.BankName));
+        }
+
+        if (!BranchCode.TryParse(command.BranchCode, out BranchCode branchCode))
+        {
+            return Invalid(nameof(command.BranchCode));
+        }
+
+        if (!DisplayName.TryParse(command.BranchName, out DisplayName branchName))
+        {
+            return Invalid(nameof(command.BranchName));
+        }
+
+        if (string.IsNullOrEmpty(command.ProductCode))
+        {
+            return Invalid(nameof(command.ProductCode));
+        }
+
+        if (!DisplayName.TryParse(command.ProductName, out DisplayName productName))
+        {
+            return Invalid(nameof(command.ProductName));
+        }
+
+        if (command.MinimumCustomerAccountAgeDays < 0)
+        {
+            return Invalid(nameof(command.MinimumCustomerAccountAgeDays));
+        }
+
+        if (command.MinimumInitialFundingMinor < 0)
+        {
+            return Invalid(nameof(command.MinimumInitialFundingMinor));
         }
 
         if (unitOfWork.BankAdministration.InstitutionCodeExists(institutionCode.Value))
@@ -805,6 +837,9 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
 
         return Result.Success();
     }
+
+    private static Result<BankView> Invalid(string field) =>
+        Result<BankView>.Failure(ErrorCategory.Validation, BankingErrorCodes.BankIdentityInvalid, field);
 
     private static AccountingBookId? ResolveCentralBankBook(
         IBankingUnitOfWork unitOfWork,

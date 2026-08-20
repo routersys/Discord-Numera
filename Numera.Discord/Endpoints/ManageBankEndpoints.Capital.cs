@@ -161,6 +161,33 @@ public sealed partial class ManageBankEndpoints
             return EndpointFailures.From(contributed.Error!);
         }
 
+        Dictionary<string, string> data = new(StringComparer.Ordinal)
+        {
+            ["institutionCode"] = contributed.Value.InstitutionCode,
+            ["amount"] = Minor(contributed.Value.ContributedAmount),
+            ["paidIn"] = Minor(contributed.Value.PaidInCapital),
+            ["minimum"] = Minor(contributed.Value.MinimumInitialCapital),
+        };
+
+        if (contributed.Value.PaidInCapital < contributed.Value.MinimumInitialCapital)
+        {
+            _ = await sessions
+                .CompleteAsync(
+                    Request(context, input.SessionToken, scope, BankCapitalFlow.ReviewState, 1L),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return await OpenCapitalStageAsync(
+                    context,
+                    scope,
+                    payload.InstitutionCode,
+                    ViewKeys.ManageBankCapitalShortfall,
+                    data,
+                    replacesOriginalMessage: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         Result<InteractionSessionSnapshot> advanced = await sessions
             .AdvanceAsync(
                 Request(context, input.SessionToken, scope, BankCapitalFlow.ReviewState, 1L),
@@ -176,13 +203,7 @@ public sealed partial class ManageBankEndpoints
 
         return DiscordEndpointResponse.UpdateMessage(
             ViewKeys.ManageBankCapitalContributed,
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["institutionCode"] = contributed.Value.InstitutionCode,
-                ["amount"] = Minor(contributed.Value.ContributedAmount),
-                ["paidIn"] = Minor(contributed.Value.PaidInCapital),
-                ["minimum"] = Minor(contributed.Value.MinimumInitialCapital),
-            },
+            data,
             DiscordResponseBody.WithComponents(new DiscordResponseComponents(
                 null,
                 [

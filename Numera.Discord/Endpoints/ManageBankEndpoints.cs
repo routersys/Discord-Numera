@@ -61,22 +61,40 @@ public sealed partial class ManageBankEndpoints : IEconomyEndpoint
 
         if (existing.IsSuccess)
         {
-            return existing.Value.Status == BankStatus.PendingActivation
-                ? await OpenCapitalStageAsync(
-                        context,
-                        scope,
-                        institutionCode,
-                        ViewKeys.ManageBankCapitalPrompt,
-                        new Dictionary<string, string>(StringComparer.Ordinal)
-                        {
-                            ["institutionCode"] = institutionCode,
-                            ["status"] = catalog.Resolve(
-                                ViewKeys.StatusOf(existing.Value.Status.ToToken())),
-                        },
-                        replacesOriginalMessage: false,
-                        cancellationToken)
-                    .ConfigureAwait(false)
-                : EndpointFailures.From(ErrorCategory.Conflict, BankingErrorCodes.BankAlreadyExists);
+            if (existing.Value.Status != BankStatus.PendingActivation)
+            {
+                return EndpointFailures.From(
+                    ErrorCategory.Conflict, BankingErrorCodes.BankAlreadyExists);
+            }
+
+            Result<BankCapitalView> capital = await banks
+                .GetBankCapitalStatusAsync(
+                    new GetBankCapitalStatusQuery(
+                        EndpointAuthorization.ToActor(context), institutionCode),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!capital.IsSuccess)
+            {
+                return EndpointFailures.From(capital.Error!);
+            }
+
+            return await OpenCapitalStageAsync(
+                    context,
+                    scope,
+                    institutionCode,
+                    ViewKeys.ManageBankCapitalPrompt,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["institutionCode"] = institutionCode,
+                        ["status"] = catalog.Resolve(
+                            ViewKeys.StatusOf(existing.Value.Status.ToToken())),
+                        ["paidIn"] = Minor(capital.Value.PaidInCapital),
+                        ["minimum"] = Minor(capital.Value.MinimumInitialCapital),
+                    },
+                    replacesOriginalMessage: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         Result<BankDraftView> result = await banks

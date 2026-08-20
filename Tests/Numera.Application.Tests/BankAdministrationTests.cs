@@ -812,6 +812,50 @@ public sealed class BankAdministrationTests
     }
 
     [TestMethod]
+    public async Task EachRejectedIdentityFieldIsNamed()
+    {
+        await using Harness harness = Harness.Create();
+
+        (CommitCreateBankCommand Command, string Field)[] cases =
+        [
+            (harness.CreateCommand(institutionCode: "ab"), "InstitutionCode"),
+            (harness.CreateCommand() with { BankName = string.Empty }, "BankName"),
+            (harness.CreateCommand() with { BranchCode = string.Empty }, "BranchCode"),
+            (harness.CreateCommand() with { BranchName = string.Empty }, "BranchName"),
+            (harness.CreateCommand() with { ProductCode = string.Empty }, "ProductCode"),
+            (harness.CreateCommand() with { ProductName = string.Empty }, "ProductName"),
+            (harness.CreateCommand(minimumCustomerAccountAgeDays: -1), "MinimumCustomerAccountAgeDays"),
+            (harness.CreateCommand(minimumInitialFunding: -1), "MinimumInitialFundingMinor"),
+        ];
+
+        foreach ((CommitCreateBankCommand command, string field) in cases)
+        {
+            Result<BankView> created = await harness.CreateBankAsync(command);
+
+            Assert.IsFalse(created.IsSuccess, field);
+            Assert.AreEqual(BankingErrorCodes.BankIdentityInvalid, created.Error!.Code, field);
+            Assert.AreEqual(field, created.Error.Field, field);
+        }
+
+        Assert.AreEqual(0L, harness.Count("banks"));
+    }
+
+    [TestMethod]
+    public async Task TheCapitalStatusQueryReportsTheTargetBeforeAnyContribution()
+    {
+        await using Harness harness = Harness.Create();
+        await harness.CreateBankAsync(harness.CreateCommand());
+
+        Result<BankCapitalView> status = await harness.Administration.GetBankCapitalStatusAsync(
+            new GetBankCapitalStatusQuery(harness.Actor, Institution), CancellationToken.None);
+
+        Assert.IsTrue(status.IsSuccess, status.Error?.Code);
+        Assert.AreEqual(0L, status.Value.PaidInCapital.Value);
+        Assert.AreEqual(100_000L, status.Value.MinimumInitialCapital.Value);
+        Assert.AreEqual(BankStatus.PendingActivation, status.Value.Status);
+    }
+
+    [TestMethod]
     public async Task TheCentralBankBookIsResolvedFromTheCurrencyWhenItIsNotGiven()
     {
         await using Harness harness = Harness.Create();

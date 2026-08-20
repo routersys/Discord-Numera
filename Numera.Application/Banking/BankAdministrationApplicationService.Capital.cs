@@ -20,6 +20,10 @@ public sealed record ActivateBankCommand(
     string InstitutionCode,
     string IdempotencyToken);
 
+public sealed record GetBankCapitalStatusQuery(
+    AuthorizationContext Actor,
+    string InstitutionCode);
+
 public sealed record BankCapitalView(
     BankId BankId,
     string InstitutionCode,
@@ -60,6 +64,56 @@ public sealed partial class BankAdministrationApplicationService
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(unitOfWork => Activate(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<BankCapitalView>> GetBankCapitalStatusAsync(
+        GetBankCapitalStatusQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => DescribeCapital(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<BankCapitalView> DescribeCapital(
+        IBankingUnitOfWork unitOfWork,
+        GetBankCapitalStatusQuery query)
+    {
+        Result<Bank> resolved = ResolveManagedBank(unitOfWork, query.Actor, query.InstitutionCode);
+
+        if (!resolved.IsSuccess)
+        {
+            return Result<BankCapitalView>.Failure(resolved.Error!);
+        }
+
+        Bank bank = resolved.Value;
+
+        if (unitOfWork.BankAdministration.FindPublishedPrudentialPolicy(bank.EconomyScopeId)
+            is not { } policy)
+        {
+            return Result<BankCapitalView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.PrudentialPolicyUnavailable);
+        }
+
+        if (unitOfWork.BankAdministration.FindActiveCurrency(bank.EconomyScopeId) is not { } currencyId)
+        {
+            return Result<BankCapitalView>.Failure(
+                ErrorCategory.BankUnavailable, BankingErrorCodes.CurrencyUnavailable);
+        }
+
+        MoneyMinor paidIn = unitOfWork.LedgerAccounts.FindPostingByKind(
+            bank.GeneralLedgerBookId, LedgerAccountKind.PaidInCapital, currencyId) is { } account
+            ? Posted(unitOfWork, account.Id)
+            : MoneyMinor.Zero;
+
+        return Result<BankCapitalView>.Success(new BankCapitalView(
+            bank.Id,
+            bank.InstitutionCode.Value,
+            MoneyMinor.Zero,
+            paidIn,
+            policy.MinimumInitialBankCapital,
+            bank.Status));
     }
 
     private Result<BankCapitalView> ContributeCapital(

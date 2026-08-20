@@ -18,6 +18,7 @@ public sealed class CommandApiClosureTests
     [
         "IBankAdministrationApplicationService.ActivateBankAsync",
         "IBankAdministrationApplicationService.ContributeBankCapitalAsync",
+        "IBankAdministrationApplicationService.GetBankCapitalStatusAsync",
     ];
 
     private static readonly string[] EntriesWithoutCanonicalUseCase =

@@ -48,6 +48,11 @@ public sealed class ErrorRenderer
         _ => TextCatalogKeys.ErrorUnexpectedDescription,
     };
 
+    public static string DescriptionKeyFor(ErrorCategory category, string? field) =>
+        category == ErrorCategory.Validation && !string.IsNullOrEmpty(field)
+            ? TextCatalogKeys.ErrorValidationDescriptionWithField
+            : DescriptionKeyFor(category);
+
     public static string FooterKeyFor(ErrorCategory category) =>
         category is ErrorCategory.Unexpected or ErrorCategory.InfrastructureUnavailable
             ? TextCatalogKeys.ErrorFooterWithCode
@@ -67,7 +72,7 @@ public sealed class ErrorRenderer
 
         return new RenderedError(
             catalog.Format(TitleKeyFor(error.Category), arguments),
-            catalog.Format(DescriptionKeyFor(error.Category), arguments),
+            catalog.Format(DescriptionKeyFor(error.Category, error.Field), arguments),
             catalog.Format(FooterKeyFor(error.Category), arguments),
             errorColor,
             Ephemeral: true);

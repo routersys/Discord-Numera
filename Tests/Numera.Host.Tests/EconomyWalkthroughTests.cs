@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Numera.Discord.Abstractions;
 using Numera.Discord.Commands;
 using Numera.Discord.Endpoints;
+using Numera.Discord.Rendering;
 using Numera.Host.Configuration;
 using Numera.Persistence.Sqlite;
 using Numera.Persistence.Sqlite.Migrations;
@@ -284,17 +285,52 @@ public sealed class EconomyWalkthroughTests
                 Walkthrough.ModalTokenOf(capitalModal)),
             new BankCapitalForm
             {
-                Amount = MinimumCapital.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Amount = (MinimumCapital / 2).ToString(System.Globalization.CultureInfo.InvariantCulture),
                 SourceInstitutionCode = string.Empty,
             },
             token));
 
-        DiscordEndpointResponse contributed = Walkthrough.Deliver(
+        DiscordEndpointResponse shortfall = Walkthrough.Deliver(
             DiscordInteractionKind.Button,
             await manageBank.CommitBankCapitalAsync(
             walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-capital-commit"),
             new DiscordComponentInput("bank-capital-commit", Walkthrough.TokenOf(capitalReview)),
             token));
+
+        Assert.AreEqual(ViewKeys.ManageBankCapitalShortfall, shortfall.ViewKey);
+        Assert.AreEqual("PENDING_ACTIVATION", walk.Text("SELECT status FROM banks;"));
+
+        DiscordEndpointResponse remainderModal = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await manageBank.OpenBankCapitalInputAsync(
+                walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-capital-input"),
+                new DiscordComponentInput("bank-capital-input", Walkthrough.TokenOf(shortfall)),
+                token));
+
+        DiscordEndpointResponse remainderReview = Walkthrough.Deliver(
+            DiscordInteractionKind.ModalSubmit,
+            await manageBank.SubmitBankCapitalAsync(
+                walk.Context(
+                    Operator,
+                    AuthorizationLevel.GuildOperator,
+                    "bank-capital",
+                    Walkthrough.ModalTokenOf(remainderModal)),
+                new BankCapitalForm
+                {
+                    Amount = (MinimumCapital / 2).ToString(
+                        System.Globalization.CultureInfo.InvariantCulture),
+                    SourceInstitutionCode = string.Empty,
+                },
+                token));
+
+        DiscordEndpointResponse contributed = Walkthrough.Deliver(
+            DiscordInteractionKind.Button,
+            await manageBank.CommitBankCapitalAsync(
+            walk.Context(Operator, AuthorizationLevel.GuildOperator, "bank-capital-commit"),
+            new DiscordComponentInput("bank-capital-commit", Walkthrough.TokenOf(remainderReview)),
+            token));
+
+        Assert.AreEqual(ViewKeys.ManageBankCapitalContributed, contributed.ViewKey);
 
         DiscordEndpointResponse activated = Walkthrough.Deliver(
             DiscordInteractionKind.Button,

@@ -30,6 +30,7 @@ internal static class ViewKeys
     public const string ManageBankCapitalCommitLabel = "view.manage.bank_capital.commit_label";
     public const string ManageBankActivateLabel = "view.manage.bank_capital.activate_label";
     public const string ManageBankCapitalIssuerLabel = "view.manage.bank_capital.issuer_label";
+    public const string ManageBankCapitalShortfall = "view.manage.bank_capital.shortfall";
     public const string BankDetail = "view.bank.detail";
     public const string BankDetailPlaceholder = "label.bank.detail_select";
     public const string BankLoanModal = "view.bank.loan_modal";
@@ -187,7 +188,8 @@ public static partial class CanonicalTextCatalog
                 + "登録状況は /account status で確認できます。",
             [ViewKeys.ManageBankCreated + ".title"] = "銀行を設立しました",
             [ViewKeys.ManageBankCreated + ".description"] =
-                "{institutionCode} を {status} で作成しました。名称は {bankName} です。",
+                "{institutionCode} を {status} で作成しました。名称は {bankName} です。"
+                + "営業開始には {minimum} 以上の払込資本が要ります。",
             [ViewKeys.ManageCurrencyCreated + ".title"] = "通貨を発行しました",
             [ViewKeys.ManageCurrencyCreated + ".description"] =
                 "通貨 {code} を作成しました。発行済のベースマネーは {baseMoneySupply} です。",
@@ -218,7 +220,8 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.FieldValue(ViewKeys.ManageBankCreateReview, ViewKeys.FieldOpeningPolicy)] = "受付する",
             [ViewKeys.ManageBankCapitalPrompt + ".title"] = "資本の払込",
             [ViewKeys.ManageBankCapitalPrompt + ".description"] =
-                "{institutionCode} は {status} です。営業を開始するには資本を払い込んでください。",
+                "{institutionCode} は {status} です。営業開始には {minimum} 以上の払込資本が要ります。"
+                + "現在の払込資本は {paidIn} です。",
             [ViewKeys.ManageBankCapitalModal + ".title"] = "資本払込の入力",
             [ViewKeys.ManageBankCapitalModal + ".description"] =
                 "払込額を最小単位で入力します。払込元を空欄にすると中央銀行が払い込みます。",
@@ -257,6 +260,10 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.FieldValue(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldCapitalAmount)] = "{amount}",
             [ViewKeys.FieldLabel(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldCapitalSource)] = "払込元",
             [ViewKeys.FieldValue(ViewKeys.ManageBankCapitalReview, ViewKeys.FieldCapitalSource)] = "{source}",
+            [ViewKeys.ManageBankCapitalShortfall + ".title"] = "払込資本が不足しています",
+            [ViewKeys.ManageBankCapitalShortfall + ".description"] =
+                "{institutionCode} へ {amount} を払い込みました。払込資本は {paidIn} で最低額は {minimum} です。"
+                + "不足分を払い込むと営業を開始できます。",
             [ViewKeys.ManageBankCapitalContributed + ".title"] = "資本を払い込みました",
             [ViewKeys.ManageBankCapitalContributed + ".description"] =
                 "{institutionCode} へ {amount} を払い込みました。払込資本は {paidIn} で最低額は {minimum} です。",

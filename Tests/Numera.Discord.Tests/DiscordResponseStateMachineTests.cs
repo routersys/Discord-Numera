@@ -264,10 +264,20 @@ public sealed class ErrorRendererTests
             "OP-1");
 
         Assert.AreEqual("入力内容を確認してください", rendered.Title);
-        Assert.AreEqual("入力内容に問題があります。表示された項目を修正してください。", rendered.Description);
+        Assert.AreEqual("入力内容に問題があります。項目 public_handle を修正してください。", rendered.Description);
         Assert.AreEqual("操作ID: OP-1", rendered.Footer);
         Assert.AreEqual(ErrorRenderer.CanonicalErrorColor, rendered.Color);
         Assert.IsTrue(rendered.Ephemeral);
+    }
+
+    [TestMethod]
+    public void ValidationErrorWithoutAFieldKeepsTheGenericText()
+    {
+        RenderedError rendered = Renderer().Render(
+            ApplicationError.Create(ErrorCategory.Validation, BankingErrorCodes.HandleFormatInvalid, null),
+            "OP-1");
+
+        Assert.AreEqual("入力内容に問題があります。表示された項目を修正してください。", rendered.Description);
     }
 
     [TestMethod]

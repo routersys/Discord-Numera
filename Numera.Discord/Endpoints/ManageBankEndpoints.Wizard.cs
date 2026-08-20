@@ -179,6 +179,18 @@ public sealed partial class ManageBankEndpoints
                 cancellationToken)
             .ConfigureAwait(false);
 
+        Result<BankCapitalView> minimum = await banks
+            .GetBankCapitalStatusAsync(
+                new GetBankCapitalStatusQuery(
+                    EndpointAuthorization.ToActor(context), result.Value.InstitutionCode),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!minimum.IsSuccess)
+        {
+            return EndpointFailures.From(minimum.Error!);
+        }
+
         return await OpenCapitalStageAsync(
                 context,
                 scope,
@@ -189,6 +201,7 @@ public sealed partial class ManageBankEndpoints
                     ["institutionCode"] = result.Value.InstitutionCode,
                     ["bankName"] = result.Value.Name,
                     ["status"] = catalog.Resolve(ViewKeys.StatusOf(result.Value.Status.ToToken())),
+                    ["minimum"] = Minor(minimum.Value.MinimumInitialCapital),
                 },
                 replacesOriginalMessage: true,
                 cancellationToken)

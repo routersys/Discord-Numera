@@ -116,6 +116,7 @@ public static class TextCatalogKeys
 {
     public const string ErrorValidationTitle = "error.validation.title";
     public const string ErrorValidationDescription = "error.validation.description";
+    public const string ErrorValidationDescriptionWithField = "error.validation.description_with_field";
     public const string ErrorNotFoundTitle = "error.not_found.title";
     public const string ErrorNotFoundDescription = "error.not_found.description";
     public const string ErrorForbiddenTitle = "error.forbidden.title";
@@ -149,6 +150,8 @@ public static partial class CanonicalTextCatalog
         {
             [TextCatalogKeys.ErrorValidationTitle] = "入力内容を確認してください",
             [TextCatalogKeys.ErrorValidationDescription] = "入力内容に問題があります。表示された項目を修正してください。",
+            [TextCatalogKeys.ErrorValidationDescriptionWithField] =
+                "入力内容に問題があります。項目 {field} を修正してください。",
             [TextCatalogKeys.ErrorNotFoundTitle] = "対象が見つかりません",
             [TextCatalogKeys.ErrorNotFoundDescription] = "指定した情報を確認し、もう一度操作してください。",
             [TextCatalogKeys.ErrorForbiddenTitle] = "この操作は実行できません",
