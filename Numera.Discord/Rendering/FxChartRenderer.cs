@@ -398,7 +398,7 @@ internal sealed class FxChartRenderer : IFxChartRenderer
         }
 
         float slot = FxChartCanvas.PlotWidth / (float)candles.Count;
-        float body = Math.Max(2f, Math.Min(slot * 0.7f, FxChartCanvas.MaximumBodyWidth));
+        float body = Math.Max(2f, Math.Min(slot * 0.55f, FxChartCanvas.MaximumBodyWidth));
 
         foreach ((FxOhlcBucket candle, int index) in candles.Select(static (item, i) => (item, i)))
         {
