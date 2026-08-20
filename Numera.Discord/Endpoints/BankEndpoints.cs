@@ -17,6 +17,7 @@ public sealed partial class BankEndpoints : IEconomyEndpoint
     private readonly IPaymentApplicationService payments;
     private readonly ICustomerAccountApplicationService customers;
     private readonly IBankQueryApplicationService queries;
+    private readonly ISuggestionApplicationService suggestions;
     private readonly InteractionSessionService sessions;
 
     public BankEndpoints(
@@ -24,18 +25,21 @@ public sealed partial class BankEndpoints : IEconomyEndpoint
         IPaymentApplicationService payments,
         ICustomerAccountApplicationService customers,
         IBankQueryApplicationService queries,
+        ISuggestionApplicationService suggestions,
         InteractionSessionService sessions)
     {
         ArgumentNullException.ThrowIfNull(accounts);
         ArgumentNullException.ThrowIfNull(payments);
         ArgumentNullException.ThrowIfNull(customers);
         ArgumentNullException.ThrowIfNull(queries);
+        ArgumentNullException.ThrowIfNull(suggestions);
         ArgumentNullException.ThrowIfNull(sessions);
 
         this.accounts = accounts;
         this.payments = payments;
         this.customers = customers;
         this.queries = queries;
+        this.suggestions = suggestions;
         this.sessions = sessions;
     }
 
@@ -112,7 +116,18 @@ public sealed partial class BankEndpoints : IEconomyEndpoint
             return EndpointFailures.From(accounts.Error!);
         }
 
-        TransferCandidate[] candidates = Candidates(accounts.Value.Items);
+        Result<IReadOnlyList<BankSuggestion>> reachable = await suggestions
+            .SuggestBanksAsync(
+                new SuggestBanksQuery(EndpointAuthorization.ToActor(context), string.Empty),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!reachable.IsSuccess)
+        {
+            return EndpointFailures.From(reachable.Error!);
+        }
+
+        TransferCandidate[] candidates = Candidates(accounts.Value.Items, reachable.Value);
 
         if (candidates.Length == 0)
         {
@@ -153,13 +168,19 @@ public sealed partial class BankEndpoints : IEconomyEndpoint
                 [])));
     }
 
-    private static TransferCandidate[] Candidates(IReadOnlyList<BankAccountItem> items)
+    private static TransferCandidate[] Candidates(
+        IReadOnlyList<BankAccountItem> items,
+        IReadOnlyList<BankSuggestion> reachableBanks)
     {
         List<TransferCandidate> candidates = [];
 
         foreach (BankAccountItem item in items)
         {
+            bool reachable = reachableBanks.Any(suggestion => string.Equals(
+                suggestion.InstitutionCode, item.InstitutionCode, StringComparison.Ordinal));
+
             if (item.Status != DepositAccountStatus.Active
+                || !reachable
                 || candidates.Count == DiscordResponseSelect.MaximumOptionCount)
             {
                 continue;

@@ -176,6 +176,22 @@ public sealed class FxWalkthroughTests
             Assert.AreEqual(ViewKeys.FxOrderUnfilled, selfMatched.ViewKey);
             Assert.AreEqual(1L, Scalar(factory, "SELECT COUNT(*) FROM fx_trades;"));
 
+            DiscordEndpointResponse homeSources = Deliver(
+                DiscordInteractionKind.SlashCommand,
+                await bank.TransferAsync(
+                    Context(HomeGuild, Maker, AuthorizationLevel.Customer, "/bank transfer"), token));
+
+            Assert.AreEqual(1, homeSources.Body.Components.Select!.Options.Count);
+            StringAssert.Contains(homeSources.Body.Components.Select!.Options[0].Label, HomeBank);
+
+            DiscordEndpointResponse awaySources = Deliver(
+                DiscordInteractionKind.SlashCommand,
+                await bank.TransferAsync(
+                    Context(AwayGuild, Maker, AuthorizationLevel.Customer, "/bank transfer"), token));
+
+            Assert.AreEqual(1, awaySources.Body.Components.Select!.Options.Count);
+            StringAssert.Contains(awaySources.Body.Components.Select!.Options[0].Label, AwayBank);
+
             Deliver(
                 DiscordInteractionKind.SlashCommand,
                 await fx.MarketAsync(
