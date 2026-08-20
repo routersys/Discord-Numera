@@ -78,8 +78,24 @@ public sealed record AccountOpeningApplicationView(
     MoneyMinor RequiredFunding,
     DepositAccountId? DepositAccountId);
 
+public sealed record GetAccountOpeningReviewQuery(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    ulong ApplicantDiscordUserId);
+
+public sealed record AccountOpeningReviewView(
+    BankId BankId,
+    string InstitutionCode,
+    AccountOpeningApplicationId? ApplicationId,
+    AccountOpeningApplicationStatus? Status,
+    string ApplicantHandle);
+
 public interface IBankAdministrationApplicationService
 {
+    Task<Result<AccountOpeningReviewView>> GetAccountOpeningReviewAsync(
+        GetAccountOpeningReviewQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<BankDraftView>> StartCreateBankAsync(
         StartCreateBankCommand command,
         CancellationToken cancellationToken);
@@ -428,6 +444,61 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
         ArgumentNullException.ThrowIfNull(command);
 
         return writeGateway.ExecuteAsync(unitOfWork => CommitCreate(unitOfWork, command), cancellationToken);
+    }
+
+    public Task<Result<AccountOpeningReviewView>> GetAccountOpeningReviewAsync(
+        GetAccountOpeningReviewQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => AccountOpeningReview(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<AccountOpeningReviewView> AccountOpeningReview(
+        IBankingUnitOfWork unitOfWork,
+        GetAccountOpeningReviewQuery query)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(unitOfWork, query.Actor, null);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<AccountOpeningReviewView>.Failure(scope.Error!);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(unitOfWork, query.Actor, scope.Value);
+
+        if (!authorized.IsSuccess)
+        {
+            return Result<AccountOpeningReviewView>.Failure(authorized.Error!);
+        }
+
+        if (unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.InstitutionCode)
+            is not { } bank)
+        {
+            return Result<AccountOpeningReviewView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        DiscordUserId applicant = DiscordUserId.FromUInt64(query.ApplicantDiscordUserId);
+
+        if (unitOfWork.DiscordIdentityLinks.FindActive(applicant) is not { } link ||
+            unitOfWork.CustomerAccounts.Find(link.CustomerAccountId) is not { } customer)
+        {
+            return Result<AccountOpeningReviewView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CustomerAccountNotFound);
+        }
+
+        AccountOpeningApplication? application =
+            unitOfWork.BankAdministration.FindPendingOpeningApplication(bank.Id, customer.Id);
+
+        return Result<AccountOpeningReviewView>.Success(new AccountOpeningReviewView(
+            bank.Id,
+            bank.InstitutionCode.Value,
+            application?.Id,
+            application?.Status,
+            customer.PublicHandle.Value));
     }
 
     public Task<Result<AccountOpeningApplicationView>> ApproveAccountOpeningAsync(

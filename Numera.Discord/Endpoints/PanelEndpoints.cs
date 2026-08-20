@@ -24,6 +24,9 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
     private readonly Numera.Application.Banking.IAtmAdministrationApplicationService atms;
     private readonly Numera.Application.Banking.ICashAdministrationApplicationService cash;
     private readonly Numera.Application.Banking.IMerchantAdministrationApplicationService merchants;
+    private readonly Numera.Application.Banking.IBankOperatorGrantApplicationService grants;
+    private readonly Numera.Application.Banking.IFeeAdministrationApplicationService fees;
+    private readonly Numera.Application.Banking.IBankAdministrationApplicationService banks;
 
     public ManagePanelEndpoints(
         Sessions.InteractionSessionService sessions,
@@ -37,7 +40,10 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         Numera.Application.Banking.IMonetaryAuthorityAdministrationApplicationService authorities,
         Numera.Application.Banking.IAtmAdministrationApplicationService atms,
         Numera.Application.Banking.ICashAdministrationApplicationService cash,
-        Numera.Application.Banking.IMerchantAdministrationApplicationService merchants)
+        Numera.Application.Banking.IMerchantAdministrationApplicationService merchants,
+        Numera.Application.Banking.IBankOperatorGrantApplicationService grants,
+        Numera.Application.Banking.IFeeAdministrationApplicationService fees,
+        Numera.Application.Banking.IBankAdministrationApplicationService banks)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -51,6 +57,9 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         ArgumentNullException.ThrowIfNull(atms);
         ArgumentNullException.ThrowIfNull(cash);
         ArgumentNullException.ThrowIfNull(merchants);
+        ArgumentNullException.ThrowIfNull(grants);
+        ArgumentNullException.ThrowIfNull(fees);
+        ArgumentNullException.ThrowIfNull(banks);
 
         this.sessions = sessions;
         this.catalog = catalog;
@@ -64,6 +73,9 @@ public sealed partial class ManagePanelEndpoints : IEconomyEndpoint
         this.atms = atms;
         this.cash = cash;
         this.merchants = merchants;
+        this.grants = grants;
+        this.fees = fees;
+        this.banks = banks;
     }
 
     [EconomySlashCommand("panel", "管理メニューを表示します。")]

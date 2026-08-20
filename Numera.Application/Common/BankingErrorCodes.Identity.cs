@@ -20,5 +20,8 @@ public static partial class BankingErrorCodes
 
     public static string FeeRuleInvalid { get; } = ErrorCodeFormat.Compose(ErrorCategory.Validation, 52);
 
+    public static string AccountOpeningDecisionInvalid { get; } =
+        ErrorCodeFormat.Compose(ErrorCategory.Validation, 53);
+
     public static string FeeScheduleAlreadyPublished { get; } = ErrorCodeFormat.Compose(ErrorCategory.Conflict, 52);
 }

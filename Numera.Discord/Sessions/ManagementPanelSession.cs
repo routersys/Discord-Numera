@@ -115,6 +115,10 @@ internal static class ManagementPanelCatalog
     internal const string MerchantProductEditor = "panel-merchant-product";
     internal const string MerchantPriceEditor = "panel-merchant-price";
     internal const string MerchantStockEditor = "panel-merchant-stock";
+    internal const string OperatorGrantEditor = "panel-operator-grant";
+    internal const string FeeScheduleEditor = "panel-fee-schedule";
+    internal const string AccountReviewEditor = "panel-account-review";
+    internal const string BankDesignEditor = "panel-bank-design";
 
     internal static IReadOnlyList<ManagementPanelCategory> Categories { get; } =
     [
@@ -137,12 +141,11 @@ internal static class ManagementPanelCatalog
             new("bank-create", "/manage bank-create"),
             new("bank-edit", "/manage bank-edit"),
             new("bank-retire", "/manage bank-retire"),
-            new("branch", Pending),
         ]),
-        new(BankOperator, [new("operator-grant", Pending)]),
-        new(DepositProduct, [new("account-product", Pending)]),
-        new(FeeLimitDormancy, [new("fee-schedule", Pending)]),
-        new(CardDesign, [new("card-design", Pending)]),
+        new(BankOperator, [new("operator-grant", Pending, OperatorGrantEditor)]),
+        new(DepositProduct, [new("account-review", Pending, AccountReviewEditor)]),
+        new(FeeLimitDormancy, [new("fee-schedule", Pending, FeeScheduleEditor)]),
+        new(CardDesign, [new("bank-design", Pending, BankDesignEditor)]),
         new(AtmCash,
         [
             new("atm-network", Pending, AtmNetworkEditor),
