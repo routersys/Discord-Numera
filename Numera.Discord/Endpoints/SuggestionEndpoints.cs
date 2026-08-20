@@ -9,6 +9,7 @@ public sealed class SuggestionEndpoints : IEconomyEndpoint
 {
     public const string BankProviderKey = "bank-suggest";
     public const string CurrencyProviderKey = "currency-suggest";
+    public const string DepositAccountProviderKey = "account-suggest";
 
     private const int DisplayLimit = 25;
 
@@ -41,6 +42,27 @@ public sealed class SuggestionEndpoints : IEconomyEndpoint
 
         return result.IsSuccess
             ? Take(result.Value.Select(static bank => (bank.Name, bank.InstitutionCode)))
+            : [];
+    }
+
+    [EconomyAutocompleteProvider(DepositAccountProviderKey)]
+    public async Task<IReadOnlyList<DiscordAutocompleteOption>> SuggestDepositAccountsAsync(
+        DiscordAutocompleteRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        AuthorizationContext actor = await ResolveAsync(request, cancellationToken).ConfigureAwait(false);
+
+        Result<IReadOnlyList<DepositAccountSuggestion>> result = await suggestions
+            .SuggestDepositAccountsAsync(
+                new SuggestDepositAccountsQuery(actor, request.Value), cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsSuccess
+            ? Take(result.Value.Select(static account => (
+                account.InstitutionCode + " *" + account.AccountNumberSuffix,
+                DepositAccountReference.Format(account.Id))))
             : [];
     }
 

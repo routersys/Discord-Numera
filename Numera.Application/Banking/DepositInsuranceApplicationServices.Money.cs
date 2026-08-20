@@ -84,7 +84,7 @@ public sealed partial class DepositInsuranceApplicationService
             unitOfWork.LedgerAccounts.Find(fund.PremiumRevenueLedgerAccountId) is not { } revenue)
         {
             return Result<DepositInsurancePremiumPaymentId>.Failure(
-                ErrorCategory.BankUnavailable, BankingErrorCodes.DepositInsuranceFundNotOperable);
+                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundNotOperable);
         }
 
         LedgerPostingBuilder fundBook = new();
@@ -140,7 +140,7 @@ public sealed partial class DepositInsuranceApplicationService
                 is not { } fundLiability)
         {
             return Result.Failure(
-                ErrorCategory.BankUnavailable, BankingErrorCodes.DepositInsuranceFundNotOperable);
+                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundNotOperable);
         }
 
         LedgerBalance walletBalance =

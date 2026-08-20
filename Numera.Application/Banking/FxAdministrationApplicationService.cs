@@ -369,7 +369,7 @@ public sealed class FxAdministrationApplicationService : IFxAdministrationApplic
             or FxMarketStatus.Retired))
         {
             return Result<FxMarketView>.Failure(
-                ErrorCategory.Validation, BankingErrorCodes.FxMarketStateInvalid);
+                ErrorCategory.Conflict, BankingErrorCodes.FxMarketStateInvalid);
         }
 
         if (command.DesiredStatus == FxMarketStatus.Retired

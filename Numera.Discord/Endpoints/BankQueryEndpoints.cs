@@ -115,7 +115,9 @@ public sealed partial class BankQueryEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> StatementAsync(
         DiscordEndpointContext context,
-        [EconomyOption("account", "口座を選びます。", true)] string account,
+        [EconomyOption("account", "口座を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.DepositAccountProviderKey)]
+        string account,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -131,7 +133,7 @@ public sealed partial class BankQueryEndpoints : IEconomyEndpoint
         if (!DepositAccountReference.TryParse(account, out Numera.Domain.Common.DepositAccountId id))
         {
             return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+                ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         Result<AccountStatementPageView> result = await queries

@@ -2,6 +2,7 @@ using Numera.Application.Abstractions;
 using Numera.Application.Common;
 using Numera.Domain.Banking;
 using Numera.Domain.Common;
+using Numera.Domain.Identity;
 
 namespace Numera.Application.Banking;
 
@@ -17,6 +18,16 @@ public sealed record SuggestCurrenciesQuery(
     AuthorizationContext Authorization,
     string Input);
 
+public sealed record DepositAccountSuggestion(
+    DepositAccountId Id,
+    string InstitutionCode,
+    string AccountNumberSuffix,
+    DepositAccountStatus Status);
+
+public sealed record SuggestDepositAccountsQuery(
+    AuthorizationContext Authorization,
+    string Input);
+
 public interface ISuggestionApplicationService
 {
     Task<Result<IReadOnlyList<BankSuggestion>>> SuggestBanksAsync(
@@ -25,6 +36,10 @@ public interface ISuggestionApplicationService
 
     Task<Result<IReadOnlyList<CurrencySuggestion>>> SuggestCurrenciesAsync(
         SuggestCurrenciesQuery query,
+        CancellationToken cancellationToken);
+
+    Task<Result<IReadOnlyList<DepositAccountSuggestion>>> SuggestDepositAccountsAsync(
+        SuggestDepositAccountsQuery query,
         CancellationToken cancellationToken);
 }
 
@@ -84,6 +99,36 @@ public sealed class SuggestionApplicationService : ISuggestionApplicationService
                 : []);
 
         return Task.FromResult(Result<IReadOnlyList<CurrencySuggestion>>.Success(suggestions));
+    }
+
+    public Task<Result<IReadOnlyList<DepositAccountSuggestion>>> SuggestDepositAccountsAsync(
+        SuggestDepositAccountsQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (query.Authorization.Level == AuthorizationLevel.Unregistered)
+        {
+            return Task.FromResult(Result<IReadOnlyList<DepositAccountSuggestion>>.Success([]));
+        }
+
+        IReadOnlyList<DepositAccountSuggestion> suggestions = readGateway.Execute(context =>
+            context.CustomerIdentities.FindByDiscordUser(
+                DiscordUserId.FromUInt64(query.Authorization.DiscordUserId)) is { } customer
+                ? (IReadOnlyList<DepositAccountSuggestion>)
+                [
+                    .. context.BankQueries
+                        .ListCustomerAccounts(customer.Id, null, CandidateFetchLimit)
+                        .Select(static item => new DepositAccountSuggestion(
+                            item.DepositAccountId,
+                            item.InstitutionCode,
+                            item.AccountNumberSuffix,
+                            item.Status)),
+                ]
+                : []);
+
+        return Task.FromResult(Result<IReadOnlyList<DepositAccountSuggestion>>.Success(suggestions));
     }
 
     public static IReadOnlyList<BankStatus> SelectableStatuses(AuthorizationLevel level) => level switch

@@ -423,7 +423,7 @@ public sealed partial class CommerceApplicationService : ICommerceApplicationSer
             command.Quantity != 1)
         {
             return Result<CommerceCheckoutView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.CommerceQuantityInvalid);
+                ErrorCategory.Validation, BankingErrorCodes.CommerceQuantityInvalid);
         }
 
         MoneyMinor subtotal = MoneyMinor.FromIntermediate(

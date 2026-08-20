@@ -418,7 +418,7 @@ public sealed partial class FxApplicationService
         if (ExactGross(netDelivery.Value, policy.TakerFeeBps) is not { } gross)
         {
             return Result<FxCashDeliveryOutcome>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FxAmountNotRepresentable);
+                ErrorCategory.Validation, BankingErrorCodes.FxAmountNotRepresentable);
         }
 
         bool acquireBase = deliveryCurrencyId == market.BaseCurrencyId;
@@ -515,7 +515,7 @@ public sealed partial class FxApplicationService
         if (ExactGross(presentmentTotal.Value, policy.TakerFeeBps) is not { } gross)
         {
             return Result<FxCashDeliveryOutcome>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FxAmountNotRepresentable);
+                ErrorCategory.Validation, BankingErrorCodes.FxAmountNotRepresentable);
         }
 
         bool acquireBase = destination.CurrencyId == market.BaseCurrencyId;

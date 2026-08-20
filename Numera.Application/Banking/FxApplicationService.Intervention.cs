@@ -54,7 +54,7 @@ public sealed partial class FxApplicationService
         if (now >= mandate.ValidUntil)
         {
             return Result<InterventionOutcome>.Failure(
-                ErrorCategory.OperationExpired, BankingErrorCodes.InterventionMandateNotActive);
+                ErrorCategory.Conflict, BankingErrorCodes.InterventionMandateNotActive);
         }
 
         CurrencyId payCurrencyId = side == FxOrderSide.BuyBase
@@ -571,7 +571,7 @@ public sealed partial class FxApplicationService
             unitOfWork.LedgerAccounts.Find(position.AssetLedgerAccountId) is { } asset
             ? Result<LedgerAccount>.Success(asset)
             : Result<LedgerAccount>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.ReservePositionAccountUnavailable);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.ReservePositionAccountUnavailable);
     }
 
     private static bool IsReserveEligible(IBankingUnitOfWork unitOfWork, CurrencyId currencyId) =>

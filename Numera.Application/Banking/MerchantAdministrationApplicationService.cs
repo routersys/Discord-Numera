@@ -900,7 +900,7 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
                 unitOfWork.Commerce.FindInventory(product.Id) is null)
             {
                 return Result<MerchantProductView>.Failure(
-                    ErrorCategory.Conflict, BankingErrorCodes.MerchantInventoryNotFound);
+                    ErrorCategory.NotFound, BankingErrorCodes.MerchantInventoryNotFound);
             }
         }
 
@@ -1177,7 +1177,7 @@ public sealed class MerchantAdministrationApplicationService : IMerchantAdminist
             or CommerceReturnStatus.Cancelled or CommerceReturnStatus.Completed))
         {
             return Result<CommerceReturnView>.Failure(
-                ErrorCategory.Validation, BankingErrorCodes.CommerceReturnStateInvalid);
+                ErrorCategory.Conflict, BankingErrorCodes.CommerceReturnStateInvalid);
         }
 
         if (!CommerceReturnStatusCatalog.IsAllowed(commerceReturn.Status, target))

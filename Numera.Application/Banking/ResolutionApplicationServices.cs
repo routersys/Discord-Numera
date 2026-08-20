@@ -160,7 +160,7 @@ public sealed class ResolutionAdministrationApplicationService
         if (candidate.Status is not (BankStatus.Operating or BankStatus.Restricted))
         {
             return ApplicationError.Create(
-                ErrorCategory.Conflict, BankingErrorCodes.BankNotOperating);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotOperating);
         }
 
         if (unitOfWork.LedgerAccounts.FindByCode(
@@ -178,7 +178,7 @@ public sealed class ResolutionAdministrationApplicationService
         return PrudentialFloor.Admits(unitOfWork, candidate, failing)
             ? null
             : ApplicationError.Create(
-                ErrorCategory.Conflict, BankingErrorCodes.ResolutionSuccessorInvalid);
+                ErrorCategory.Validation, BankingErrorCodes.ResolutionSuccessorInvalid);
     }
 
     private Result<ResolutionCaseView> Bridge(

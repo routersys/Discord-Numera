@@ -71,7 +71,7 @@ public sealed partial class BankQueryEndpoints
 
         if (input.Values.Count != 1)
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.BankNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
         }
 
         string institutionCode = input.Values[0];

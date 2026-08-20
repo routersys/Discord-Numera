@@ -477,7 +477,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
                     break;
                 default:
                     return Result<ScheduledPaymentPlanView>.Failure(
-                        ErrorCategory.Validation, BankingErrorCodes.ScheduledPaymentStateInvalid);
+                        ErrorCategory.Conflict, BankingErrorCodes.ScheduledPaymentStateInvalid);
             }
         }
         catch (InvariantViolationException)
@@ -579,7 +579,7 @@ public sealed class PaymentManagementApplicationService : IPaymentManagementAppl
                     break;
                 default:
                     return Result<DirectDebitMandateView>.Failure(
-                        ErrorCategory.Validation, BankingErrorCodes.DirectDebitMandateStateInvalid);
+                        ErrorCategory.Conflict, BankingErrorCodes.DirectDebitMandateStateInvalid);
             }
         }
         catch (InvariantViolationException)

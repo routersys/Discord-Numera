@@ -797,7 +797,7 @@ public sealed partial class DepositInsuranceApplicationService : IDepositInsuran
         if (unitOfWork.LedgerAccounts.Find(fund.LiquidAssetLedgerAccountId) is not { } liquidAsset)
         {
             return Result<DepositInsuranceEnrollmentView>.Failure(
-                ErrorCategory.BankUnavailable, BankingErrorCodes.DepositInsuranceFundNotOperable);
+                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundNotOperable);
         }
 
         Int128 available =

@@ -191,7 +191,7 @@ public sealed class FeeAdministrationApplicationService : IFeeAdministrationAppl
         if (unitOfWork.FeeAdministration.CountRules(command.FeeScheduleVersionId) == 0)
         {
             return Result<FeeScheduleVersionView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.FeeRuleUnavailable);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.FeeRuleUnavailable);
         }
 
         BankId bankId = unitOfWork.FeeAdministration.FindVersionBank(command.FeeScheduleVersionId)!.Value;
@@ -210,7 +210,7 @@ public sealed class FeeAdministrationApplicationService : IFeeAdministrationAppl
     {
         if (unitOfWork.FeeAdministration.FindVersionBank(versionId) is not { } bankId)
         {
-            return Result.Failure(ErrorCategory.NotFound, BankingErrorCodes.FeeScheduleUnavailable);
+            return Result.Failure(ErrorCategory.BankUnavailable, BankingErrorCodes.FeeScheduleUnavailable);
         }
 
         Bank? bank = unitOfWork.Banks.Find(bankId);

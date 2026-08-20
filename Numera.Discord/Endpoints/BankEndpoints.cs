@@ -179,7 +179,9 @@ public sealed partial class BankEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> CloseAsync(
         DiscordEndpointContext context,
-        [EconomyOption("account", "解約する口座を選びます。", true)] string account,
+        [EconomyOption("account", "解約する口座を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.DepositAccountProviderKey)]
+        string account,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -195,7 +197,7 @@ public sealed partial class BankEndpoints : IEconomyEndpoint
         if (!DepositAccountReference.TryParse(account, out Numera.Domain.Common.DepositAccountId id))
         {
             return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+                ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         Result result = await accounts
@@ -225,6 +227,9 @@ public sealed partial class BankEndpoints : IEconomyEndpoint
 
 internal static class DepositAccountReference
 {
+    internal static string Format(DepositAccountId id) =>
+        new Guid(id.Value.ToByteArray(), bigEndian: true).ToString();
+
     internal static bool TryParse(string text, out DepositAccountId id)
     {
         if (Guid.TryParse(text, out Guid parsed))

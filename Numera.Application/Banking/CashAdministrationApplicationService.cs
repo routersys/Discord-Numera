@@ -349,7 +349,7 @@ public sealed class CashAdministrationApplicationService : ICashAdministrationAp
             { Status: BankCashVaultStatus.Active } vault)
         {
             return Result<CashConversionView>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.BankCashVaultNotFound);
+                ErrorCategory.NotFound, BankingErrorCodes.BankCashVaultNotFound);
         }
 
         if (unitOfWork.SettlementParticipations.FindLive(bank.Id) is not

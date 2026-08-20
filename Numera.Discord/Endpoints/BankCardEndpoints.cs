@@ -47,7 +47,9 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> CardAsync(
         DiscordEndpointContext context,
-        [EconomyOption("account", "対象の口座を選びます。", true)] string account,
+        [EconomyOption("account", "対象の口座を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.DepositAccountProviderKey)]
+        string account,
         [EconomyOption("action", "実行する操作を選びます。", false)]
         [EconomyChoice("確認", ActionShow)]
         [EconomyChoice("キャッシュカードを発行", ActionIssueCash)]
@@ -78,7 +80,7 @@ public sealed partial class BankCardEndpoints : IEconomyEndpoint
         if (!DepositAccountReference.TryParse(account, out DepositAccountId id))
         {
             return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+                ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         Result mutation = await ExecuteAsync(

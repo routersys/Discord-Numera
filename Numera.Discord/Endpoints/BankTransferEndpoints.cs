@@ -42,7 +42,7 @@ public sealed partial class BankEndpoints
 
         if (Selected(payload, input.Values) is not { } candidate)
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         Result<InteractionSessionSnapshot> advanced = await sessions
@@ -220,7 +220,7 @@ public sealed partial class BankEndpoints
 
         if (!EntityIdValue.TryParse(payload.SourceDepositAccountId, out EntityIdValue source))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         Result<PaymentOrderView> result = await payments

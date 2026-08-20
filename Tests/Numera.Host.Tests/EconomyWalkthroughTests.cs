@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Numera.Discord.Abstractions;
 using Numera.Discord.Commands;
+using Numera.Discord.Gateway;
 using Numera.Discord.Endpoints;
 using Numera.Discord.Rendering;
 using Numera.Host.Configuration;
@@ -100,6 +101,9 @@ public sealed class EconomyWalkthroughTests
             string sessionToken = "") =>
             new(interaction++, userId, Guild, 1UL, "ja", commandPath, level, sessionToken);
 
+        private static readonly CatalogResponseComposer Composer =
+            new(CanonicalTextCatalog.Create());
+
         public static DiscordEndpointResponse Deliver(
             DiscordInteractionKind kind,
             DiscordEndpointResponse response)
@@ -111,6 +115,19 @@ public sealed class EconomyWalkthroughTests
             Assert.IsTrue(
                 plan.IsPermitted,
                 $"{kind} は {response.Kind} を返せません（{plan.Failure}）。{response.ViewKey}");
+
+            if (response.Kind == DiscordResponseKind.Modal)
+            {
+                Assert.IsNotEmpty(Composer.ResolveModalCustomId(response), response.ViewKey);
+                return response;
+            }
+
+            DiscordEmbedPayload embed = Composer.Compose(response);
+
+            Assert.DoesNotContain("{", embed.Title, response.ViewKey);
+            Assert.DoesNotContain("{", embed.Description, response.ViewKey);
+
+            _ = Composer.ComposeComponents(response);
 
             return response;
         }
@@ -463,6 +480,24 @@ public sealed class EconomyWalkthroughTests
         Walkthrough.Succeeded(transferred);
         Assert.AreEqual(120_000L, walk.BalanceOf("beneficiary"));
         Assert.AreEqual(380_000L, walk.BalanceOf("depositor"));
+
+        SuggestionEndpoints suggestions = walk.Endpoint<SuggestionEndpoints>();
+
+        IReadOnlyList<DiscordAutocompleteOption> accounts =
+            await suggestions.SuggestDepositAccountsAsync(
+                new DiscordAutocompleteRequest(
+                    Depositor, Guild, "/bank statement", "account", string.Empty),
+                token);
+
+        Assert.AreEqual(1, accounts.Count);
+        StringAssert.Contains(accounts[0].Name, Institution);
+
+        Walkthrough.Deliver(
+            DiscordInteractionKind.SlashCommand,
+            await bankQueries.StatementAsync(
+                walk.Context(Depositor, AuthorizationLevel.Customer, "/bank statement"),
+                accounts[0].Value,
+                token));
     }
 
     public TestContext TestContext { get; set; } = null!;

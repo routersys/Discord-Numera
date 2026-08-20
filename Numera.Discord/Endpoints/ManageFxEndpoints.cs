@@ -89,7 +89,7 @@ public sealed class ManageFxEndpoints : IEconomyEndpoint
             ActionRetire => await StateAsync(
                 actor, market, FxMarketStatus.Retired, cancellationToken).ConfigureAwait(false),
             _ => EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound),
+                ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound),
         };
     }
 
@@ -176,7 +176,7 @@ public sealed class ManageFxEndpoints : IEconomyEndpoint
     {
         if (!TryMarket(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         Result<FxMarketView> result = await markets
@@ -193,7 +193,7 @@ public sealed class ManageFxEndpoints : IEconomyEndpoint
     {
         if (!TryMarket(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         Result<FxMarketView> result = await markets
@@ -211,7 +211,7 @@ public sealed class ManageFxEndpoints : IEconomyEndpoint
     {
         if (!TryMarket(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         Result<FxMarketView> result = await markets

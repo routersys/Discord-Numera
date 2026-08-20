@@ -45,7 +45,7 @@ public sealed partial class CustomerAccountApplicationService
         if (string.IsNullOrEmpty(command.Code))
         {
             return Task.FromResult(Result<CustomerAccountView>.Failure(
-                ErrorCategory.Validation, BankingErrorCodes.LinkGrantInvalid, nameof(command.Code)));
+                ErrorCategory.NotFound, BankingErrorCodes.LinkGrantInvalid, nameof(command.Code)));
         }
 
         byte[] digest = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(command.Code));

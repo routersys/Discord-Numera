@@ -59,7 +59,7 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         if (!FxMarketReference.TryParse(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         Result<FxBoardVisualView> result = await markets
@@ -90,7 +90,7 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         if (!FxMarketReference.TryParse(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         Result<FxRateVisualView> result = await markets
@@ -124,7 +124,7 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         if (!FxMarketReference.TryParse(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         Result<FxBoardVisualView> result = await markets
@@ -164,7 +164,7 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         if (!FxMarketReference.TryParse(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         int bucket = interval switch
@@ -262,7 +262,7 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         if (!FxMarketReference.TryParse(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         Result<FxTradeHistoryPageView> result = await markets
@@ -310,14 +310,14 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         if (!FxMarketReference.TryParse(market, out FxMarketId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxMarketNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxMarketNotFound);
         }
 
         if (!DepositAccountReference.TryParse(source, out DepositAccountId sourceAccountId) ||
             !DepositAccountReference.TryParse(destination, out DepositAccountId destinationAccountId))
         {
             return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.DepositAccountNotFound);
+                ErrorCategory.NotFound, BankingErrorCodes.DepositAccountNotFound);
         }
 
         FxOrderType orderType = type switch
@@ -403,7 +403,7 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
         if (!FxOrderReference.TryParse(order, out FxOrderId id))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.FxOrderNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.FxOrderNotFound);
         }
 
         Result<FxOrderView> result = await markets

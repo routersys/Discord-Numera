@@ -140,7 +140,7 @@ public sealed class PrudentialAdministrationApplicationService : IPrudentialAdmi
         if (unitOfWork.PrudentialPolicies.Find(command.PrudentialPolicyVersionId) is not { } existing)
         {
             return Result<PrudentialPolicyDraftView>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.PrudentialPolicyUnavailable);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.PrudentialPolicyUnavailable);
         }
 
         Result authorized = ManagementAuthorizationPolicy.Ensure(
@@ -181,7 +181,7 @@ public sealed class PrudentialAdministrationApplicationService : IPrudentialAdmi
         if (unitOfWork.PrudentialPolicies.Find(command.PrudentialPolicyVersionId) is not { } draft)
         {
             return Result<PrudentialPolicyVersionView>.Failure(
-                ErrorCategory.NotFound, BankingErrorCodes.PrudentialPolicyUnavailable);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.PrudentialPolicyUnavailable);
         }
 
         Result authorized = ManagementAuthorizationPolicy.Ensure(

@@ -118,7 +118,7 @@ public sealed class SystemEndpoints : IEconomyEndpoint
             scope == 0)
         {
             return Task.FromResult(EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.GuildEconomyNotFound));
+                ErrorCategory.NotFound, BankingErrorCodes.GuildEconomyNotFound));
         }
 
         return Task.FromResult(DiscordEndpointResponse.Message(

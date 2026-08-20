@@ -49,7 +49,7 @@ public sealed class ManageEndpoints : IEconomyEndpoint
         if (!EntityReference.TryParse(book, out EntityIdValue bookId))
         {
             return EndpointFailures.From(
-                ErrorCategory.Validation, BankingErrorCodes.CurrencyIssuanceAccountUnavailable);
+                ErrorCategory.BankUnavailable, BankingErrorCodes.CurrencyIssuanceAccountUnavailable);
         }
 
         Result<CurrencyView> result = await currencies
@@ -137,7 +137,7 @@ public sealed class ManageEndpoints : IEconomyEndpoint
         if (!EntityReference.TryParse(currency, out EntityIdValue currencyId) ||
             !EntityReference.TryParse(destination, out EntityIdValue accountId))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.CurrencyNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
         }
 
         Result<CurrencySupplyView> result = await currencies
@@ -170,7 +170,7 @@ public sealed class ManageEndpoints : IEconomyEndpoint
         if (!EntityReference.TryParse(currency, out EntityIdValue currencyId) ||
             !EntityReference.TryParse(source, out EntityIdValue accountId))
         {
-            return EndpointFailures.From(ErrorCategory.Validation, BankingErrorCodes.CurrencyNotFound);
+            return EndpointFailures.From(ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
         }
 
         Result<CurrencySupplyView> result = await currencies

@@ -327,7 +327,7 @@ internal sealed class ClearingSettlementService
             if (unitOfWork.Banks.Find(position.BankId) is not { } bank)
             {
                 return Result<ParticipantSettlement[]>.Failure(
-                    ErrorCategory.BankUnavailable, BankingErrorCodes.BankNotFound);
+                    ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
             }
 
             Result<SettlementSide> side = InterbankSettlementPolicy.ResolveSettlementSide(

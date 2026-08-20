@@ -132,7 +132,7 @@ internal sealed class DepositInsuranceClaimService
             { Status: DepositInsuranceReservationStatus.Active } reservation)
         {
             return Result<bool>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceReservationNotFound);
+                ErrorCategory.NotFound, BankingErrorCodes.DepositInsuranceReservationNotFound);
         }
 
         if (unitOfWork.DepositInsurance.FindFund(reservation.FundId) is not
@@ -147,7 +147,7 @@ internal sealed class DepositInsuranceClaimService
         if (consumed > reservation.Reserved)
         {
             return Result<bool>.Failure(
-                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceCoverageInvalid);
+                ErrorCategory.Validation, BankingErrorCodes.DepositInsuranceCoverageInvalid);
         }
 
         if (approved && consumed.IsPositive)
@@ -208,7 +208,7 @@ internal sealed class DepositInsuranceClaimService
             unitOfWork.LedgerAccounts.Find(fund.ClaimExpenseLedgerAccountId) is not { } expense)
         {
             return Result.Failure(
-                ErrorCategory.BankUnavailable, BankingErrorCodes.DepositInsuranceFundNotOperable);
+                ErrorCategory.Conflict, BankingErrorCodes.DepositInsuranceFundNotOperable);
         }
 
         if (unitOfWork.AccountingPeriods.FindOpen(fund.AccountingBookId, businessDate)
