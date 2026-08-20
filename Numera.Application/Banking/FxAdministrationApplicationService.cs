@@ -9,9 +9,9 @@ namespace Numera.Application.Banking;
 
 public sealed record CreateFxMarketCommand(
     AuthorizationContext Actor,
-    CurrencyId BaseCurrencyId,
-    CurrencyId QuoteCurrencyId,
-    PartyId OperatorPartyId,
+    string BaseCurrencyCode,
+    string QuoteCurrencyCode,
+    string OperatorInstitutionCode,
     long PriceScale,
     long TickSizePriceUnits,
     long LotSizeBaseMinor);
@@ -88,6 +88,8 @@ public sealed class FxAdministrationApplicationService : IFxAdministrationApplic
     public const string MarketDecisionEventType = "FX_MARKET_DECISION_RECORDED";
 
     public const string GuildOperatorAuthority = "GUILD_OPERATOR";
+
+    private const int FxFeeRevenueSuffixLength = 27;
 
     public const string SystemOwnerAuthority = "SYSTEM_OWNER";
 
@@ -169,13 +171,34 @@ public sealed class FxAdministrationApplicationService : IFxAdministrationApplic
             return Result<FxMarketView>.Failure(authorized.Error!);
         }
 
-        if (command.BaseCurrencyId == command.QuoteCurrencyId)
+        if (unitOfWork.Currencies.FindByCode(command.BaseCurrencyCode) is not { } baseCurrencyId ||
+            unitOfWork.Currencies.FindByCode(command.QuoteCurrencyCode) is not { } quoteCurrencyId)
+        {
+            return Result<FxMarketView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.CurrencyNotFound);
+        }
+
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, command.Actor, requested: null);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<FxMarketView>.Failure(scope.Error!);
+        }
+
+        if (unitOfWork.Banks.FindByInstitutionCode(scope.Value, command.OperatorInstitutionCode)
+            is not { } operatorBank)
+        {
+            return Result<FxMarketView>.Failure(ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        if (baseCurrencyId == quoteCurrencyId)
         {
             return Result<FxMarketView>.Failure(
                 ErrorCategory.Validation, BankingErrorCodes.FxMarketPairInvalid);
         }
 
-        (CurrencyId first, CurrencyId second) = Orient(command.BaseCurrencyId, command.QuoteCurrencyId);
+        (CurrencyId first, CurrencyId second) = Orient(baseCurrencyId, quoteCurrencyId);
 
         if (unitOfWork.Fx.FindMarketByPair(first, second) is not null)
         {
@@ -198,7 +221,7 @@ public sealed class FxAdministrationApplicationService : IFxAdministrationApplic
                 FxMarketId.FromValue(idGenerator.NextId()),
                 first,
                 second,
-                command.OperatorPartyId,
+                operatorBank.PartyId,
                 command.PriceScale,
                 command.TickSizePriceUnits,
                 command.LotSizeBaseMinor);
@@ -213,7 +236,48 @@ public sealed class FxAdministrationApplicationService : IFxAdministrationApplic
         unitOfWork.Fx.UpsertSummary(new FxMarketSummary(
             market.Id, null, null, 1, 1, clock.Now()));
 
+        EnsureOperatorAccounts(unitOfWork, operatorBank, first);
+        EnsureOperatorAccounts(unitOfWork, operatorBank, second);
+
         return Result<FxMarketView>.Success(ToView(unitOfWork, market));
+    }
+
+    private void EnsureOperatorAccounts(
+        IBankingUnitOfWork unitOfWork,
+        Bank operatorBank,
+        CurrencyId currencyId)
+    {
+        EnsureAccount(unitOfWork, operatorBank, currencyId, LedgerAccountKind.FeeRevenue, "4300-");
+        EnsureAccount(unitOfWork, operatorBank, currencyId, LedgerAccountKind.FxClearingReceivable, "1450-");
+        EnsureAccount(unitOfWork, operatorBank, currencyId, LedgerAccountKind.FxClearingPayable, "2450-");
+    }
+
+    private void EnsureAccount(
+        IBankingUnitOfWork unitOfWork,
+        Bank operatorBank,
+        CurrencyId currencyId,
+        LedgerAccountKind kind,
+        string codePrefix)
+    {
+        if (unitOfWork.LedgerAccounts.FindPostingByKind(
+            operatorBank.GeneralLedgerBookId, kind, currencyId) is not null)
+        {
+            return;
+        }
+
+        LedgerAccountId id = LedgerAccountId.FromValue(idGenerator.NextId());
+
+        unitOfWork.LedgerAccounts.Add(LedgerAccount.CreatePosting(
+            id,
+            operatorBank.GeneralLedgerBookId,
+            parentAccountId: null,
+            codePrefix + currencyId.Value.ToString()[^FxFeeRevenueSuffixLength..],
+            kind,
+            currencyId,
+            LedgerOwnerReferenceType.None,
+            EntityIdValue.Empty));
+
+        unitOfWork.LedgerAccounts.UpsertProjection(id, LedgerBalance.Empty, clock.Now());
     }
 
     private Result<FxMarketPolicyView> PublishPolicy(

@@ -45,10 +45,18 @@ public sealed class ManageFxEndpoints : IEconomyEndpoint
         [EconomyChoice("取引を再開", ActionResume)]
         [EconomyChoice("市場を廃止", ActionRetire)]
         string action,
-        [EconomyOption("market", "対象の市場を指定します。", false)] string? market,
-        [EconomyOption("base", "基軸通貨を指定します。", false)] string? baseCurrency,
-        [EconomyOption("quote", "決済通貨を指定します。", false)] string? quoteCurrency,
-        [EconomyOption("operator", "運営主体を指定します。", false)] string? marketOperator,
+        [EconomyOption("market", "対象の市場を指定します。", false)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
+        string? market,
+        [EconomyOption("base", "基軸通貨を指定します。", false)]
+        [EconomyAutocomplete(SuggestionEndpoints.CurrencyProviderKey)]
+        string? baseCurrency,
+        [EconomyOption("quote", "決済通貨を指定します。", false)]
+        [EconomyAutocomplete(SuggestionEndpoints.CurrencyProviderKey)]
+        string? quoteCurrency,
+        [EconomyOption("operator", "運営主体の銀行を選びます。", false)]
+        [EconomyAutocomplete(SuggestionEndpoints.BankProviderKey)]
+        string? marketOperator,
         [EconomyOption("price-scale", "価格の桁数を入力します。", false)] string? priceScale,
         [EconomyOption("tick-size", "呼値の刻みを入力します。", false)] string? tickSize,
         [EconomyOption("lot-size", "売買単位を入力します。", false)] string? lotSize,
@@ -103,12 +111,9 @@ public sealed class ManageFxEndpoints : IEconomyEndpoint
         string? lotSize,
         CancellationToken cancellationToken)
     {
-        if (baseCurrency is null ||
-            quoteCurrency is null ||
-            marketOperator is null ||
-            !EntityReference.TryParse(baseCurrency, out EntityIdValue baseId) ||
-            !EntityReference.TryParse(quoteCurrency, out EntityIdValue quoteId) ||
-            !EntityReference.TryParse(marketOperator, out EntityIdValue operatorId) ||
+        if (string.IsNullOrWhiteSpace(baseCurrency) ||
+            string.IsNullOrWhiteSpace(quoteCurrency) ||
+            string.IsNullOrWhiteSpace(marketOperator) ||
             !TryNumber(priceScale, out long scale) ||
             !TryNumber(tickSize, out long tick) ||
             !TryNumber(lotSize, out long lot))
@@ -121,9 +126,9 @@ public sealed class ManageFxEndpoints : IEconomyEndpoint
             .CreateMarketAsync(
                 new CreateFxMarketCommand(
                     actor,
-                    CurrencyId.FromValue(baseId),
-                    CurrencyId.FromValue(quoteId),
-                    PartyId.FromValue(operatorId),
+                    baseCurrency,
+                    quoteCurrency,
+                    marketOperator,
                     scale,
                     tick,
                     lot),

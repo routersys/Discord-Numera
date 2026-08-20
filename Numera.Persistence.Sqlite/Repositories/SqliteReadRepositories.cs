@@ -102,7 +102,7 @@ public sealed class SqliteCurrencyReadRepository : ICurrencyReadRepository
 
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT m.code, m.name
+            SELECT m.code, m.name, c.currency_id
             FROM currencies AS c
             INNER JOIN currency_metadata_versions AS m ON m.currency_id = c.currency_id
             WHERE c.economy_scope_id = $scope
@@ -119,7 +119,10 @@ public sealed class SqliteCurrencyReadRepository : ICurrencyReadRepository
 
         while (reader.Read())
         {
-            suggestions.Add(new CurrencySuggestion(reader.GetString(0), reader.GetString(1)));
+            suggestions.Add(new CurrencySuggestion(
+                CurrencyId.FromValue(EntityIdValue.FromBytes(reader.GetFieldValue<byte[]>(2))),
+                reader.GetString(0),
+                reader.GetString(1)));
         }
 
         return suggestions;
@@ -231,6 +234,7 @@ public sealed class SqliteBankingReadContext : IBankingReadContext
         EconomyScopes = new SqliteEconomyScopeReadRepository(connection);
         BankQueries = new SqliteBankQueryReadRepository(connection);
         FxVisuals = new SqliteFxVisualReadRepository(connection);
+        FxSuggestions = new SqliteFxSuggestionReadRepository(connection);
     }
 
     public IBankReadRepository Banks { get; }
@@ -246,6 +250,8 @@ public sealed class SqliteBankingReadContext : IBankingReadContext
     public IBankQueryReadRepository BankQueries { get; }
 
     public IFxVisualReadRepository FxVisuals { get; }
+
+    public IFxSuggestionReadRepository FxSuggestions { get; }
 }
 
 public sealed class SqliteBankingReadGateway : IBankingReadGateway

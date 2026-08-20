@@ -214,6 +214,33 @@ public sealed class SqliteCurrencyRepository : ICurrencyRepository
             MoneyMinor.FromMinor(genesis), MoneyMinor.FromMinor(issued), MoneyMinor.FromMinor(burned));
     }
 
+    public CurrencyId? FindByCode(string code)
+    {
+        ArgumentNullException.ThrowIfNull(code);
+
+        using SqliteCommand command = unitOfWork.CreateCommand("""
+            SELECT c.currency_id
+            FROM currencies AS c
+            INNER JOIN currency_metadata_versions AS m ON m.currency_id = c.currency_id
+            WHERE m.code = $code
+              AND m.effective_to IS NULL
+              AND c.status IN ('ACTIVE', 'SUSPENDED', 'RETIRING')
+            LIMIT 2;
+            """);
+        command.Parameters.AddWithValue("$code", code);
+
+        using SqliteDataReader reader = command.ExecuteReader();
+
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        CurrencyId resolved = CurrencyId.FromValue(SqliteValueMapper.ReadEntityId(reader, 0));
+
+        return reader.Read() ? null : resolved;
+    }
+
     public LedgerAccount? FindIssuanceLiabilityAccount(CurrencyId currencyId)
     {
         using SqliteCommand command = unitOfWork.CreateCommand($"""

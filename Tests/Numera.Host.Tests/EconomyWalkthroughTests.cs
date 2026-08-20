@@ -101,6 +101,32 @@ public sealed class EconomyWalkthroughTests
             string sessionToken = "") =>
             new(interaction++, userId, Guild, 1UL, "ja", commandPath, level, sessionToken);
 
+        public DiscordEndpointContext ContextIn(
+            ulong guildId,
+            ulong userId,
+            AuthorizationLevel level,
+            string commandPath,
+            string sessionToken = "") =>
+            new(interaction++, userId, guildId, 1UL, "ja", commandPath, level, sessionToken);
+
+        public string InitializeEconomy(ulong guildId, long minimumCapital)
+        {
+            SqliteConnectionFactory factory = Host.Services.GetRequiredService<SqliteConnectionFactory>();
+
+            SqliteDatabaseBootstrapService bootstrap = new(
+                factory, static () => Guid.CreateVersion7().ToByteArray(bigEndian: true));
+
+            EconomyBootstrapOutcome outcome = bootstrap.InitializeEconomy(
+                guildId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "Asia/Tokyo",
+                minimumCapital,
+                1_787_000_000_000);
+
+            Assert.IsTrue(outcome.IsSuccess, outcome.Detail);
+
+            return outcome.IssuanceAccountingBookId;
+        }
+
         private static readonly CatalogResponseComposer Composer =
             new(CanonicalTextCatalog.Create());
 

@@ -134,6 +134,8 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
     private const string SettlementPayableAccountCode = "2200";
     private const string SuspenseAccountCode = "2300";
     private const string ClearingPayableAccountCode = "2400";
+    private const string FxClearingReceivableAccountCode = "1450";
+    private const string FxClearingPayableAccountCode = "2450";
     private const string PaidInCapitalAccountCode = "3000";
     private const string FeeRevenueAccountCode = "4300";
     private const string CentralBankLiabilityPrefix = "2100-";
@@ -723,6 +725,14 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
         AddPosting(
             unitOfWork, bank, currencyId, ClearingReceivableAccountCode, LedgerAccountKind.ClearingReceivable);
         AddPosting(unitOfWork, bank, currencyId, ClearingPayableAccountCode, LedgerAccountKind.ClearingPayable);
+        AddPosting(
+            unitOfWork,
+            bank,
+            currencyId,
+            FxClearingReceivableAccountCode,
+            LedgerAccountKind.FxClearingReceivable);
+        AddPosting(
+            unitOfWork, bank, currencyId, FxClearingPayableAccountCode, LedgerAccountKind.FxClearingPayable);
         AddPosting(unitOfWork, bank, currencyId, PaidInCapitalAccountCode, LedgerAccountKind.PaidInCapital);
 
         if (mode == SettlementParticipationMode.Direct)

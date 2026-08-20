@@ -8,7 +8,7 @@ namespace Numera.Application.Banking;
 
 public sealed record BankSuggestion(string InstitutionCode, string Name, BankStatus Status);
 
-public sealed record CurrencySuggestion(string Code, string Name);
+public sealed record CurrencySuggestion(CurrencyId Id, string Code, string Name);
 
 public sealed record SuggestBanksQuery(
     AuthorizationContext Authorization,
@@ -28,6 +28,14 @@ public sealed record SuggestDepositAccountsQuery(
     AuthorizationContext Authorization,
     string Input);
 
+public sealed record SuggestFxMarketsQuery(
+    AuthorizationContext Authorization,
+    string Input);
+
+public sealed record SuggestFxOrdersQuery(
+    AuthorizationContext Authorization,
+    string Input);
+
 public interface ISuggestionApplicationService
 {
     Task<Result<IReadOnlyList<BankSuggestion>>> SuggestBanksAsync(
@@ -40,6 +48,14 @@ public interface ISuggestionApplicationService
 
     Task<Result<IReadOnlyList<DepositAccountSuggestion>>> SuggestDepositAccountsAsync(
         SuggestDepositAccountsQuery query,
+        CancellationToken cancellationToken);
+
+    Task<Result<IReadOnlyList<FxMarketSuggestion>>> SuggestFxMarketsAsync(
+        SuggestFxMarketsQuery query,
+        CancellationToken cancellationToken);
+
+    Task<Result<IReadOnlyList<FxOrderSuggestion>>> SuggestFxOrdersAsync(
+        SuggestFxOrdersQuery query,
         CancellationToken cancellationToken);
 }
 
@@ -129,6 +145,47 @@ public sealed class SuggestionApplicationService : ISuggestionApplicationService
                 : []);
 
         return Task.FromResult(Result<IReadOnlyList<DepositAccountSuggestion>>.Success(suggestions));
+    }
+
+    public Task<Result<IReadOnlyList<FxMarketSuggestion>>> SuggestFxMarketsAsync(
+        SuggestFxMarketsQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (query.Authorization.Level == AuthorizationLevel.Unregistered)
+        {
+            return Task.FromResult(Result<IReadOnlyList<FxMarketSuggestion>>.Success([]));
+        }
+
+        IReadOnlyList<FxMarketSuggestion> suggestions = readGateway.Execute(context =>
+            context.EconomyScopes.FindByGuild(query.Authorization.GuildId) is { } scope
+                ? context.FxSuggestions.ListMarkets(scope, CandidateFetchLimit)
+                : []);
+
+        return Task.FromResult(Result<IReadOnlyList<FxMarketSuggestion>>.Success(suggestions));
+    }
+
+    public Task<Result<IReadOnlyList<FxOrderSuggestion>>> SuggestFxOrdersAsync(
+        SuggestFxOrdersQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (query.Authorization.Level == AuthorizationLevel.Unregistered)
+        {
+            return Task.FromResult(Result<IReadOnlyList<FxOrderSuggestion>>.Success([]));
+        }
+
+        IReadOnlyList<FxOrderSuggestion> suggestions = readGateway.Execute(context =>
+            context.CustomerIdentities.FindByDiscordUser(
+                DiscordUserId.FromUInt64(query.Authorization.DiscordUserId)) is { } customer
+                ? context.FxSuggestions.ListRestingOrders(customer.Id, CandidateFetchLimit)
+                : []);
+
+        return Task.FromResult(Result<IReadOnlyList<FxOrderSuggestion>>.Success(suggestions));
     }
 
     public static IReadOnlyList<BankStatus> SelectableStatuses(AuthorizationLevel level) => level switch

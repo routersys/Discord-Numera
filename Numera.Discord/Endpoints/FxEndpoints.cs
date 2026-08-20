@@ -52,7 +52,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> MarketAsync(
         DiscordEndpointContext context,
-        [EconomyOption("market", "市場を指定します。", true)] string market,
+        [EconomyOption("market", "市場を指定します。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
+        string market,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -83,7 +85,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> RateAsync(
         DiscordEndpointContext context,
-        [EconomyOption("market", "市場を指定します。", true)] string market,
+        [EconomyOption("market", "市場を指定します。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
+        string market,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -117,7 +121,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> BoardAsync(
         DiscordEndpointContext context,
-        [EconomyOption("market", "市場を指定します。", true)] string market,
+        [EconomyOption("market", "市場を指定します。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
+        string market,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -152,7 +158,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> ChartAsync(
         DiscordEndpointContext context,
-        [EconomyOption("market", "市場を指定します。", true)] string market,
+        [EconomyOption("market", "市場を指定します。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
+        string market,
         [EconomyOption("interval", "足の長さを選びます。", false)]
         [EconomyChoice("1分足", "60")]
         [EconomyChoice("5分足", "300")]
@@ -254,7 +262,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> HistoryAsync(
         DiscordEndpointContext context,
-        [EconomyOption("market", "市場を指定します。", true)] string market,
+        [EconomyOption("market", "市場を指定します。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
+        string market,
         [EconomyOption("cursor", "次のページの位置を指定します。", false)] string? cursor,
         CancellationToken cancellationToken)
     {
@@ -289,7 +299,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> OrderAsync(
         DiscordEndpointContext context,
-        [EconomyOption("market", "市場を指定します。", true)] string market,
+        [EconomyOption("market", "市場を指定します。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxMarketProviderKey)]
+        string market,
         [EconomyOption("side", "売買の向きを選びます。", true)]
         [EconomyChoice("基軸通貨を買う", "BUY_BASE")]
         [EconomyChoice("基軸通貨を売る", "SELL_BASE")]
@@ -300,8 +312,12 @@ public sealed class FxEndpoints : IEconomyEndpoint
         [EconomyChoice("成行（全量約定のみ）", TypeMarketFok)]
         string type,
         [EconomyOption("amount", "基軸通貨の数量を入力します。", true)] long amount,
-        [EconomyOption("source", "支払う通貨の口座を選びます。", true)] string source,
-        [EconomyOption("destination", "受け取る通貨の口座を選びます。", true)] string destination,
+        [EconomyOption("source", "支払う通貨の口座を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.DepositAccountProviderKey)]
+        string source,
+        [EconomyOption("destination", "受け取る通貨の口座を選びます。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.DepositAccountProviderKey)]
+        string destination,
         [EconomyOption("price", "指値の価格を入力します。", false)] string? price,
         [EconomyOption("slippage", "成行の許容スリッページをbpsで入力します。", false)] string? slippage,
         CancellationToken cancellationToken)
@@ -388,7 +404,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
     [EconomyAuthorization(Abstractions.AuthorizationLevel.Customer)]
     public async Task<DiscordEndpointResponse> CancelAsync(
         DiscordEndpointContext context,
-        [EconomyOption("order", "取り消す注文を指定します。", true)] string order,
+        [EconomyOption("order", "取り消す注文を指定します。", true)]
+        [EconomyAutocomplete(SuggestionEndpoints.FxOrderProviderKey)]
+        string order,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -446,6 +464,9 @@ public sealed class FxEndpoints : IEconomyEndpoint
 
 internal static class FxMarketReference
 {
+    internal static string Format(FxMarketId id) =>
+        new Guid(id.Value.ToByteArray(), bigEndian: true).ToString();
+
     internal static bool TryParse(string text, out FxMarketId id)
     {
         if (Guid.TryParse(text, out Guid parsed))
@@ -461,6 +482,9 @@ internal static class FxMarketReference
 
 internal static class FxOrderReference
 {
+    internal static string Format(FxOrderId id) =>
+        new Guid(id.Value.ToByteArray(), bigEndian: true).ToString();
+
     internal static bool TryParse(string text, out FxOrderId id)
     {
         if (Guid.TryParse(text, out Guid parsed))

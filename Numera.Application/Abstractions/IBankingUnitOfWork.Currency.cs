@@ -14,6 +14,8 @@ public interface ICurrencyRepository
 
     Currency? FindCurrent(EconomyScopeId economyScopeId);
 
+    CurrencyId? FindByCode(string code);
+
     bool EconomyIsActive(EconomyScopeId economyScopeId);
 
     bool AccountingBookIsOpen(AccountingBookId accountingBookId);
