@@ -85,35 +85,6 @@ public sealed partial class ManagePanelEndpoints
             cancellationToken);
     }
 
-    private async Task<Result> ApplyBankAsync(
-        AuthorizationContext actor,
-        Sessions.ManagePanelPayload payload,
-        CancellationToken cancellationToken)
-    {
-        switch (payload.Action)
-        {
-            case ActionOperatorGrant:
-                return await ApplyOperatorGrantAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionFeeSchedule:
-                return await ApplyFeeScheduleAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionAccountReview:
-                return await ApplyAccountReviewAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionBankDesign:
-                return await ApplyBankDesignAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            default:
-                return await ApplyResolutionAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-        }
-    }
-
     private async Task<Result> ApplyOperatorGrantAsync(
         AuthorizationContext actor,
         Sessions.ManagePanelPayload payload,
@@ -354,10 +325,45 @@ public sealed partial class ManagePanelEndpoints
         Sessions.ManagePanelPayload payload,
         CancellationToken cancellationToken)
     {
-        if (payload.Action is not (ActionAccountReview or ActionBankDesign))
+        if (payload.Action == ActionOperatorGrant)
         {
-            return await ResolutionCurrentAsync(actor, payload, cancellationToken)
+            Result<BankOperatorGrantStatusView> grant = await grants
+                .GetGrantStatusAsync(
+                    new GetBankOperatorGrantQuery(
+                        actor,
+                        Field(payload, FieldInstitution),
+                        ulong.TryParse(
+                            Field(payload, FieldUser),
+                            NumberStyles.None,
+                            CultureInfo.InvariantCulture,
+                            out ulong target)
+                            ? target
+                            : 0UL),
+                    cancellationToken)
                 .ConfigureAwait(false);
+
+            return grant.IsSuccess
+                ? catalog.Resolve(
+                    grant.Value.HasActiveGrant
+                        ? Rendering.ViewKeys.PanelGrantActive
+                        : Rendering.ViewKeys.PanelGrantAbsent)
+                : null;
+        }
+
+        if (payload.Action == ActionFeeSchedule)
+        {
+            Result<FeeRuleStatusView> fee = await fees
+                .GetFeeRuleStatusAsync(
+                    new GetFeeRuleQuery(
+                        actor, Field(payload, FieldInstitution), Field(payload, FieldType)),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return fee is { IsSuccess: true, Value.HasPublishedRule: true }
+                ? fee.Value.FeeType
+                    + " " + fee.Value.FixedMinor.ToString(CultureInfo.InvariantCulture)
+                    + "," + fee.Value.BasisPoints.ToString(CultureInfo.InvariantCulture)
+                : null;
         }
 
         Result<AccountOpeningReviewView> review =

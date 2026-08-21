@@ -79,27 +79,6 @@ public sealed partial class ManagePanelEndpoints
             cancellationToken);
     }
 
-    private async Task<Result> ApplyResolutionAsync(
-        AuthorizationContext actor,
-        Sessions.ManagePanelPayload payload,
-        CancellationToken cancellationToken)
-    {
-        switch (payload.Action)
-        {
-            case ActionInsuranceFund:
-                return await CreateInsuranceFundAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionResolution:
-                return await AdvanceResolutionAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            default:
-                return Result.Failure(
-                    ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown);
-        }
-    }
-
     private async Task<Result> CreateInsuranceFundAsync(
         AuthorizationContext actor,
         Sessions.ManagePanelPayload payload,

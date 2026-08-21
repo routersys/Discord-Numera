@@ -235,9 +235,10 @@ public sealed class AtmAdministrationApplicationService : IAtmAdministrationAppl
                     entry.DisplayName, query.TerminalName, StringComparison.Ordinal))
             : null;
 
-        Bank? bank = query.InstitutionCode.Length > 0
-            ? unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.InstitutionCode)
-            : null;
+        Bank? bank =
+            InstitutionCode.TryParse(query.InstitutionCode, out InstitutionCode institutionCode)
+                ? unitOfWork.Banks.FindByInstitutionCode(scope.Value, institutionCode.Value)
+                : null;
 
         CurrencyDenominationRecord? denomination = query.DenominationValueMinor > 0
             ? unitOfWork.Cash.FindDenominationByValue(currency.Id, query.DenominationValueMinor)

@@ -474,8 +474,9 @@ public sealed partial class BankAdministrationApplicationService : IBankAdminist
             return Result<AccountOpeningReviewView>.Failure(authorized.Error!);
         }
 
-        if (unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.InstitutionCode)
-            is not { } bank)
+        if (!InstitutionCode.TryParse(query.InstitutionCode, out InstitutionCode institutionCode) ||
+            unitOfWork.Banks.FindByInstitutionCode(scope.Value, institutionCode.Value)
+                is not { } bank)
         {
             return Result<AccountOpeningReviewView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);

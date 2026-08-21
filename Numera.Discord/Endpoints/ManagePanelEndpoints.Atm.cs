@@ -199,43 +199,6 @@ public sealed partial class ManagePanelEndpoints
             cancellationToken);
     }
 
-    private async Task<Result> ApplyAtmAsync(
-        AuthorizationContext actor,
-        Sessions.ManagePanelPayload payload,
-        CancellationToken cancellationToken)
-    {
-        switch (payload.Action)
-        {
-            case ActionAtmNetwork:
-                return await ApplyAtmNetworkAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionAtmTerminal:
-                return await ApplyAtmTerminalAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionAtmService:
-                return await ApplyAtmServiceAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionAtmCassette:
-                return await ApplyAtmCassetteAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionDenomination:
-                return await ApplyDenominationAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionCashConversion:
-                return await ApplyCashConversionAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            default:
-                return await ApplyMerchantAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-        }
-    }
-
     private async Task<Result> ApplyAtmNetworkAsync(
         AuthorizationContext actor,
         Sessions.ManagePanelPayload payload,
@@ -470,13 +433,6 @@ public sealed partial class ManagePanelEndpoints
         Sessions.ManagePanelPayload payload,
         CancellationToken cancellationToken)
     {
-        if (payload.Action is not (ActionAtmNetwork or ActionAtmTerminal or ActionAtmService
-            or ActionAtmCassette or ActionDenomination or ActionCashConversion))
-        {
-            return await MerchantCurrentAsync(actor, payload, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
         Result<AtmDeploymentView> deployment = await Deployment(actor, payload, cancellationToken)
             .ConfigureAwait(false);
 

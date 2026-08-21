@@ -65,6 +65,8 @@ internal static class ViewKeys
     public const string PanelCurrentUnavailable = "view.manage.panel.current.unavailable";
     public const string PanelCurrentDefaultSuffix = "view.manage.panel.current.default";
     public const string PanelFundExists = "view.manage.panel.fund.exists";
+    public const string PanelGrantActive = "view.manage.panel.grant.active";
+    public const string PanelGrantAbsent = "view.manage.panel.grant.absent";
 
     public static string PanelEditorModal(string action) =>
         "view.manage.panel.modal." + action;
@@ -342,6 +344,8 @@ public static partial class CanonicalTextCatalog
             [ViewKeys.PanelCurrentUnavailable] = "なし",
             [ViewKeys.PanelCurrentDefaultSuffix] = "（既定）",
             [ViewKeys.PanelFundExists] = "作成済み",
+            [ViewKeys.PanelGrantActive] = "権限あり",
+            [ViewKeys.PanelGrantAbsent] = "権限なし",
             [ViewKeys.PanelActionLabel("deposit-insurance", "insurance-fund")] = "保険基金の作成",
             [ViewKeys.PanelActionLabel("prudential-resolution", "resolution-case")] = "破綻処理の手続",
             [ViewKeys.PanelEditorModal("insurance-fund")] = "保険基金の作成",

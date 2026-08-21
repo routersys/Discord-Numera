@@ -8,12 +8,27 @@ using Numera.Domain.Common;
 
 namespace Numera.Discord.Endpoints;
 
+internal enum PanelCurrentGroup
+{
+    None = 0,
+    Calendar = 1,
+    Governance = 2,
+    Policy = 3,
+    Atm = 4,
+    Merchant = 5,
+    Bank = 6,
+    Resolution = 7,
+}
+
 public sealed partial class ManagePanelEndpoints
 {
     internal const string FieldDate = "date";
     internal const string FieldDayClass = "class";
     internal const string FieldDescription = "reason";
     internal const string FieldCurrent = "current";
+
+    internal const string ActionCalendarSet = "calendar-set";
+    internal const string ActionCalendarClear = "calendar-clear";
 
     [EconomyComponent(EconomyComponentKind.Button, ManagePanelFlow.EditAction)]
     [EconomyAuthorization(Abstractions.AuthorizationLevel.MerchantOperator)]
@@ -156,48 +171,73 @@ public sealed partial class ManagePanelEndpoints
             ViewKeys.ManagePanelApplied, Describe(payload));
     }
 
-    private async Task<Result> ApplyAsync(
+    private Task<Result> ApplyAsync(
+        AuthorizationContext actor,
+        ManagePanelPayload payload,
+        CancellationToken cancellationToken) => payload.Action switch
+    {
+        ActionCalendarSet or ActionCalendarClear =>
+            ApplyCalendarAsync(actor, payload, cancellationToken),
+        ActionTrustPolicy => PublishTrustPolicyAsync(actor, payload, cancellationToken),
+        ActionNetworkPolicy => PublishNetworkPolicyAsync(actor, payload, cancellationToken),
+        ActionNetworkState => ChangeNetworkStateAsync(actor, payload, cancellationToken),
+        ActionPrudentialPolicy => PublishPrudentialPolicyAsync(actor, payload, cancellationToken),
+        ActionPresentation => PublishPresentationAsync(actor, payload, cancellationToken),
+        ActionInsuranceScheme => PublishInsuranceSchemeAsync(actor, payload, cancellationToken),
+        ActionInsuranceState => ChangeInsuranceStateAsync(actor, payload, cancellationToken),
+        ActionIntervention => StartInterventionAsync(actor, payload, cancellationToken),
+        ActionAtmNetwork => ApplyAtmNetworkAsync(actor, payload, cancellationToken),
+        ActionAtmTerminal => ApplyAtmTerminalAsync(actor, payload, cancellationToken),
+        ActionAtmService => ApplyAtmServiceAsync(actor, payload, cancellationToken),
+        ActionAtmCassette => ApplyAtmCassetteAsync(actor, payload, cancellationToken),
+        ActionDenomination => ApplyDenominationAsync(actor, payload, cancellationToken),
+        ActionCashConversion => ApplyCashConversionAsync(actor, payload, cancellationToken),
+        ActionMerchantProduct or ActionMerchantPrice or ActionMerchantStock =>
+            ApplyMerchantAsync(actor, payload, cancellationToken),
+        ActionOperatorGrant => ApplyOperatorGrantAsync(actor, payload, cancellationToken),
+        ActionFeeSchedule => ApplyFeeScheduleAsync(actor, payload, cancellationToken),
+        ActionAccountReview => ApplyAccountReviewAsync(actor, payload, cancellationToken),
+        ActionBankDesign => ApplyBankDesignAsync(actor, payload, cancellationToken),
+        ActionInsuranceFund => CreateInsuranceFundAsync(actor, payload, cancellationToken),
+        ActionResolution => AdvanceResolutionAsync(actor, payload, cancellationToken),
+        _ => Task.FromResult(Result.Failure(
+            ErrorCategory.Validation, BankingErrorCodes.ManagementActionUnknown)),
+    };
+
+    private async Task<Result> ApplyCalendarAsync(
         AuthorizationContext actor,
         ManagePanelPayload payload,
         CancellationToken cancellationToken)
     {
-        switch (payload.Action)
+        if (payload.Action == ActionCalendarClear)
         {
-            case "calendar-set":
-            {
-                if (!BusinessDayClassCatalog.TryParseToken(
-                        Field(payload, FieldDayClass), out BusinessDayClass dayClass))
-                {
-                    return Result.Failure(
-                        ErrorCategory.Validation, BankingErrorCodes.CalendarDayClassInvalid);
-                }
-
-                string description = Field(payload, FieldDescription);
-
-                Result<BusinessCalendarDateView> outcome = await calendars
-                    .SetDateOverrideAsync(
-                        new SetBusinessCalendarDateCommand(
-                            actor,
-                            Field(payload, FieldDate),
-                            dayClass,
-                            description.Length == 0 ? null : description),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-
-                return outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
-            }
-
-            case "calendar-clear":
-                return await calendars
-                    .ClearDateOverrideAsync(
-                        new ClearBusinessCalendarDateCommand(actor, Field(payload, FieldDate)),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-
-            default:
-                return await ApplyGovernanceAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
+            return await calendars
+                .ClearDateOverrideAsync(
+                    new ClearBusinessCalendarDateCommand(actor, Field(payload, FieldDate)),
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
+
+        if (!BusinessDayClassCatalog.TryParseToken(
+                Field(payload, FieldDayClass), out BusinessDayClass dayClass))
+        {
+            return Result.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.CalendarDayClassInvalid);
+        }
+
+        string description = Field(payload, FieldDescription);
+
+        Result<BusinessCalendarDateView> outcome = await calendars
+            .SetDateOverrideAsync(
+                new SetBusinessCalendarDateCommand(
+                    actor,
+                    Field(payload, FieldDate),
+                    dayClass,
+                    description.Length == 0 ? null : description),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error!);
     }
 
     private async Task<string> CurrentAsync(
@@ -205,14 +245,44 @@ public sealed partial class ManagePanelEndpoints
         ManagePanelPayload payload,
         CancellationToken cancellationToken)
     {
-        if (payload.Action is not ("calendar-set" or "calendar-clear"))
+        Task<string?> lookup = CurrentGroupOf(payload.Action) switch
         {
-            string? described = await GovernanceCurrentAsync(actor, payload, cancellationToken)
-                .ConfigureAwait(false);
+            PanelCurrentGroup.Calendar => CalendarCurrentAsync(actor, payload, cancellationToken),
+            PanelCurrentGroup.Governance => GovernanceCurrentAsync(actor, payload, cancellationToken),
+            PanelCurrentGroup.Policy => PolicyCurrentAsync(actor, payload, cancellationToken),
+            PanelCurrentGroup.Atm => AtmCurrentAsync(actor, payload, cancellationToken),
+            PanelCurrentGroup.Merchant => MerchantCurrentAsync(actor, payload, cancellationToken),
+            PanelCurrentGroup.Bank => BankCurrentAsync(actor, payload, cancellationToken),
+            PanelCurrentGroup.Resolution => ResolutionCurrentAsync(actor, payload, cancellationToken),
+            _ => Task.FromResult<string?>(null),
+        };
 
-            return described ?? catalog.Resolve(ViewKeys.PanelCurrentUnavailable);
-        }
+        return await lookup.ConfigureAwait(false)
+            ?? catalog.Resolve(ViewKeys.PanelCurrentUnavailable);
+    }
 
+    internal static PanelCurrentGroup CurrentGroupOf(string action) => action switch
+    {
+        ActionCalendarSet or ActionCalendarClear => PanelCurrentGroup.Calendar,
+        ActionTrustPolicy or ActionNetworkPolicy or ActionNetworkState or ActionPrudentialPolicy =>
+            PanelCurrentGroup.Governance,
+        ActionPresentation or ActionInsuranceScheme or ActionInsuranceState or ActionIntervention =>
+            PanelCurrentGroup.Policy,
+        ActionAtmNetwork or ActionAtmTerminal or ActionAtmService or ActionAtmCassette
+            or ActionDenomination or ActionCashConversion => PanelCurrentGroup.Atm,
+        ActionMerchantProduct or ActionMerchantPrice or ActionMerchantStock =>
+            PanelCurrentGroup.Merchant,
+        ActionAccountReview or ActionBankDesign or ActionOperatorGrant or ActionFeeSchedule =>
+            PanelCurrentGroup.Bank,
+        ActionInsuranceFund or ActionResolution => PanelCurrentGroup.Resolution,
+        _ => PanelCurrentGroup.None,
+    };
+
+    private async Task<string?> CalendarCurrentAsync(
+        AuthorizationContext actor,
+        ManagePanelPayload payload,
+        CancellationToken cancellationToken)
+    {
         Result<BusinessCalendarDateStatusView> status = await calendars
             .GetDateStatusAsync(
                 new GetBusinessCalendarDateQuery(actor, Field(payload, FieldDate)),
@@ -221,7 +291,7 @@ public sealed partial class ManagePanelEndpoints
 
         if (!status.IsSuccess)
         {
-            return catalog.Resolve(ViewKeys.PanelCurrentUnavailable);
+            return null;
         }
 
         string label = catalog.Resolve(ViewKeys.StatusOf(status.Value.DayClass.ToToken()));

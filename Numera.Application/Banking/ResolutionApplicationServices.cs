@@ -118,16 +118,18 @@ public sealed class ResolutionAdministrationApplicationService
             return Result<ResolutionCaseLookupView>.Failure(scope.Error!);
         }
 
-        if (unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.InstitutionCode)
-            is not { } bank)
+        if (!InstitutionCode.TryParse(query.InstitutionCode, out InstitutionCode institutionCode) ||
+            unitOfWork.Banks.FindByInstitutionCode(scope.Value, institutionCode.Value)
+                is not { } bank)
         {
             return Result<ResolutionCaseLookupView>.Failure(
                 ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
         }
 
-        BankId? successor = query.SuccessorInstitutionCode.Length > 0
-            ? unitOfWork.Banks.FindByInstitutionCode(scope.Value, query.SuccessorInstitutionCode)?.Id
-            : null;
+        BankId? successor =
+            InstitutionCode.TryParse(query.SuccessorInstitutionCode, out InstitutionCode successorCode)
+                ? unitOfWork.Banks.FindByInstitutionCode(scope.Value, successorCode.Value)?.Id
+                : null;
 
         ResolutionCaseRecord? found = unitOfWork.Governance.FindOpenResolutionCaseByBank(bank.Id);
 

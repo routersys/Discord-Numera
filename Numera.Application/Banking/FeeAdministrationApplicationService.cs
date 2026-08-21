@@ -28,8 +28,24 @@ public sealed record FeeRuleView(FeeRuleId Id, string FeeType, int Priority, Mon
 
 public sealed record FeeScheduleVersionView(FeeScheduleVersionId Id, UtcTimestamp EffectiveFrom);
 
+public sealed record GetFeeRuleQuery(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    string FeeType);
+
+public sealed record FeeRuleStatusView(
+    string InstitutionCode,
+    string FeeType,
+    bool HasPublishedRule,
+    long FixedMinor,
+    int BasisPoints);
+
 public interface IFeeAdministrationApplicationService
 {
+    Task<Result<FeeRuleStatusView>> GetFeeRuleStatusAsync(
+        GetFeeRuleQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<FeeScheduleDraftView>> StartDraftAsync(
         StartFeeScheduleDraftCommand command,
         CancellationToken cancellationToken);
@@ -61,6 +77,60 @@ public sealed class FeeAdministrationApplicationService : IFeeAdministrationAppl
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<FeeRuleStatusView>> GetFeeRuleStatusAsync(
+        GetFeeRuleQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => FeeRuleStatus(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<FeeRuleStatusView> FeeRuleStatus(
+        IBankingUnitOfWork unitOfWork,
+        GetFeeRuleQuery query)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(unitOfWork, query.Actor, null);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<FeeRuleStatusView>.Failure(scope.Error!);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(unitOfWork, query.Actor, scope.Value);
+
+        if (!authorized.IsSuccess)
+        {
+            return Result<FeeRuleStatusView>.Failure(authorized.Error!);
+        }
+
+        if (!InstitutionCode.TryParse(query.InstitutionCode, out InstitutionCode institutionCode) ||
+            unitOfWork.Banks.FindByInstitutionCode(scope.Value, institutionCode.Value)
+                is not { } bank)
+        {
+            return Result<FeeRuleStatusView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        if (!FeeCatalog.TryParseFeeTypeToken(query.FeeType, out FeeType feeType))
+        {
+            return Result<FeeRuleStatusView>.Failure(
+                ErrorCategory.Validation, BankingErrorCodes.FeeRuleInvalid);
+        }
+
+        FeeRule? rule = bank.CurrentFeeScheduleVersionId is { } versionId
+            ? unitOfWork.FeeSchedules.ListRules(versionId, feeType).FirstOrDefault()
+            : null;
+
+        return Result<FeeRuleStatusView>.Success(new FeeRuleStatusView(
+            institutionCode.Value,
+            feeType.ToToken(),
+            rule is not null,
+            rule?.FixedAmount.Value ?? 0L,
+            rule?.BasisPoints ?? 0));
     }
 
     public Task<Result<FeeScheduleDraftView>> StartDraftAsync(

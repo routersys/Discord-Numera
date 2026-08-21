@@ -16,15 +16,15 @@ namespace Numera.Host.Tests;
 [TestClass]
 public sealed class EconomyWalkthroughTests
 {
-    private const ulong Operator = 700_000_000_000_000_001UL;
+    internal const ulong Operator = 700_000_000_000_000_001UL;
     private const ulong Depositor = 700_000_000_000_000_002UL;
     private const ulong Beneficiary = 700_000_000_000_000_003UL;
-    private const ulong Guild = 1_284_327_110_349_164_587UL;
+    internal const ulong Guild = 1_284_327_110_349_164_587UL;
     private const string Institution = "NUM0001";
     private const long MinimumCapital = 1_000_000L;
     private const long Genesis = 100_000_000L;
 
-    private sealed class Walkthrough : IAsyncDisposable
+    internal sealed class Walkthrough : IAsyncDisposable
     {
         private readonly string root;
         private ulong interaction = 5_000_000_000_000_000_001UL;

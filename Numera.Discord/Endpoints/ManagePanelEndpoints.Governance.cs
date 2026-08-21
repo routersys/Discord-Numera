@@ -154,35 +154,6 @@ public sealed partial class ManagePanelEndpoints
             cancellationToken);
     }
 
-    private async Task<Result> ApplyGovernanceAsync(
-        AuthorizationContext actor,
-        Sessions.ManagePanelPayload payload,
-        CancellationToken cancellationToken)
-    {
-        switch (payload.Action)
-        {
-            case ActionTrustPolicy:
-                return await PublishTrustPolicyAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionNetworkPolicy:
-                return await PublishNetworkPolicyAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionNetworkState:
-                return await ChangeNetworkStateAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionPrudentialPolicy:
-                return await PublishPrudentialPolicyAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            default:
-                return await ApplyPolicyAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-        }
-    }
-
     private async Task<Result> PublishTrustPolicyAsync(
         AuthorizationContext actor,
         Sessions.ManagePanelPayload payload,
@@ -378,8 +349,7 @@ public sealed partial class ManagePanelEndpoints
             }
 
             default:
-                return await PolicyCurrentAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
+                return null;
         }
     }
 

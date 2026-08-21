@@ -147,34 +147,6 @@ public sealed partial class ManagePanelEndpoints
             cancellationToken);
     }
 
-    private async Task<Result> ApplyPolicyAsync(
-        AuthorizationContext actor,
-        Sessions.ManagePanelPayload payload,
-        CancellationToken cancellationToken)
-    {
-        switch (payload.Action)
-        {
-            case ActionPresentation:
-                return await PublishPresentationAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionInsuranceScheme:
-                return await PublishInsuranceSchemeAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionInsuranceState:
-                return await ChangeInsuranceStateAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case ActionIntervention:
-                return await StartInterventionAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
-
-            default:
-                return await ApplyAtmAsync(actor, payload, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     private async Task<Result> PublishPresentationAsync(
         AuthorizationContext actor,
         Sessions.ManagePanelPayload payload,
@@ -427,8 +399,7 @@ public sealed partial class ManagePanelEndpoints
             }
 
             default:
-                return await AtmCurrentAsync(actor, payload, cancellationToken)
-                    .ConfigureAwait(false);
+                return null;
         }
     }
 

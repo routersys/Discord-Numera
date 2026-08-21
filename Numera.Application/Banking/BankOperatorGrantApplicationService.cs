@@ -22,8 +22,22 @@ public sealed record BankOperatorGrantView(
     ulong DiscordUserId,
     string Status);
 
+public sealed record GetBankOperatorGrantQuery(
+    AuthorizationContext Actor,
+    string InstitutionCode,
+    ulong TargetDiscordUserId);
+
+public sealed record BankOperatorGrantStatusView(
+    string InstitutionCode,
+    ulong TargetDiscordUserId,
+    bool HasActiveGrant);
+
 public interface IBankOperatorGrantApplicationService
 {
+    Task<Result<BankOperatorGrantStatusView>> GetGrantStatusAsync(
+        GetBankOperatorGrantQuery query,
+        CancellationToken cancellationToken);
+
     Task<Result<BankOperatorGrantView>> GrantAsync(
         GrantBankOperatorCommand command,
         CancellationToken cancellationToken);
@@ -51,6 +65,51 @@ public sealed class BankOperatorGrantApplicationService : IBankOperatorGrantAppl
         this.writeGateway = writeGateway;
         this.clock = clock;
         this.idGenerator = idGenerator;
+    }
+
+    public Task<Result<BankOperatorGrantStatusView>> GetGrantStatusAsync(
+        GetBankOperatorGrantQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return writeGateway.ExecuteAsync(
+            unitOfWork => GrantStatus(unitOfWork, query), cancellationToken);
+    }
+
+    private static Result<BankOperatorGrantStatusView> GrantStatus(
+        IBankingUnitOfWork unitOfWork,
+        GetBankOperatorGrantQuery query)
+    {
+        Result<EconomyScopeId> scope = EconomyScopeResolver.Resolve(
+            unitOfWork, query.Actor, requested: null);
+
+        if (!scope.IsSuccess)
+        {
+            return Result<BankOperatorGrantStatusView>.Failure(scope.Error!);
+        }
+
+        if (!InstitutionCode.TryParse(query.InstitutionCode, out InstitutionCode institutionCode) ||
+            unitOfWork.Banks.FindByInstitutionCode(scope.Value, institutionCode.Value)
+                is not { } bank)
+        {
+            return Result<BankOperatorGrantStatusView>.Failure(
+                ErrorCategory.NotFound, BankingErrorCodes.BankNotFound);
+        }
+
+        Result authorized = ManagementAuthorizationPolicy.Ensure(
+            unitOfWork, query.Actor, bank.EconomyScopeId);
+
+        if (!authorized.IsSuccess)
+        {
+            return Result<BankOperatorGrantStatusView>.Failure(authorized.Error!);
+        }
+
+        BankOperatorGrant? grant = unitOfWork.BankOperatorGrants.FindActive(
+            bank.Id, DiscordUserId.FromUInt64(query.TargetDiscordUserId));
+
+        return Result<BankOperatorGrantStatusView>.Success(new BankOperatorGrantStatusView(
+            institutionCode.Value, query.TargetDiscordUserId, grant is not null));
     }
 
     public Task<Result<BankOperatorGrantView>> GrantAsync(

@@ -30,6 +30,8 @@ public sealed class CommandApiClosureTests
         "IMerchantAdministrationApplicationService.GetMerchantContextAsync",
         "IBankAdministrationApplicationService.GetAccountOpeningReviewAsync",
         "IResolutionAdministrationApplicationService.FindCaseAsync",
+        "IBankOperatorGrantApplicationService.GetGrantStatusAsync",
+        "IFeeAdministrationApplicationService.GetFeeRuleStatusAsync",
     ];
 
     private static readonly string[] EntriesWithoutCanonicalUseCase =
